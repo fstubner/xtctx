@@ -38,6 +38,11 @@ jobs:
           npm test
           npm run test:integration
 
+      - name: Security tests and checklist
+        run: |
+          npm run test:security
+          npm run security:checklist
+
       - name: Build packages
         run: |
           npm run build

@@ -17,6 +17,8 @@ Thanks for contributing.
 Before opening a PR, run:
 
 - `npm test`
+- `npm run test:security`
+- `npm run security:checklist`
 - `npm run test:integration`
 - `npm run build`
 - `npm --prefix web run build`

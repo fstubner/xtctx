@@ -40,6 +40,23 @@ npx xtctx ingest
 npx xtctx ingest --full
 ```
 
+## API Security Controls
+
+- API binds to `127.0.0.1` only by default.
+- CORS allows localhost/same-origin by default; additional origins can be set via `XTCTX_ALLOWED_ORIGINS`.
+- Optional API token auth can be enabled with `XTCTX_API_TOKEN`.
+- Basic API rate limiting is enabled for `/api/*`.
+
+Example:
+
+```bash
+set XTCTX_API_TOKEN=my-local-token
+set XTCTX_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:3232
+set XTCTX_RATE_LIMIT_MAX=120
+set XTCTX_RATE_LIMIT_WINDOW_MS=60000
+xtctx serve
+```
+
 ## Upgrade
 
 1. Pull latest `main`/`dev`.

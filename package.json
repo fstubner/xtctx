@@ -11,8 +11,10 @@
     "build:bundle-web": "npm run web:build && npm run web:copy-dist",
     "dev": "tsx watch src/cli/index.ts",
     "test": "vitest run",
+    "test:security": "vitest run tests/api/security.test.ts",
     "test:integration": "vitest run tests/integration",
     "test:watch": "vitest",
+    "security:checklist": "node scripts/verify-security-checklist.mjs",
     "lint": "eslint src/ tests/",
     "mcp": "tsx src/mcp/server.ts",
     "api": "tsx src/api/server.ts",
@@ -21,7 +23,7 @@
     "web:copy-dist": "node scripts/copy-web-dist.mjs",
     "prepack": "npm run build && npm run build:bundle-web",
     "smoke:cli": "node dist/src/cli/index.js --help",
-    "verify:release": "npm test && npm run build && npm run build:bundle-web && npm run smoke:cli"
+    "verify:release": "npm test && npm run test:security && npm run security:checklist && npm run build && npm run build:bundle-web && npm run smoke:cli"
   },
   "dependencies": {
     "@lancedb/lancedb": "^0.13.0",
@@ -31,8 +33,10 @@
     "better-sqlite3": "^11.0.0",
     "chokidar": "^4.0.0",
     "commander": "^13.0.0",
+    "express-rate-limit": "^7.5.0",
     "express": "^5.0.0",
     "glob": "^11.0.0",
+    "helmet": "^8.1.0",
     "yaml": "^2.7.0"
   },
   "devDependencies": {

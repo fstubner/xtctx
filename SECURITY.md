@@ -32,3 +32,8 @@ Please allow maintainers reasonable time to investigate and patch before public 
 - npm publishing is intended to run through GitHub OIDC trusted publishing.
 - Do not share or request long-lived npm auth tokens for this repository.
 - If release automation, provenance, or workflow permissions appear misconfigured, report privately using the same vulnerability process above.
+
+## Security Baseline Tracking
+
+- The project maintains an OWASP ASVS-lite checklist at `docs/security/owasp-asvs-lite.md`.
+- CI validates security tests and checklist presence on each push/PR.
