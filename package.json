@@ -4,7 +4,7 @@
   "description": "Cross-tool context for AI coding agents",
   "type": "module",
   "bin": {
-    "xtctx": "./dist/src/cli/index.js"
+    "xtctx": "dist/src/cli/index.js"
   },
   "scripts": {
     "build": "tsc",
@@ -52,7 +52,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/fstubner/xtctx.git"
+    "url": "git+https://github.com/fstubner/xtctx.git"
   },
   "files": [
     "dist",
