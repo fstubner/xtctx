@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>xtctx | Cross-Tool Context For AI Coding Agents</title>
+    <meta
+      name="description"
+      content="xtctx keeps your coding context portable across AI tools with local indexing, MCP access, and shared project knowledge."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="atmosphere"></div>
+    <header class="site-header reveal">
+      <p class="kicker">xtctx</p>
+      <a class="repo-link" href="https://github.com/fstubner/xtctx" target="_blank" rel="noreferrer">
+        GitHub
+      </a>
+    </header>
+
+    <main>
+      <section class="hero reveal delay-1">
+        <p class="badge">Portable AI Memory</p>
+        <h1>Keep context across Claude, Cursor, Codex, and Copilot.</h1>
+        <p class="subtitle">
+          xtctx indexes conversation history locally, exposes it through MCP, and keeps project knowledge reusable
+          across tools and sessions.
+        </p>
+        <div class="hero-actions">
+          <a class="btn primary" href="#quick-start">Quick Start</a>
+          <a class="btn ghost" href="#architecture">Architecture</a>
+        </div>
+      </section>
+
+      <section id="architecture" class="panel reveal delay-2">
+        <h2>Architecture</h2>
+        <p>Single local runtime, multiple tool inputs, one searchable context layer.</p>
+        <svg class="diagram" viewBox="0 0 980 420" role="img" aria-label="xtctx architecture diagram">
+          <defs>
+            <linearGradient id="nodeGradA" x1="0" x2="1">
+              <stop offset="0%" stop-color="#ecfeff" />
+              <stop offset="100%" stop-color="#cffafe" />
+            </linearGradient>
+            <linearGradient id="nodeGradB" x1="0" x2="1">
+              <stop offset="0%" stop-color="#fef3c7" />
+              <stop offset="100%" stop-color="#fde68a" />
+            </linearGradient>
+            <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 Z" fill="#1f2937" />
+            </marker>
+          </defs>
+
+          <g>
+            <rect x="32" y="52" width="210" height="70" rx="14" class="node node-a" />
+            <text x="54" y="95">Claude Code Scraper</text>
+            <rect x="32" y="150" width="210" height="70" rx="14" class="node node-a" />
+            <text x="54" y="193">Cursor / Codex / Copilot</text>
+            <rect x="32" y="248" width="210" height="70" rx="14" class="node node-a" />
+            <text x="54" y="291">Project Knowledge Files</text>
+          </g>
+
+          <g>
+            <rect x="330" y="110" width="270" height="150" rx="18" class="node node-b" />
+            <text x="360" y="158" class="title">xtctx Ingestion + Search</text>
+            <text x="360" y="188">Hybrid RRF Search</text>
+            <text x="360" y="214">Compaction + Dedup</text>
+          </g>
+
+          <g>
+            <rect x="700" y="70" width="230" height="80" rx="14" class="node node-a" />
+            <text x="730" y="115">MCP Tools</text>
+            <rect x="700" y="170" width="230" height="80" rx="14" class="node node-a" />
+            <text x="730" y="215">Web UI + API</text>
+            <rect x="700" y="270" width="230" height="80" rx="14" class="node node-a" />
+            <text x="730" y="315">Config Sync Outputs</text>
+          </g>
+
+          <g class="links">
+            <line x1="242" y1="86" x2="330" y2="146" marker-end="url(#arrow)" />
+            <line x1="242" y1="184" x2="330" y2="184" marker-end="url(#arrow)" />
+            <line x1="242" y1="282" x2="330" y2="224" marker-end="url(#arrow)" />
+            <line x1="600" y1="160" x2="700" y2="110" marker-end="url(#arrow)" />
+            <line x1="600" y1="188" x2="700" y2="210" marker-end="url(#arrow)" />
+            <line x1="600" y1="218" x2="700" y2="310" marker-end="url(#arrow)" />
+          </g>
+        </svg>
+      </section>
+
+      <section class="panel reveal delay-3">
+        <h2>Feature Overview</h2>
+        <div class="feature-grid">
+          <article>
+            <h3>Cross-Tool Memory</h3>
+            <p>Indexes conversations and context from multiple coding assistants in one local store.</p>
+          </article>
+          <article>
+            <h3>MCP-Native Access</h3>
+            <p>Agents read and write context through `xtctx_*` tools without changing their core workflow.</p>
+          </article>
+          <article>
+            <h3>Project Knowledge Layer</h3>
+            <p>Share decisions, solutions, and insights in git-tracked `.xtctx/knowledge` files.</p>
+          </article>
+          <article>
+            <h3>Portable Config Sync</h3>
+            <p>Generate tool-native instructions from one `.xtctx/tool-config/shared.yaml` source.</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="quick-start" class="panel reveal delay-4">
+        <h2>Quick Start</h2>
+        <ol>
+          <li>Install dependencies and build.</li>
+          <li>Initialize `.xtctx` in your project.</li>
+          <li>Start runtime services.</li>
+          <li>Sync tool-native instructions.</li>
+        </ol>
+        <pre><code>npm install
+npm run build
+npx xtctx init
+npx xtctx serve
+npx xtctx sync</code></pre>
+      </section>
+    </main>
+  </body>
+</html>
