@@ -4,6 +4,28 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import type { HybridSearch } from "../store/search.js";
+import {
+  createGetConfigHandler,
+  createListConfigsHandler,
+  createToolPreferencesHandler,
+  type ConfigStore,
+} from "./tools/config.js";
+import {
+  createProjectKnowledgeHandler,
+  type KnowledgeStore,
+} from "./tools/knowledge.js";
+import { createSearchHandler } from "./tools/search.js";
+import {
+  createRecentSessionsHandler,
+  createSessionDetailHandler,
+  type SessionService,
+} from "./tools/sessions.js";
+import {
+  createWriteHandlers,
+  type KnowledgeWriter,
+  type SimilarityLookup,
+} from "./tools/write.js";
 
 export interface ToolDefinition {
   name: string;
@@ -13,6 +35,18 @@ export interface ToolDefinition {
     properties: Record<string, unknown>;
     required?: string[];
   };
+}
+
+type ToolParams = Record<string, unknown>;
+type ToolHandler = (params: ToolParams) => Promise<unknown>;
+
+export interface McpToolDependencies {
+  search?: HybridSearch;
+  sessions?: SessionService;
+  knowledge?: KnowledgeStore;
+  writer?: KnowledgeWriter;
+  findSimilar?: SimilarityLookup;
+  configs?: ConfigStore;
 }
 
 export function buildToolDefinitions(): ToolDefinition[] {
@@ -203,13 +237,74 @@ export function buildToolDefinitions(): ToolDefinition[] {
   ];
 }
 
-export async function startMcpServer(): Promise<void> {
+export function createToolHandlers(
+  dependencies: McpToolDependencies = {},
+): Map<string, ToolHandler> {
+  const handlers = new Map<string, ToolHandler>();
+
+  if (dependencies.search) {
+    const search = createSearchHandler(dependencies.search);
+    handlers.set("xtctx_search", (params) => search(params as any));
+  } else {
+    handlers.set("xtctx_search", missingDependency("search index"));
+  }
+
+  if (dependencies.sessions) {
+    const recentSessions = createRecentSessionsHandler(dependencies.sessions);
+    const sessionDetail = createSessionDetailHandler(dependencies.sessions);
+    handlers.set("xtctx_recent_sessions", (params) => recentSessions(params as any));
+    handlers.set("xtctx_session_detail", (params) => sessionDetail(params as any));
+  } else {
+    handlers.set("xtctx_recent_sessions", missingDependency("session service"));
+    handlers.set("xtctx_session_detail", missingDependency("session service"));
+  }
+
+  if (dependencies.knowledge) {
+    const projectKnowledge = createProjectKnowledgeHandler(dependencies.knowledge);
+    handlers.set("xtctx_project_knowledge", (params) => projectKnowledge(params as any));
+  } else {
+    handlers.set("xtctx_project_knowledge", missingDependency("knowledge store"));
+  }
+
+  if (dependencies.writer) {
+    const writeHandlers = createWriteHandlers(dependencies.writer, dependencies.findSimilar);
+    handlers.set("xtctx_save_decision", (params) => writeHandlers.saveDecision(params as any));
+    handlers.set("xtctx_save_error_solution", (params) =>
+      writeHandlers.saveErrorSolution(params as any),
+    );
+    handlers.set("xtctx_save_insight", (params) => writeHandlers.saveInsight(params as any));
+  } else {
+    handlers.set("xtctx_save_decision", missingDependency("knowledge writer"));
+    handlers.set("xtctx_save_error_solution", missingDependency("knowledge writer"));
+    handlers.set("xtctx_save_insight", missingDependency("knowledge writer"));
+  }
+
+  if (dependencies.configs) {
+    const listConfigs = createListConfigsHandler(dependencies.configs);
+    const getConfig = createGetConfigHandler(dependencies.configs);
+    const toolPreferences = createToolPreferencesHandler(dependencies.configs);
+    handlers.set("xtctx_list_configs", (params) => listConfigs(params as any));
+    handlers.set("xtctx_get_config", (params) => getConfig(params as any));
+    handlers.set("xtctx_tool_preferences", (params) => toolPreferences(params as any));
+  } else {
+    handlers.set("xtctx_list_configs", missingDependency("config store"));
+    handlers.set("xtctx_get_config", missingDependency("config store"));
+    handlers.set("xtctx_tool_preferences", missingDependency("config store"));
+  }
+
+  return handlers;
+}
+
+export function createMcpServer(
+  dependencies: McpToolDependencies = {},
+): Server {
   const server = new Server(
     { name: "xtctx", version: "0.1.0" },
     { capabilities: { tools: {} } },
   );
 
   const tools = buildToolDefinitions();
+  const handlers = createToolHandlers(dependencies);
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: tools as any,
@@ -217,18 +312,79 @@ export async function startMcpServer(): Promise<void> {
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const name = request.params.name;
-    const args = request.params.arguments ?? {};
+    const params = asToolParams(request.params.arguments);
+    const handler = handlers.get(name);
 
-    return {
-      content: [
-        {
-          type: "text",
-          text: `Tool ${name} called with ${JSON.stringify(args)}`,
-        },
-      ],
-    };
+    if (!handler) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Unknown tool: ${name}` }],
+      };
+    }
+
+    try {
+      const result = await handler(params);
+      return formatCallToolResult(result);
+    } catch (error) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Tool ${name} failed: ${errorMessage(error)}` }],
+      };
+    }
   });
 
+  return server;
+}
+
+export async function startMcpServer(
+  dependencies: McpToolDependencies = {},
+): Promise<void> {
+  const server = createMcpServer(dependencies);
   const transport = new StdioServerTransport();
   await server.connect(transport);
+}
+
+function asToolParams(value: unknown): ToolParams {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as ToolParams;
+  }
+
+  return {};
+}
+
+function missingDependency(dependency: string): ToolHandler {
+  return async () => ({
+    error: `Tool is unavailable because ${dependency} is not configured.`,
+  });
+}
+
+function formatCallToolResult(result: unknown): {
+  content: Array<{ type: "text"; text: string }>;
+  structuredContent?: Record<string, unknown>;
+} {
+  const response: {
+    content: Array<{ type: "text"; text: string }>;
+    structuredContent?: Record<string, unknown>;
+  } = {
+    content: [
+      {
+        type: "text",
+        text: typeof result === "string" ? result : JSON.stringify(result, null, 2),
+      },
+    ],
+  };
+
+  if (result && typeof result === "object" && !Array.isArray(result)) {
+    response.structuredContent = result as Record<string, unknown>;
+  }
+
+  return response;
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return String(error);
 }
