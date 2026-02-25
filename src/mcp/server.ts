@@ -4,7 +4,6 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import type { HybridSearch } from "../store/search.js";
 import {
   createGetConfigHandler,
   createListConfigsHandler,
@@ -15,7 +14,7 @@ import {
   createProjectKnowledgeHandler,
   type KnowledgeStore,
 } from "./tools/knowledge.js";
-import { createSearchHandler } from "./tools/search.js";
+import { createSearchHandler, type SearchRunner } from "./tools/search.js";
 import {
   createRecentSessionsHandler,
   createSessionDetailHandler,
@@ -41,7 +40,7 @@ type ToolParams = Record<string, unknown>;
 type ToolHandler = (params: ToolParams) => Promise<unknown>;
 
 export interface McpToolDependencies {
-  search?: HybridSearch;
+  search?: SearchRunner;
   sessions?: SessionService;
   knowledge?: KnowledgeStore;
   writer?: KnowledgeWriter;

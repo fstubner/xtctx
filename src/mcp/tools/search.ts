@@ -1,4 +1,13 @@
-import type { HybridSearch, SearchMode } from "../../store/search.js";
+import type { HybridSearchResult, SearchMode } from "../../store/search.js";
+
+export interface SearchRunner {
+  search(
+    tableName: string,
+    query: string,
+    mode: SearchMode,
+    limit: number,
+  ): Promise<HybridSearchResult[]>;
+}
 
 interface SearchParams {
   query: string;
@@ -11,7 +20,7 @@ interface SearchParams {
   limit?: number;
 }
 
-export function createSearchHandler(search: HybridSearch) {
+export function createSearchHandler(search: SearchRunner) {
   return async (params: SearchParams) => {
     const mode = params.mode ?? "hybrid";
     const format = params.format ?? "markdown";
