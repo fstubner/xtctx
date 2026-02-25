@@ -1,0 +1,50 @@
+name: ci
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [20, 22]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install web dependencies
+        run: npm --prefix web ci
+
+      - name: Unit and integration tests
+        run: |
+          npm test
+          npm run test:integration
+
+      - name: Build packages
+        run: |
+          npm run build
+          npm --prefix web run build
+
+      - name: CLI smoke check
+        run: npm run smoke:cli
+
+      - name: Package dry run
+        run: npm pack --dry-run

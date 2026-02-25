@@ -1,0 +1,12 @@
+shared:
+  skills:
+    - xtctx-search
+  commands:
+    - npm test
+  agents:
+    - reviewer
+toolPreferences:
+  claude-code:
+    alwaysCallRecentSessions: true
+  codex:
+    enforceTests: true

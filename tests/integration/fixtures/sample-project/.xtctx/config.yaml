@@ -1,0 +1,21 @@
+version: "1"
+project:
+  name: "sample-project"
+  root: "."
+ingestion:
+  scrapers: []
+  watchPaths: []
+  pollIntervalMs: 30000
+  excludePatterns:
+    - node_modules/**
+    - dist/**
+compaction:
+  strategy: rule-based
+  sessionBoundaryMinutes: 30
+search:
+  defaultMode: hybrid
+  defaultDepth: summary
+  defaultLimit: 10
+domainTags: {}
+web:
+  port: 3232

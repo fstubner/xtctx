@@ -10,12 +10,15 @@
     "build": "tsc",
     "dev": "tsx watch src/cli/index.ts",
     "test": "vitest run",
+    "test:integration": "vitest run tests/integration",
     "test:watch": "vitest",
     "lint": "eslint src/ tests/",
     "mcp": "tsx src/mcp/server.ts",
     "api": "tsx src/api/server.ts",
     "web:dev": "npm --prefix web run dev",
-    "web:build": "npm --prefix web run build"
+    "web:build": "npm --prefix web run build",
+    "smoke:cli": "node dist/src/cli/index.js --help",
+    "verify:release": "npm test && npm run build && npm run smoke:cli && npm --prefix web run build"
   },
   "dependencies": {
     "@lancedb/lancedb": "^0.13.0",
@@ -44,6 +47,10 @@
     "type": "git",
     "url": "https://github.com/fstubner/xtctx.git"
   },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "license": "MIT",
   "homepage": "https://xtctx.com"
 }

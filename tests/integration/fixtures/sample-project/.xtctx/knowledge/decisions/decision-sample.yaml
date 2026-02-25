@@ -1,0 +1,15 @@
+id: "decision-sample"
+type: "decision"
+created_at: "2026-02-24T10:00:00.000Z"
+source_tool: "claude-code"
+referenced_files:
+  - "src/cli/serve.ts"
+domain_tags:
+  - "reliability"
+environment:
+  runtime_versions:
+    node: "22.0.0"
+title: "Standardize retry handling for service startup"
+body: "Use exponential retry/backoff for API and ingestion startup to reduce transient failures."
+metadata:
+  confidence: "high"
