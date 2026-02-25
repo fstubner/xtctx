@@ -4,7 +4,7 @@
   "description": "Cross-tool context for AI coding agents",
   "type": "module",
   "bin": {
-    "xtctx": "./dist/cli/index.js"
+    "xtctx": "./dist/src/cli/index.js"
   },
   "scripts": {
     "build": "tsc",
