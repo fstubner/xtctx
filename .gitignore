@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .xtctx/.store/
+.xtctx/state/
 *.tsbuildinfo
 coverage/
 .env
