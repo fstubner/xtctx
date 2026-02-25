@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.xtctx/.store/
+*.tsbuildinfo
+coverage/
+.env
+.env.local
