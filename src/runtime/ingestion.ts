@@ -2,10 +2,15 @@ import { join } from "node:path";
 import { IngestionCoordinator } from "../ingestion/coordinator.js";
 import { IngestionDaemon } from "../ingestion/daemon.js";
 import { ClaudeCodeScraper } from "../scrapers/claude-code.js";
+import { CodexCliScraper } from "../scrapers/codex.js";
+import { CopilotScraper } from "../scrapers/copilot.js";
+import { CursorScraper } from "../scrapers/cursor.js";
+import { GeminiCliScraper } from "../scrapers/gemini.js";
 import { ScraperRegistry } from "../scrapers/registry.js";
 import { EmbeddingService } from "../store/embeddings.js";
 import { LanceStore } from "../store/lance.js";
 import { HybridSearch } from "../store/search.js";
+import type { ConversationScraper } from "../types/scraper.js";
 import type { ProjectServices } from "./services.js";
 
 export interface IngestionRuntime {
@@ -51,20 +56,45 @@ export async function createIngestionRuntime(
   const embeddings = new LazyEmbeddingService();
   const search = new HybridSearch(store, embeddings);
   const registry = new ScraperRegistry();
-
-  const claudeConfig = services.ingestion.scrapers.find(
-    (scraper) => scraper.tool === "claude-code",
+  const scraperConfigByTool = new Map(
+    services.ingestion.scrapers.map((scraper) => [scraper.tool, scraper]),
   );
-  const claudeEnabled = claudeConfig ? claudeConfig.enabled : true;
 
-  if (claudeEnabled) {
-    registry.register(
-      new ClaudeCodeScraper(
-        claudeConfig?.customStorePath ?? defaultClaudeProjectsDir(),
-        services.stateDir,
-      ),
-    );
-  }
+  registerConfiguredScraper(
+    registry,
+    scraperConfigByTool,
+    "claude-code",
+    defaultClaudeProjectsDir(),
+    (storePath) => new ClaudeCodeScraper(storePath, services.stateDir),
+  );
+  registerConfiguredScraper(
+    registry,
+    scraperConfigByTool,
+    "cursor",
+    defaultCursorStorePath(),
+    (storePath) => new CursorScraper(storePath, services.stateDir),
+  );
+  registerConfiguredScraper(
+    registry,
+    scraperConfigByTool,
+    "codex",
+    defaultCodexSessionsPath(),
+    (storePath) => new CodexCliScraper(storePath, services.stateDir),
+  );
+  registerConfiguredScraper(
+    registry,
+    scraperConfigByTool,
+    "copilot",
+    defaultCopilotHistoryPath(),
+    (storePath) => new CopilotScraper(storePath, services.stateDir),
+  );
+  registerConfiguredScraper(
+    registry,
+    scraperConfigByTool,
+    "gemini",
+    defaultGeminiHistoryPath(),
+    (storePath) => new GeminiCliScraper(storePath, services.stateDir),
+  );
 
   const watchPaths = uniquePaths([
     ...services.ingestion.watchPaths,
@@ -101,6 +131,48 @@ function defaultClaudeProjectsDir(): string {
   return join(home, ".claude", "projects");
 }
 
+function defaultCursorStorePath(): string {
+  const appData = process.env.APPDATA;
+  if (appData) {
+    return join(appData, "Cursor", "User", "workspaceStorage");
+  }
+
+  const home = process.env.USERPROFILE ?? process.env.HOME ?? "";
+  return join(home, ".cursor", "workspaceStorage");
+}
+
+function defaultCodexSessionsPath(): string {
+  const home = process.env.USERPROFILE ?? process.env.HOME ?? "";
+  return join(home, ".codex", "sessions");
+}
+
+function defaultCopilotHistoryPath(): string {
+  const home = process.env.USERPROFILE ?? process.env.HOME ?? "";
+  return join(home, ".copilot", "history");
+}
+
+function defaultGeminiHistoryPath(): string {
+  const home = process.env.USERPROFILE ?? process.env.HOME ?? "";
+  return join(home, ".gemini", "history");
+}
+
 function uniquePaths(paths: string[]): string[] {
   return [...new Set(paths.filter((path) => path.length > 0))];
+}
+
+function registerConfiguredScraper(
+  registry: ScraperRegistry,
+  configByTool: Map<string, { tool: string; enabled: boolean; customStorePath?: string }>,
+  tool: string,
+  defaultStorePath: string,
+  factory: (storePath: string) => ConversationScraper,
+): void {
+  const config = configByTool.get(tool);
+  const enabled = config ? config.enabled : true;
+
+  if (!enabled) {
+    return;
+  }
+
+  registry.register(factory(config?.customStorePath ?? defaultStorePath));
 }

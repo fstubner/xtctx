@@ -60,3 +60,20 @@ export interface CodexChunk extends ConversationChunk {
     sandboxed: boolean;
   };
 }
+
+export interface CopilotChunk extends ConversationChunk {
+  tool: "copilot";
+  metadata: ChunkMetadata & {
+    model?: string;
+    completionType?: string;
+  };
+}
+
+export interface GeminiChunk extends ConversationChunk {
+  tool: "gemini";
+  metadata: ChunkMetadata & {
+    model?: string;
+    promptTokens?: number;
+    responseTokens?: number;
+  };
+}
