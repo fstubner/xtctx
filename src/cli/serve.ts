@@ -84,7 +84,7 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
       );
       await waitForApiReadiness(apiHandle.port);
       console.error(`xtctx serve: API server active on http://127.0.0.1:${apiHandle.port}`);
-      console.error("xtctx serve: web UI should be started separately with `npm --prefix web run dev`.");
+      console.error(`xtctx serve: web UI available at http://127.0.0.1:${apiHandle.port}/`);
       console.error(
         `xtctx serve: ingestion daemon active (poll ${services.ingestion.pollIntervalMs}ms).`,
       );

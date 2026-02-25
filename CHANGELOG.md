@@ -3,16 +3,7 @@
 All notable changes to this project are documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
-
-## [Unreleased]
-
-### Added
-
-- Open-source release metadata and governance docs:
-  - `LICENSE`
-  - `CONTRIBUTING.md`
-  - `CODE_OF_CONDUCT.md`
-  - `SECURITY.md`
+This file is maintained automatically by Release Please.
 
 ## [0.1.0] - 2026-02-25
 
@@ -48,4 +39,3 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
   - CI workflow (Node 20/22)
   - Release verification scripts and packaging allowlist
   - Operator/runbook docs in `README.md`
-

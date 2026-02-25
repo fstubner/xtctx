@@ -8,6 +8,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "build:bundle-web": "npm run web:build && npm run web:copy-dist",
     "dev": "tsx watch src/cli/index.ts",
     "test": "vitest run",
     "test:integration": "vitest run tests/integration",
@@ -17,8 +18,10 @@
     "api": "tsx src/api/server.ts",
     "web:dev": "npm --prefix web run dev",
     "web:build": "npm --prefix web run build",
+    "web:copy-dist": "node scripts/copy-web-dist.mjs",
+    "prepack": "npm run build && npm run build:bundle-web",
     "smoke:cli": "node dist/src/cli/index.js --help",
-    "verify:release": "npm test && npm run build && npm run smoke:cli && npm --prefix web run build"
+    "verify:release": "npm test && npm run build && npm run build:bundle-web && npm run smoke:cli"
   },
   "dependencies": {
     "@lancedb/lancedb": "^0.13.0",
@@ -49,7 +52,9 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "license": "MIT",
   "homepage": "https://xtctx.com"

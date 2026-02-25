@@ -26,3 +26,9 @@ Preferred reporting path:
 ## Disclosure
 
 Please allow maintainers reasonable time to investigate and patch before public disclosure.
+
+## Release Pipeline Security
+
+- npm publishing is intended to run through GitHub OIDC trusted publishing.
+- Do not share or request long-lived npm auth tokens for this repository.
+- If release automation, provenance, or workflow permissions appear misconfigured, report privately using the same vulnerability process above.

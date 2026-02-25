@@ -25,11 +25,7 @@ Start runtime services:
 npx xtctx serve
 ```
 
-Start web UI (separate terminal):
-
-```bash
-npm --prefix web run dev
-```
+The web UI is served by `xtctx serve` at `/` on the configured web port.
 
 Sync tool-native config outputs:
 
@@ -48,17 +44,50 @@ npx xtctx ingest --full
 
 1. Pull latest `main`/`dev`.
 2. Run `npm install` and `npm --prefix web install`.
-3. Rebuild with `npm run build` and `npm --prefix web run build`.
+3. Rebuild with `npm run build` and `npm run build:bundle-web`.
 4. Re-run `npx xtctx sync` to refresh managed tool configs.
 5. Validate with `npm run verify:release`.
 
-## Release Checklist
+## Automated Release Flow
 
-1. Confirm `npm test`, `npm run build`, and `npm --prefix web run build` pass.
-2. Confirm CLI bin smoke check: `npm run smoke:cli`.
-3. Confirm integration checks: `npm run test:integration`.
-4. Verify package contents: `npm pack --dry-run`.
-5. Tag and publish according to your release process.
+- Push merge commits to `main`.
+- Release Please opens/updates a release PR with version bump and changelog updates.
+- Merging that release PR creates a GitHub Release.
+- Publishing the GitHub Release triggers npm publish via OIDC trusted publishing.
+
+## Maintainer Release Runbook
+
+### Quality gates before merge
+
+1. Run `npm run verify:release`.
+2. Run `npm pack --dry-run` and confirm `dist/web/index.html` is included.
+
+### First release bootstrap (`v0.1.0`)
+
+1. Merge release automation files to `main`.
+2. Create and publish `v0.1.0` GitHub Release from current `main`.
+3. Verify npm trusted publisher link for package `xtctx`.
+4. After bootstrap, rely on Release Please for all next releases.
+
+### Inspecting release PRs
+
+1. Confirm expected semver bump.
+2. Confirm generated changelog entries match merged commits.
+3. Confirm `package.json` version and release notes look correct.
+
+### Failed publish recovery
+
+1. Fix workflow/auth issue (permissions, OIDC trust, or package metadata).
+2. If publish fails after a release is created, do not try to reuse that version.
+3. Merge a follow-up fix and let Release Please cut a new patch release.
+
+### Post-release checks
+
+1. `npx xtctx --help`
+2. `npx xtctx serve` and verify:
+   - `GET /`
+   - `GET /health`
+   - one `GET /api/*` endpoint
 
 ## Operator Runbook
 

@@ -39,7 +39,12 @@ Or run everything with:
 1. Keep changes focused and atomic.
 2. Add tests for behavior changes.
 3. Update docs when CLI/API behavior changes.
-4. Use clear commit messages (`feat:`, `fix:`, `docs:`, `test:`).
+4. Use conventional commits for release automation:
+   - `feat: ...`
+   - `fix: ...`
+   - `docs: ...`
+   - `test: ...`
+   - `chore: ...`
 5. Avoid unrelated formatting-only diffs.
 
 ## Coding Expectations

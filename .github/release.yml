@@ -1,0 +1,26 @@
+changelog:
+  categories:
+    - title: Features
+      labels:
+        - feat
+    - title: Bug Fixes
+      labels:
+        - fix
+    - title: Documentation
+      labels:
+        - docs
+    - title: Tests
+      labels:
+        - test
+    - title: Miscellaneous
+      labels:
+        - "*"
+template: |
+  ## Changes
+
+  $CHANGES
+
+  ## Post-release checklist
+
+  - [ ] CLI install smoke: `npx xtctx --help`
+  - [ ] Runtime smoke: `npx xtctx serve` then verify `GET /`, `GET /health`, and one `GET /api/*` endpoint

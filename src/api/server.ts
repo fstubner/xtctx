@@ -1,6 +1,8 @@
 import express from "express";
+import { stat } from "node:fs/promises";
 import { createServer } from "node:http";
-import { pathToFileURL } from "node:url";
+import { dirname, extname, join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { createConfigRouter } from "./routes/config.js";
 import { createKnowledgeRouter } from "./routes/knowledge.js";
 import { createSearchRouter } from "./routes/search.js";
@@ -10,6 +12,7 @@ import { createProjectServices } from "../runtime/services.js";
 export interface ApiServerOptions {
   projectPath?: string;
   port?: number;
+  webStaticDir?: string;
 }
 
 export interface ApiServerHandle {
@@ -18,11 +21,15 @@ export interface ApiServerHandle {
   port: number;
 }
 
-export async function createApiApp(projectPath?: string): Promise<{
+export async function createApiApp(
+  projectPath?: string,
+  options: Pick<ApiServerOptions, "webStaticDir"> = {},
+): Promise<{
   app: express.Express;
   port: number;
 }> {
   const services = await createProjectServices(projectPath);
+  const webAssets = await resolveWebAssets(options.webStaticDir);
   const app = express();
 
   app.use(express.json({ limit: "1mb" }));
@@ -60,6 +67,27 @@ export async function createApiApp(projectPath?: string): Promise<{
     }),
   );
   app.use("/api/config", createConfigRouter(services.configs));
+  if (webAssets) {
+    app.use(express.static(webAssets.root, { index: false }));
+
+    app.get("/", (_req, res) => {
+      res.sendFile(webAssets.indexFile);
+    });
+
+    app.get("/{*path}", (req, res, next) => {
+      if (req.path === "/health" || req.path === "/api" || req.path.startsWith("/api/")) {
+        next();
+        return;
+      }
+
+      if (extname(req.path)) {
+        next();
+        return;
+      }
+
+      res.sendFile(webAssets.indexFile);
+    });
+  }
 
   app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     const message = error instanceof Error ? error.message : String(error);
@@ -70,7 +98,9 @@ export async function createApiApp(projectPath?: string): Promise<{
 }
 
 export async function startApiServer(options: ApiServerOptions = {}): Promise<ApiServerHandle> {
-  const { app, port: defaultPort } = await createApiApp(options.projectPath);
+  const { app, port: defaultPort } = await createApiApp(options.projectPath, {
+    webStaticDir: options.webStaticDir,
+  });
   const port = options.port ?? defaultPort;
   const server = createServer(app);
 
@@ -100,4 +130,41 @@ if (import.meta.url === invokedPath) {
     console.error(message);
     process.exitCode = 1;
   });
+}
+
+interface WebAssets {
+  root: string;
+  indexFile: string;
+}
+
+async function resolveWebAssets(webStaticDir?: string): Promise<WebAssets | null> {
+  const moduleDir = dirname(fileURLToPath(import.meta.url));
+  const candidates = dedupePaths([
+    webStaticDir,
+    resolve(moduleDir, "..", "..", "web"),
+    resolve(moduleDir, "..", "..", "..", "dist", "web"),
+    resolve(moduleDir, "..", "..", "..", "web", "dist"),
+  ]);
+
+  for (const candidate of candidates) {
+    const indexFile = join(candidate, "index.html");
+    if (await isFile(indexFile)) {
+      return { root: candidate, indexFile };
+    }
+  }
+
+  return null;
+}
+
+async function isFile(path: string): Promise<boolean> {
+  try {
+    const result = await stat(path);
+    return result.isFile();
+  } catch {
+    return false;
+  }
+}
+
+function dedupePaths(paths: Array<string | undefined>): string[] {
+  return [...new Set(paths.filter((entry): entry is string => Boolean(entry)))];
 }
