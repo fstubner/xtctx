@@ -2201,6 +2201,49 @@ Each follows the same pattern as the Claude Code scraper: implement `Conversatio
 
 ---
 
+## Phase 14: Integration Hardening & Release Readiness (Follow-up)
+
+### Task 14.1: End-to-End Integration Tests
+
+**Files:**
+- Create: `tests/integration/mcp-api-web.test.ts`
+- Create: `tests/integration/fixtures/` (sample project + `.xtctx` data)
+
+Validate complete flows:
+- Start API server + MCP server
+- Seed knowledge + source data
+- Verify MCP `tools/list` and `tools/call` responses
+- Verify API route parity with MCP handlers
+- Verify web app can load and render dashboard/search data paths
+
+### Task 14.2: Runtime Reliability
+
+**Files:**
+- Create: `src/utils/retry.ts`
+- Create: `src/utils/shutdown.ts`
+- Modify: `src/cli/serve.ts`
+
+Add:
+- Graceful shutdown hooks (SIGINT/SIGTERM)
+- Coordinated teardown for API/MCP/ingestion services
+- Retry/backoff wrappers for flaky IO paths (scrapers, DB, network)
+- Health/readiness checks for long-running operations
+
+### Task 14.3: Packaging, Distribution, and Ops
+
+**Files:**
+- Modify: `package.json`
+- Create: `README.md` sections for install/run/upgrade
+- Create: `.github/workflows/ci.yml`
+
+Include:
+- CI matrix (Node LTS) with test + build + smoke checks
+- Packaging verification for `bin` entrypoint
+- Versioning/release checklist
+- Operator runbook for local service troubleshooting
+
+---
+
 ## Execution Order
 
 Phases 1-5 form the **critical path** — they produce a working MCP server you can connect to from any tool. This is the MVP.
@@ -2212,3 +2255,5 @@ Phase 8 adds the **CLI** — makes it installable and usable.
 Phase 9 adds the **web UI** — browse and manage.
 
 Phases 10-13 are **polish and breadth** — more scrapers, config sync, landing page.
+
+Phase 14 is **stabilization and release hardening** — confidence for real-world use and distribution.
