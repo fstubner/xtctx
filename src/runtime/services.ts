@@ -107,10 +107,17 @@ export class FileConfigStore implements ConfigStore {
 export interface ProjectServices {
   projectRoot: string;
   xtctxDir: string;
+  storeDir: string;
   knowledgeDir: string;
   configRoot: string;
   stateDir: string;
   webPort: number;
+  ingestion: {
+    scrapers: Array<{ tool: string; enabled: boolean; customStorePath?: string }>;
+    watchPaths: string[];
+    pollIntervalMs: number;
+    excludePatterns: string[];
+  };
   knowledge: KnowledgeRepository;
   sessions: EmptySessionService;
   configs: FileConfigStore;
@@ -119,10 +126,13 @@ export interface ProjectServices {
 export async function createProjectServices(projectPath?: string): Promise<ProjectServices> {
   const projectRoot = resolve(projectPath ?? process.cwd());
   const xtctxDir = join(projectRoot, ".xtctx");
+  const storeDir = join(xtctxDir, ".store");
   const knowledgeDir = join(xtctxDir, "knowledge");
   const configRoot = join(xtctxDir, "tool-config");
   const stateDir = join(xtctxDir, "state");
-  const webPort = await loadWebPort(xtctxDir);
+  const config = await loadProjectConfig(xtctxDir);
+  const webPort = parseWebPort(config);
+  const ingestion = parseIngestionConfig(config, projectRoot);
 
   const knowledge = new KnowledgeRepository(knowledgeDir);
   await knowledge.initialize();
@@ -130,32 +140,118 @@ export async function createProjectServices(projectPath?: string): Promise<Proje
   return {
     projectRoot,
     xtctxDir,
+    storeDir,
     knowledgeDir,
     configRoot,
     stateDir,
     webPort,
+    ingestion,
     knowledge,
     sessions: new EmptySessionService(),
     configs: new FileConfigStore(configRoot),
   };
 }
 
-async function loadWebPort(xtctxDir: string): Promise<number> {
+async function loadProjectConfig(xtctxDir: string): Promise<Record<string, unknown>> {
   const configPath = join(xtctxDir, "config.yaml");
+
   try {
     const raw = await readFile(configPath, "utf-8");
-    const parsed = parseYaml(raw) as Record<string, unknown>;
-    const web = parsed.web;
-
-    if (web && typeof web === "object" && !Array.isArray(web)) {
-      const port = Number((web as Record<string, unknown>).port);
-      if (Number.isFinite(port) && port > 0 && port < 65536) {
-        return port;
-      }
+    const parsed = parseYaml(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
     }
   } catch {
-    // default if missing
+    // ignore
+  }
+
+  return {};
+}
+
+function parseWebPort(config: Record<string, unknown>): number {
+  const web = config.web;
+  if (web && typeof web === "object" && !Array.isArray(web)) {
+    const port = Number((web as Record<string, unknown>).port);
+    if (Number.isFinite(port) && port > 0 && port < 65536) {
+      return port;
+    }
   }
 
   return 3232;
+}
+
+function parseIngestionConfig(
+  config: Record<string, unknown>,
+  projectRoot: string,
+): {
+  scrapers: Array<{ tool: string; enabled: boolean; customStorePath?: string }>;
+  watchPaths: string[];
+  pollIntervalMs: number;
+  excludePatterns: string[];
+} {
+  const ingestion = config.ingestion;
+  const defaults = {
+    scrapers: [] as Array<{ tool: string; enabled: boolean; customStorePath?: string }>,
+    watchPaths: [projectRoot],
+    pollIntervalMs: 30_000,
+    excludePatterns: ["node_modules/**", "dist/**"],
+  };
+
+  if (!ingestion || typeof ingestion !== "object" || Array.isArray(ingestion)) {
+    return defaults;
+  }
+
+  const value = ingestion as Record<string, unknown>;
+
+  const watchPaths = Array.isArray(value.watchPaths)
+    ? value.watchPaths
+        .filter((item): item is string => typeof item === "string" && item.length > 0)
+        .map((item) => resolve(projectRoot, item))
+    : defaults.watchPaths;
+
+  const pollIntervalMs = Number(value.pollIntervalMs);
+
+  const excludePatterns = Array.isArray(value.excludePatterns)
+    ? value.excludePatterns.filter(
+        (item): item is string => typeof item === "string" && item.length > 0,
+      )
+    : defaults.excludePatterns;
+
+  const scrapers = Array.isArray(value.scrapers)
+    ? value.scrapers
+        .map((item): { tool: string; enabled: boolean; customStorePath?: string } | null => {
+          if (!item || typeof item !== "object" || Array.isArray(item)) {
+            return null;
+          }
+          const scraper = item as Record<string, unknown>;
+          const tool = typeof scraper.tool === "string" ? scraper.tool : "";
+          if (!tool) {
+            return null;
+          }
+
+          const enabled = scraper.enabled !== false;
+          if (typeof scraper.customStorePath === "string") {
+            return {
+              tool,
+              enabled,
+              customStorePath: resolve(projectRoot, scraper.customStorePath),
+            };
+          }
+
+          return { tool, enabled };
+        })
+        .filter((item): item is { tool: string; enabled: boolean; customStorePath?: string } =>
+          item !== null,
+        )
+    : defaults.scrapers;
+
+  return {
+    scrapers,
+    watchPaths: watchPaths.length > 0 ? watchPaths : defaults.watchPaths,
+    pollIntervalMs:
+      Number.isFinite(pollIntervalMs) && pollIntervalMs > 0
+        ? Math.floor(pollIntervalMs)
+        : defaults.pollIntervalMs,
+    excludePatterns,
+  };
 }

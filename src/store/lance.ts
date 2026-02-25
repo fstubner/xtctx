@@ -46,6 +46,9 @@ export class LanceStore {
     limit: number,
   ): Promise<SearchResult[]> {
     const db = this.requireDb();
+    if (!(await this.tableExists(tableName))) {
+      return [];
+    }
     const table = await db.openTable(tableName);
     const results = await table.vectorSearch(queryVector).limit(limit).toArray();
 
@@ -63,6 +66,9 @@ export class LanceStore {
     limit: number,
   ): Promise<SearchResult[]> {
     const db = this.requireDb();
+    if (!(await this.tableExists(tableName))) {
+      return [];
+    }
     const table = await db.openTable(tableName);
 
     try {
