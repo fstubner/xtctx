@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.3.1](https://github.com/fstubner/xtctx/compare/xtctx-v0.3.0...xtctx-v0.3.1) (2026-02-26)
+
+
+### Miscellaneous
+
+* auto-enable merge for release-please prs ([8028118](https://github.com/fstubner/xtctx/commit/80281187525971817d238d8c6c93e67309e01d69))
+* auto-enable merge for release-please PRs ([7c8535f](https://github.com/fstubner/xtctx/commit/7c8535ff7858111fa570bc528c457e29e99c5098))
+
 ## [0.3.0](https://github.com/fstubner/xtctx/compare/xtctx-v0.2.0...xtctx-v0.3.0) (2026-02-26)
 
 
