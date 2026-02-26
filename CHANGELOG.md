@@ -5,6 +5,15 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.3.3](https://github.com/fstubner/xtctx/compare/xtctx-v0.3.2...xtctx-v0.3.3) (2026-02-26)
+
+
+### Documentation
+
+* clarify api token and github pages behavior ([c23f317](https://github.com/fstubner/xtctx/commit/c23f317deb666039b1b365a0150e61cc4dd6f5b6))
+* clarify optional API token behavior ([d95575e](https://github.com/fstubner/xtctx/commit/d95575e6d707f5ce30d22ec0dff0a3657b4ff319))
+* keep readme focused on api token behavior ([79b78f9](https://github.com/fstubner/xtctx/commit/79b78f9d2c8e65b8924cb10bdb6b3c4a959ca1ec))
+
 ## [0.3.2](https://github.com/fstubner/xtctx/compare/xtctx-v0.3.1...xtctx-v0.3.2) (2026-02-26)
 
 
