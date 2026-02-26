@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.3.0](https://github.com/fstubner/xtctx/compare/xtctx-v0.2.0...xtctx-v0.3.0) (2026-02-26)
+
+
+### Features
+
+* make API security config file first and refresh README ([bac9c3b](https://github.com/fstubner/xtctx/commit/bac9c3bfa44e0b0c4a080f2fcf42550c1e21ef29))
+* make API security config file first and refresh README ([8625dba](https://github.com/fstubner/xtctx/commit/8625dba6383cd416ae6d45790bfe67e5eac0eaad))
+
 ## [0.2.0](https://github.com/fstubner/xtctx/compare/xtctx-v0.1.0...xtctx-v0.2.0) (2026-02-25)
 
 
