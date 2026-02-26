@@ -150,14 +150,6 @@ Run packaging smoke check:
 npm pack --dry-run
 ```
 
-## Landing Site (GitHub Pages)
-
-- This repo publishes a project Pages site from `landing/`.
-- Current URL pattern is `https://fstubner.github.io/xtctx/`.
-- This does not take over all `fstubner.github.io/*` paths. Each repo can have its own project path.
-- Only the special repository named `fstubner.github.io` controls the root user site (`https://fstubner.github.io/`).
-- Custom domains are supported by GitHub Pages (set DNS + Pages custom domain and add `landing/CNAME`).
-
 ## Maintainers
 
 - Conventional commits drive release notes/versioning via Release Please.
