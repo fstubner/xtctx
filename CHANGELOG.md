@@ -5,6 +5,19 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.3.2](https://github.com/fstubner/xtctx/compare/xtctx-v0.3.1...xtctx-v0.3.2) (2026-02-26)
+
+
+### Documentation
+
+* add root AGENTS guide for repository automation ([1439030](https://github.com/fstubner/xtctx/commit/1439030dfc458cf88f9a7e3abf7f925d678aa1ab))
+
+
+### Miscellaneous
+
+* deploy landing site to github pages ([6ddecd1](https://github.com/fstubner/xtctx/commit/6ddecd1828e6f3e2ba60200ba8a4dc659e629e73))
+* deploy landing site to GitHub Pages ([4fbbfdc](https://github.com/fstubner/xtctx/commit/4fbbfdc1ffadd615e444ab865afa8196ee2f6466))
+
 ## [0.3.1](https://github.com/fstubner/xtctx/compare/xtctx-v0.3.0...xtctx-v0.3.1) (2026-02-26)
 
 
