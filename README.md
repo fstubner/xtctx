@@ -101,6 +101,12 @@ api:
     rateLimitMax: 120
 ```
 
+`api.security.token` is optional:
+
+- `""` (empty): no API auth required.
+- non-empty token: `/api/*` requires `Authorization: Bearer <token>` (or `X-Xtctx-Api-Token`).
+- `/health` remains unauthenticated.
+
 Environment variables are optional explicit overrides (useful for temporary local sessions/CI):
 
 - `XTCTX_API_TOKEN`
@@ -108,6 +114,20 @@ Environment variables are optional explicit overrides (useful for temporary loca
 - `XTCTX_ALLOW_LOCALHOST_ORIGINS` (`true`/`false`)
 - `XTCTX_RATE_LIMIT_WINDOW_MS`
 - `XTCTX_RATE_LIMIT_MAX`
+
+Example (file-based token):
+
+```yaml
+api:
+  security:
+    token: "change-me-local-token"
+```
+
+Then call:
+
+```bash
+curl -H "Authorization: Bearer change-me-local-token" http://127.0.0.1:3232/api/sources/status
+```
 
 ## Security Defaults
 
@@ -129,6 +149,14 @@ Run packaging smoke check:
 ```bash
 npm pack --dry-run
 ```
+
+## Landing Site (GitHub Pages)
+
+- This repo publishes a project Pages site from `landing/`.
+- Current URL pattern is `https://fstubner.github.io/xtctx/`.
+- This does not take over all `fstubner.github.io/*` paths. Each repo can have its own project path.
+- Only the special repository named `fstubner.github.io` controls the root user site (`https://fstubner.github.io/`).
+- Custom domains are supported by GitHub Pages (set DNS + Pages custom domain and add `landing/CNAME`).
 
 ## Maintainers
 
