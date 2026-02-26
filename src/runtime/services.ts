@@ -112,6 +112,13 @@ export interface ProjectServices {
   configRoot: string;
   stateDir: string;
   webPort: number;
+  apiSecurity: {
+    apiToken?: string | null;
+    allowedOrigins?: string[];
+    allowLocalhostOrigins?: boolean;
+    rateLimitWindowMs?: number;
+    rateLimitMax?: number;
+  };
   ingestion: {
     scrapers: Array<{ tool: string; enabled: boolean; customStorePath?: string }>;
     watchPaths: string[];
@@ -132,6 +139,7 @@ export async function createProjectServices(projectPath?: string): Promise<Proje
   const stateDir = join(xtctxDir, "state");
   const config = await loadProjectConfig(xtctxDir);
   const webPort = parseWebPort(config);
+  const apiSecurity = parseApiSecurityConfig(config);
   const ingestion = parseIngestionConfig(config, projectRoot);
 
   const knowledge = new KnowledgeRepository(knowledgeDir);
@@ -145,6 +153,7 @@ export async function createProjectServices(projectPath?: string): Promise<Proje
     configRoot,
     stateDir,
     webPort,
+    apiSecurity,
     ingestion,
     knowledge,
     sessions: new EmptySessionService(),
@@ -178,6 +187,62 @@ function parseWebPort(config: Record<string, unknown>): number {
   }
 
   return 3232;
+}
+
+function parseApiSecurityConfig(config: Record<string, unknown>): {
+  apiToken?: string | null;
+  allowedOrigins?: string[];
+  allowLocalhostOrigins?: boolean;
+  rateLimitWindowMs?: number;
+  rateLimitMax?: number;
+} {
+  const api = config.api;
+  if (!api || typeof api !== "object" || Array.isArray(api)) {
+    return {};
+  }
+
+  const security = (api as Record<string, unknown>).security;
+  if (!security || typeof security !== "object" || Array.isArray(security)) {
+    return {};
+  }
+
+  const value = security as Record<string, unknown>;
+  const parsed: {
+    apiToken?: string | null;
+    allowedOrigins?: string[];
+    allowLocalhostOrigins?: boolean;
+    rateLimitWindowMs?: number;
+    rateLimitMax?: number;
+  } = {};
+
+  if (typeof value.token === "string") {
+    const token = value.token.trim();
+    parsed.apiToken = token.length > 0 ? token : null;
+  } else if (value.token === null) {
+    parsed.apiToken = null;
+  }
+
+  if (Array.isArray(value.allowedOrigins)) {
+    parsed.allowedOrigins = value.allowedOrigins.filter(
+      (item): item is string => typeof item === "string" && item.length > 0,
+    );
+  }
+
+  if (typeof value.allowLocalhostOrigins === "boolean") {
+    parsed.allowLocalhostOrigins = value.allowLocalhostOrigins;
+  }
+
+  const rateLimitWindowMs = Number(value.rateLimitWindowMs);
+  if (Number.isFinite(rateLimitWindowMs) && rateLimitWindowMs > 0) {
+    parsed.rateLimitWindowMs = Math.floor(rateLimitWindowMs);
+  }
+
+  const rateLimitMax = Number(value.rateLimitMax);
+  if (Number.isFinite(rateLimitMax) && rateLimitMax > 0) {
+    parsed.rateLimitMax = Math.floor(rateLimitMax);
+  }
+
+  return parsed;
 }
 
 function parseIngestionConfig(

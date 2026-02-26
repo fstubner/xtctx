@@ -22,6 +22,15 @@ export interface XtctxConfig {
   web: {
     port: number;
   };
+  api: {
+    security: {
+      token: string | null;
+      allowedOrigins: string[];
+      allowLocalhostOrigins: boolean;
+      rateLimitWindowMs: number;
+      rateLimitMax: number;
+    };
+  };
 }
 
 export interface ScraperConfig {

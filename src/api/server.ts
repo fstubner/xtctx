@@ -42,7 +42,10 @@ export async function createApiApp(
 }> {
   const services = await createProjectServices(projectPath);
   const webAssets = await resolveWebAssets(options.webStaticDir);
-  const security = resolveSecurityOptions(services.webPort, options.security);
+  const security = resolveSecurityOptions(services.webPort, {
+    ...services.apiSecurity,
+    ...(options.security ?? {}),
+  });
   const app = express();
 
   app.disable("x-powered-by");
@@ -284,28 +287,30 @@ function resolveSecurityOptions(
   overrides: Partial<ApiSecurityOptions> | undefined,
 ): ApiSecurityOptions {
   const envOrigins = splitCsv(process.env.XTCTX_ALLOWED_ORIGINS);
-  const allowLocalhostOrigins = parseBoolean(
-    process.env.XTCTX_ALLOW_LOCALHOST_ORIGINS,
-    true,
-  );
   const defaultOrigins = [`http://127.0.0.1:${port}`, `http://localhost:${port}`];
   const allowedOrigins = dedupePaths([
     ...(overrides?.allowedOrigins ?? []),
     ...envOrigins,
     ...defaultOrigins,
   ]);
+  const localhostOriginDefault = overrides?.allowLocalhostOrigins ?? true;
+  const allowLocalhostOrigins = process.env.XTCTX_ALLOW_LOCALHOST_ORIGINS == null
+    ? localhostOriginDefault
+    : parseBoolean(process.env.XTCTX_ALLOW_LOCALHOST_ORIGINS, localhostOriginDefault);
+  const apiToken = process.env.XTCTX_API_TOKEN == null
+    ? normalizeToken(overrides?.apiToken ?? null)
+    : normalizeToken(process.env.XTCTX_API_TOKEN);
 
   return {
-    apiToken: overrides?.apiToken ?? process.env.XTCTX_API_TOKEN ?? null,
+    apiToken,
     allowedOrigins,
-    allowLocalhostOrigins:
-      overrides?.allowLocalhostOrigins ?? allowLocalhostOrigins,
+    allowLocalhostOrigins,
     rateLimitWindowMs: sanitizePositiveInt(
-      overrides?.rateLimitWindowMs ?? process.env.XTCTX_RATE_LIMIT_WINDOW_MS,
+      process.env.XTCTX_RATE_LIMIT_WINDOW_MS ?? overrides?.rateLimitWindowMs,
       60_000,
     ),
     rateLimitMax: sanitizePositiveInt(
-      overrides?.rateLimitMax ?? process.env.XTCTX_RATE_LIMIT_MAX,
+      process.env.XTCTX_RATE_LIMIT_MAX ?? overrides?.rateLimitMax,
       120,
     ),
   };
@@ -335,6 +340,15 @@ function parseBoolean(value: string | undefined, fallback: boolean): boolean {
     return false;
   }
   return fallback;
+}
+
+function normalizeToken(value: string | null): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const token = value.trim();
+  return token.length > 0 ? token : null;
 }
 
 function sanitizePositiveInt(value: unknown, fallback: number): number {
