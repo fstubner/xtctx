@@ -1,4 +1,4 @@
-import { cp, mkdtemp, rm } from "node:fs/promises";
+import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -88,17 +88,92 @@ describe("API security controls", () => {
     expect(second.status).toBe(200);
     expect(third.status).toBe(429);
   });
+
+  it("reads token and CORS controls from .xtctx/config.yaml", async () => {
+    const { baseUrl } = await startFixtureServer(
+      tempDirs,
+      servers,
+      undefined,
+      `
+api:
+  security:
+    token: fixture-token
+    allowedOrigins:
+      - https://allowed.example
+    allowLocalhostOrigins: false
+`,
+    );
+
+    const unauthorized = await fetch(`${baseUrl}/api/sources/status`);
+    const authorized = await fetch(`${baseUrl}/api/sources/status`, {
+      headers: { Authorization: "Bearer fixture-token" },
+    });
+    const deniedOrigin = await fetch(`${baseUrl}/api/sources/status`, {
+      method: "OPTIONS",
+      headers: {
+        Origin: "http://localhost:5173",
+        "Access-Control-Request-Method": "GET",
+      },
+    });
+    const allowedOrigin = await fetch(`${baseUrl}/api/sources/status`, {
+      method: "OPTIONS",
+      headers: {
+        Origin: "https://allowed.example",
+        "Access-Control-Request-Method": "GET",
+      },
+    });
+
+    expect(unauthorized.status).toBe(401);
+    expect(authorized.status).toBe(200);
+    expect(deniedOrigin.status).toBe(403);
+    expect(allowedOrigin.status).toBe(204);
+    expect(allowedOrigin.headers.get("access-control-allow-origin")).toBe(
+      "https://allowed.example",
+    );
+  });
+
+  it("reads rate limit controls from .xtctx/config.yaml", async () => {
+    const { baseUrl } = await startFixtureServer(
+      tempDirs,
+      servers,
+      undefined,
+      `
+api:
+  security:
+    rateLimitWindowMs: 60000
+    rateLimitMax: 1
+`,
+    );
+
+    const first = await fetch(`${baseUrl}/api/sources/status`);
+    const second = await fetch(`${baseUrl}/api/sources/status`);
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(429);
+  });
 });
 
 async function startFixtureServer(
   tempDirs: string[],
   servers: Server[],
   security?: Partial<ApiSecurityOptions>,
+  configPatch?: string,
 ): Promise<{ baseUrl: string }> {
   const workspaceDir = await mkdtemp(join(tmpdir(), "xtctx-api-security-"));
   const projectDir = join(workspaceDir, "sample-project");
   tempDirs.push(workspaceDir);
   await cp(FIXTURE_PROJECT, projectDir, { recursive: true });
+  if (configPatch) {
+    const configPath = join(projectDir, ".xtctx", "config.yaml");
+    const existing = await readFile(configPath, "utf-8");
+    const normalized = existing.replace(/\r\n/g, "\n");
+    const withoutApi = normalized.replace(/\napi:\n[\s\S]*$/m, "\n").trimEnd();
+    await writeFile(
+      configPath,
+      `${withoutApi}\n${configPatch.trim()}\n`,
+      "utf-8",
+    );
+  }
 
   const { app } = await createApiApp(projectDir, { security });
   const server = createServer(app);

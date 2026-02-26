@@ -1,123 +1,138 @@
 # xtctx
 
+[![CI](https://github.com/fstubner/xtctx/actions/workflows/ci.yml/badge.svg)](https://github.com/fstubner/xtctx/actions/workflows/ci.yml)
+[![Release Please](https://github.com/fstubner/xtctx/actions/workflows/release-please.yml/badge.svg)](https://github.com/fstubner/xtctx/actions/workflows/release-please.yml)
+[![Latest Release](https://img.shields.io/github/v/release/fstubner/xtctx?sort=semver)](https://github.com/fstubner/xtctx/releases)
+[![License](https://img.shields.io/github/license/fstubner/xtctx)](LICENSE)
+[![Node >=20](https://img.shields.io/badge/node-%3E%3D20-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+
 Cross-tool context for AI coding agents.
 
-xtctx indexes local conversation history, stores searchable context, exposes MCP tools, and provides API/Web surfaces for browsing project knowledge.
+xtctx is a local-first context layer that ingests session history and project knowledge, then exposes it consistently through:
 
-## Install
+- MCP tools (for agents)
+- HTTP API (`/api/*`)
+- bundled web UI (`/`)
+
+## Features
+
+- Multi-tool ingestion support (Claude Code, Codex CLI, Cursor, Copilot, Gemini).
+- Hybrid search (semantic + keyword fusion) across indexed context.
+- Knowledge repository with auto-tagging and dedup/supersession behavior.
+- Config sync for tool-native files (`AGENTS.md`, `CLAUDE.md`, `.cursorrules`, Copilot instructions).
+- Single `xtctx serve` runtime with API + web UI + MCP.
+- Secure-by-default local API behavior (localhost bind, CORS filtering, optional token auth, rate limiting).
+
+## Quick Start
+
+Install and build:
 
 ```bash
-npm install
+npm ci
+npm --prefix web ci
 npm run build
 ```
 
-## Run
-
-Initialize a project:
+Initialize in your project:
 
 ```bash
 npx xtctx init
 ```
 
-Start runtime services:
+Ingest data:
+
+```bash
+npx xtctx ingest --full
+```
+
+Run services:
 
 ```bash
 npx xtctx serve
 ```
 
-The web UI is served by `xtctx serve` at `/` on the configured web port.
+Then open:
 
-Sync tool-native config outputs:
+- Web UI: `http://127.0.0.1:3232/`
+- Health: `http://127.0.0.1:3232/health`
+- API: `http://127.0.0.1:3232/api/*`
 
-```bash
-npx xtctx sync
+## CLI Commands
+
+- `xtctx init [path]`: scaffold `.xtctx/` config and knowledge structure.
+- `xtctx serve [--mcp-only]`: start runtime services.
+- `xtctx ingest [--full]`: run ingestion on demand.
+- `xtctx sync`: generate/update managed tool-native config sections.
+
+## Configuration (File-First)
+
+xtctx is configured from `.xtctx/config.yaml`. No environment variables are required for normal usage.
+
+Default config:
+
+```yaml
+version: "1"
+project:
+  name: ""
+  root: "."
+ingestion:
+  scrapers: []
+  watchPaths: []
+  pollIntervalMs: 30000
+  excludePatterns:
+    - node_modules/**
+    - dist/**
+compaction:
+  strategy: rule-based
+  sessionBoundaryMinutes: 30
+search:
+  defaultMode: hybrid
+  defaultDepth: summary
+  defaultLimit: 10
+domainTags: {}
+web:
+  port: 3232
+api:
+  security:
+    token: ""
+    allowedOrigins: []
+    allowLocalhostOrigins: true
+    rateLimitWindowMs: 60000
+    rateLimitMax: 120
 ```
 
-Run ingestion manually:
+Environment variables are optional explicit overrides (useful for temporary local sessions/CI):
+
+- `XTCTX_API_TOKEN`
+- `XTCTX_ALLOWED_ORIGINS` (comma-separated)
+- `XTCTX_ALLOW_LOCALHOST_ORIGINS` (`true`/`false`)
+- `XTCTX_RATE_LIMIT_WINDOW_MS`
+- `XTCTX_RATE_LIMIT_MAX`
+
+## Security Defaults
+
+- API binds to `127.0.0.1`.
+- `/api/*` is rate limited.
+- CORS is restricted to localhost/same-origin patterns by default.
+- API token auth is available when `api.security.token` is set.
+
+## Development
+
+Run full verification:
 
 ```bash
-npx xtctx ingest
-npx xtctx ingest --full
+npm run verify:release
 ```
 
-## API Security Controls
-
-- API binds to `127.0.0.1` only by default.
-- CORS allows localhost/same-origin by default; additional origins can be set via `XTCTX_ALLOWED_ORIGINS`.
-- Optional API token auth can be enabled with `XTCTX_API_TOKEN`.
-- Basic API rate limiting is enabled for `/api/*`.
-
-Example:
+Run packaging smoke check:
 
 ```bash
-set XTCTX_API_TOKEN=my-local-token
-set XTCTX_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:3232
-set XTCTX_RATE_LIMIT_MAX=120
-set XTCTX_RATE_LIMIT_WINDOW_MS=60000
-xtctx serve
+npm pack --dry-run
 ```
 
-## Upgrade
+## Maintainers
 
-1. Pull latest `main`/`dev`.
-2. Run `npm install` and `npm --prefix web install`.
-3. Rebuild with `npm run build` and `npm run build:bundle-web`.
-4. Re-run `npx xtctx sync` to refresh managed tool configs.
-5. Validate with `npm run verify:release`.
-
-## Automated Release Flow
-
-- Push merge commits to `main`.
-- Release Please opens/updates a release PR with version bump and changelog updates.
-- Merging that release PR creates a GitHub Release.
-- Publishing the GitHub Release triggers npm publish via OIDC trusted publishing.
-
-## Maintainer Release Runbook
-
-### Quality gates before merge
-
-1. Run `npm run verify:release`.
-2. Run `npm pack --dry-run` and confirm `dist/web/index.html` is included.
-
-### First release bootstrap (`v0.1.0`)
-
-1. Merge release automation files to `main`.
-2. Create and publish `v0.1.0` GitHub Release from current `main`.
-3. Verify npm trusted publisher link for package `xtctx`.
-4. After bootstrap, rely on Release Please for all next releases.
-
-### Inspecting release PRs
-
-1. Confirm expected semver bump.
-2. Confirm generated changelog entries match merged commits.
-3. Confirm `package.json` version and release notes look correct.
-
-### Failed publish recovery
-
-1. Fix workflow/auth issue (permissions, OIDC trust, or package metadata).
-2. If publish fails after a release is created, do not try to reuse that version.
-3. Merge a follow-up fix and let Release Please cut a new patch release.
-
-### Post-release checks
-
-1. `npx xtctx --help`
-2. `npx xtctx serve` and verify:
-   - `GET /`
-   - `GET /health`
-   - one `GET /api/*` endpoint
-
-## Operator Runbook
-
-If `xtctx serve` fails:
-
-1. Check API health: `curl http://127.0.0.1:3232/health`.
-2. Inspect `.xtctx/config.yaml` for invalid YAML or ports.
-3. Ensure scraper paths exist or disable unavailable scrapers in `ingestion.scrapers`.
-4. Check `.xtctx/state/` permissions.
-5. Restart with logs visible: `npx xtctx serve --mcp-only` (for MCP isolation) or full `npx xtctx serve`.
-
-If search returns no results:
-
-1. Run `npx xtctx ingest --full`.
-2. Confirm knowledge files exist under `.xtctx/knowledge/`.
-3. Check source status endpoint: `GET /api/sources/status`.
+- Conventional commits drive release notes/versioning via Release Please.
+- Merge release PRs on `main` to create GitHub releases.
+- GitHub release publish triggers npm publish with OIDC trusted publishing.
+- For contribution expectations, see `CONTRIBUTING.md`.

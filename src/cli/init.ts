@@ -27,6 +27,13 @@ search:
 domainTags: {}
 web:
   port: 3232
+api:
+  security:
+    token: ""
+    allowedOrigins: []
+    allowLocalhostOrigins: true
+    rateLimitWindowMs: 60000
+    rateLimitMax: 120
 `;
 
 const DEFAULT_TOOL_CONFIG_YAML = `shared:
