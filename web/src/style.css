@@ -199,6 +199,11 @@
     background: color-mix(in srgb, hsl(var(--warn)), hsl(var(--surface)) 88%);
   }
 
+  .xt-alert-ok {
+    @apply xt-alert;
+    background: color-mix(in srgb, hsl(var(--accent)), hsl(var(--surface)) 86%);
+  }
+
   .xt-table {
     @apply w-full border-collapse text-sm;
   }

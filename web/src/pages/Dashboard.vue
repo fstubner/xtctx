@@ -50,7 +50,7 @@ const readinessClass = computed(() => {
     return "xt-alert-warn";
   }
 
-  return sourcesStatus.value.toolPortabilityReady ? "xt-chip-ok" : "xt-alert-warn";
+  return sourcesStatus.value.toolPortabilityReady ? "xt-alert-ok" : "xt-alert-warn";
 });
 
 onMounted(async () => {
