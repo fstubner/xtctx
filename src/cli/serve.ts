@@ -1,4 +1,5 @@
 import { startApiServer } from "../api/server.js";
+import { syncToolConfigs } from "../config/sync.js";
 import { startMcpServer, type McpToolDependencies } from "../mcp/server.js";
 import { createIngestionRuntime } from "../runtime/ingestion.js";
 import { createProjectServices } from "../runtime/services.js";
@@ -16,8 +17,10 @@ interface ServeOptions {
 
 export async function runServe(options: ServeOptions = {}): Promise<void> {
   const services = await createProjectServices(options.projectPath);
+  await runAutoSync(services.projectRoot, "startup");
   const runtime = await createIngestionRuntime(services);
   let apiHandle: Awaited<ReturnType<typeof startApiServer>> | null = null;
+  let syncInterval: NodeJS.Timeout | null = null;
   const shutdown = new ShutdownCoordinator();
 
   shutdown.register("api-server", async () => {
@@ -28,6 +31,12 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
   });
   shutdown.register("ingestion-daemon", async () => {
     await runtime.daemon.stop();
+  });
+  shutdown.register("continuity-sync", async () => {
+    if (syncInterval) {
+      clearInterval(syncInterval);
+      syncInterval = null;
+    }
   });
 
   shutdown.installSignalHandlers((signal) => {
@@ -49,6 +58,10 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
 
   try {
     if (!options.mcpOnly) {
+      syncInterval = setInterval(() => {
+        void runAutoSync(services.projectRoot, "reconcile");
+      }, Math.max(15_000, services.ingestion.pollIntervalMs));
+
       await withRetry(
         async () => {
           await runtime.daemon.start();
@@ -134,4 +147,22 @@ function errorMessage(error: unknown): string {
   }
 
   return String(error);
+}
+
+async function runAutoSync(projectRoot: string, reason: "startup" | "reconcile"): Promise<void> {
+  try {
+    const result = await syncToolConfigs(projectRoot);
+    const updates = result.updated + result.created;
+    if (updates > 0 || result.warnings.length > 0 || reason === "startup") {
+      console.error(
+        `xtctx serve: continuity ${reason} sync complete (updated: ${result.updated}, created: ${result.created}, unchanged: ${result.unchanged}).`,
+      );
+    }
+
+    for (const warning of result.warnings) {
+      console.error(`xtctx serve: continuity warning: ${warning}`);
+    }
+  } catch (error) {
+    console.error(`xtctx serve: continuity ${reason} sync failed: ${errorMessage(error)}`);
+  }
 }

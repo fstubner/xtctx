@@ -51,9 +51,16 @@ export interface ToolContinuityPolicy {
   preferences: Record<string, unknown>;
 }
 
+export interface ToolPolicyOverrides {
+  enabled?: boolean;
+  scope?: ContinuityScope;
+  categories?: Partial<Record<ContinuityCategory, boolean>>;
+  preferences?: Record<string, unknown>;
+}
+
 export interface ContinuityPolicyLayer {
   defaults: Partial<ContinuityDefaults>;
-  tools: Record<string, Partial<ToolContinuityPolicy>>;
+  tools: Record<string, ToolPolicyOverrides>;
   policy: {
     whitelist: Partial<WhitelistPolicy>;
   };
@@ -260,7 +267,7 @@ function parseTools(
   input: unknown,
   path: string,
   errors: string[],
-): Record<string, Partial<ToolContinuityPolicy>> {
+): Record<string, ToolPolicyOverrides> {
   if (input == null) {
     return {};
   }
@@ -270,7 +277,7 @@ function parseTools(
     return {};
   }
 
-  const tools: Record<string, Partial<ToolContinuityPolicy>> = {};
+  const tools: Record<string, ToolPolicyOverrides> = {};
   for (const [toolName, rawTool] of Object.entries(input)) {
     const toolPath = `${path}.${toolName}`;
     if (!isRecord(rawTool)) {
@@ -280,7 +287,7 @@ function parseTools(
 
     rejectUnknownKeys(rawTool, TOOL_KEYS, toolPath, errors);
 
-    const parsed: Partial<ToolContinuityPolicy> = {};
+    const parsed: ToolPolicyOverrides = {};
     if ("enabled" in rawTool) {
       if (typeof rawTool.enabled === "boolean") {
         parsed.enabled = rawTool.enabled;
@@ -408,8 +415,8 @@ function mergeWhitelist(
 
 function resolveToolPolicy(
   defaults: ContinuityDefaults,
-  globalTool: Partial<ToolContinuityPolicy> | undefined,
-  repoTool: Partial<ToolContinuityPolicy> | undefined,
+  globalTool: ToolPolicyOverrides | undefined,
+  repoTool: ToolPolicyOverrides | undefined,
 ): ToolContinuityPolicy {
   const categories = createDefaultCategoryMap(defaults.categories_enabled);
   applyCategoryOverrides(categories, globalTool?.categories);

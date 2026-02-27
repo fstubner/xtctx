@@ -58,12 +58,15 @@ export class FileConfigStore implements ConfigStore {
     try {
       const raw = await readFile(filePath, "utf-8");
       const parsed = parseYaml(raw) as Record<string, unknown>;
-      const prefs = parsed.toolPreferences;
+      const tools = parsed.tools;
 
-      if (prefs && typeof prefs === "object" && !Array.isArray(prefs)) {
-        const toolPrefs = (prefs as Record<string, unknown>)[tool];
-        if (toolPrefs && typeof toolPrefs === "object" && !Array.isArray(toolPrefs)) {
-          return toolPrefs as Record<string, unknown>;
+      if (tools && typeof tools === "object" && !Array.isArray(tools)) {
+        const toolConfig = (tools as Record<string, unknown>)[tool];
+        if (toolConfig && typeof toolConfig === "object" && !Array.isArray(toolConfig)) {
+          const preferences = (toolConfig as Record<string, unknown>).preferences;
+          if (preferences && typeof preferences === "object" && !Array.isArray(preferences)) {
+            return preferences as Record<string, unknown>;
+          }
         }
       }
     } catch {
