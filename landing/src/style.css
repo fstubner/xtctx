@@ -65,10 +65,10 @@ pre {
 }
 
 .landing-shell {
-  width: min(1240px, calc(100% - 2.4rem));
-  margin: 1.4rem auto 2.8rem;
+  width: min(1240px, calc(100% - 3.4rem));
+  margin: 1.75rem auto 3.6rem;
   display: grid;
-  gap: 1.1rem;
+  gap: 1.4rem;
 }
 
 .shell-panel {
@@ -80,12 +80,12 @@ pre {
 
 .site-nav {
   position: sticky;
-  top: 0.65rem;
+  top: 0.8rem;
   z-index: 10;
-  padding: 0.8rem 1rem;
+  padding: 1rem 1.25rem;
   display: grid;
   grid-template-columns: auto 1fr auto;
-  gap: 0.7rem;
+  gap: 1rem;
   align-items: center;
 }
 
@@ -119,7 +119,7 @@ pre {
 .site-nav nav a {
   border: 1px solid transparent;
   border-radius: 10px;
-  padding: 0.42rem 0.72rem;
+  padding: 0.5rem 0.85rem;
   color: var(--land-text-muted);
   font-weight: 600;
   font-size: 0.92rem;
@@ -139,16 +139,16 @@ pre {
 }
 
 .hero {
-  padding: 1.2rem;
+  padding: 1.7rem;
   display: grid;
   grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
-  gap: 0.95rem;
+  gap: 1.25rem;
 }
 
 .hero-copy {
   display: grid;
   align-content: start;
-  gap: 0.75rem;
+  gap: 1rem;
 }
 
 .hero-copy h1 {
@@ -163,12 +163,14 @@ pre {
 .hero-copy p {
   margin: 0;
   color: var(--land-text-muted);
-  max-width: 62ch;
+  max-width: 60ch;
+  line-height: 1.68;
 }
 
 .hero-note {
   color: var(--land-text-dim);
   font-size: 0.93rem;
+  line-height: 1.6;
 }
 
 .hero-actions {
@@ -179,7 +181,7 @@ pre {
 
 .hero-proof {
   display: grid;
-  gap: 0.7rem;
+  gap: 0.95rem;
 }
 
 .proof-card {
@@ -189,19 +191,19 @@ pre {
 }
 
 .proof-card .p-card-body {
-  padding: 0.92rem;
+  padding: 1.15rem;
 }
 
 .proof-card pre {
   margin: 0;
-  padding: 0.8rem;
+  padding: 1rem;
   border-radius: 10px;
   border: 1px solid var(--land-border);
   background: color-mix(in srgb, var(--land-panel), #000 15%);
   color: var(--land-text);
   overflow: auto;
   font-size: 0.79rem;
-  line-height: 1.45;
+  line-height: 1.55;
 }
 
 .preview-card img {
@@ -212,14 +214,14 @@ pre {
 }
 
 .section-block {
-  padding: 1.15rem;
+  padding: 1.5rem;
   display: grid;
-  gap: 0.9rem;
+  gap: 1.25rem;
 }
 
 .section-head {
   display: grid;
-  gap: 0.35rem;
+  gap: 0.48rem;
 }
 
 .section-head p,
@@ -234,10 +236,10 @@ pre {
 
 .section-head h2 {
   margin: 0;
-  max-width: 22ch;
+  max-width: 24ch;
   font-family: "Space Grotesk", var(--xt-font-heading);
   font-size: clamp(1.65rem, 3vw, 2.4rem);
-  line-height: 1.07;
+  line-height: 1.13;
   letter-spacing: -0.03em;
 }
 
@@ -245,7 +247,7 @@ pre {
 .proof-grid,
 .quick-grid {
   display: grid;
-  gap: 0.75rem;
+  gap: 1rem;
   grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
 }
 
@@ -257,19 +259,26 @@ pre {
   background: var(--land-panel-strong);
 }
 
+.mechanism-card .p-card-body,
+.proof-feature-card .p-card-body,
+.quick-card .p-card-body {
+  padding: 1.15rem;
+}
+
 .mechanism-card p,
 .proof-feature-card p {
   margin: 0;
   color: var(--land-text-muted);
+  line-height: 1.65;
 }
 
 .compat-row {
   border: 1px solid var(--land-border);
   border-radius: var(--land-radius-sm);
   background: color-mix(in srgb, var(--land-panel), #000 8%);
-  padding: 0.9rem;
+  padding: 1.15rem;
   display: grid;
-  gap: 0.8rem;
+  gap: 1rem;
   grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
 }
 
@@ -282,13 +291,14 @@ pre {
   margin: 0;
   padding-left: 1.1rem;
   display: grid;
-  gap: 0.42rem;
+  gap: 0.58rem;
   color: var(--land-text-muted);
+  line-height: 1.62;
 }
 
 .quick-card pre {
-  margin: 0.72rem 0 0;
-  padding: 0.78rem;
+  margin: 1rem 0 0;
+  padding: 0.95rem;
   border: 1px solid var(--land-border);
   border-radius: 10px;
   background: color-mix(in srgb, var(--land-panel), #000 16%);
@@ -349,7 +359,7 @@ a:focus-visible {
 
 @media (max-width: 1060px) {
   .landing-shell {
-    width: calc(100% - 1.7rem);
+    width: calc(100% - 2.1rem);
   }
 
   .site-nav {
@@ -371,13 +381,13 @@ a:focus-visible {
 
 @media (max-width: 760px) {
   .landing-shell {
-    width: calc(100% - 1.05rem);
-    margin-top: 0.75rem;
+    width: calc(100% - 1.15rem);
+    margin-top: 0.9rem;
   }
 
   .hero,
   .section-block {
-    padding: 0.95rem;
+    padding: 1.1rem;
   }
 
   .hero-copy h1 {
