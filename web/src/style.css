@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Rajdhani:wght@500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Rajdhani:wght@600;700&display=swap");
 
 @tailwind base;
 @tailwind components;
@@ -7,28 +7,30 @@
 @layer base {
   :root {
     color-scheme: dark;
-    --bg: 224 18% 9%;
-    --surface: 223 17% 13%;
-    --surface-2: 223 16% 16%;
-    --border: 219 18% 29%;
-    --text: 214 31% 92%;
-    --muted: 216 16% 67%;
-    --accent: 191 63% 58%;
-    --warn: 35 64% 62%;
-    --danger: 355 58% 64%;
+    --bg: 221 24% 10%;
+    --surface: 222 22% 14%;
+    --surface-2: 223 20% 17%;
+    --surface-3: 224 18% 21%;
+    --border: 220 22% 31%;
+    --text: 214 32% 93%;
+    --muted: 216 14% 69%;
+    --accent: 193 68% 52%;
+    --warn: 35 72% 62%;
+    --danger: 354 70% 64%;
   }
 
   :root.light-mode {
     color-scheme: light;
-    --bg: 210 35% 95%;
+    --bg: 210 24% 95%;
     --surface: 0 0% 100%;
-    --surface-2: 210 30% 97%;
-    --border: 215 26% 82%;
-    --text: 222 28% 20%;
-    --muted: 218 14% 44%;
-    --accent: 196 66% 36%;
+    --surface-2: 210 25% 97%;
+    --surface-3: 210 24% 94%;
+    --border: 216 24% 81%;
+    --text: 222 28% 21%;
+    --muted: 218 12% 43%;
+    --accent: 196 66% 38%;
     --warn: 34 65% 42%;
-    --danger: 355 55% 42%;
+    --danger: 356 54% 42%;
   }
 
   * {
@@ -45,10 +47,8 @@
     @apply m-0 bg-bg text-text antialiased;
     font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
     background-image:
-      linear-gradient(hsl(var(--border) / 0.18) 1px, transparent 1px),
-      linear-gradient(90deg, hsl(var(--border) / 0.18) 1px, transparent 1px),
-      linear-gradient(180deg, hsl(var(--bg)), color-mix(in srgb, hsl(var(--bg)), #000 6%));
-    background-size: 24px 24px, 24px 24px, auto;
+      radial-gradient(circle at 0% 0%, hsl(var(--accent) / 0.08), transparent 42%),
+      linear-gradient(180deg, hsl(var(--bg)), color-mix(in srgb, hsl(var(--bg)), black 10%));
   }
 
   code,
@@ -59,25 +59,20 @@
 
 @layer components {
   .xt-shell {
-    @apply mx-auto my-4 grid w-[min(1420px,calc(100%-1.5rem))] gap-4 lg:grid-cols-[296px_minmax(0,1fr)];
+    @apply mx-auto grid w-[min(1500px,calc(100%-2rem))] gap-5 py-5 lg:grid-cols-[260px_minmax(0,1fr)];
   }
 
   .xt-panel {
-    @apply rounded-lg border bg-surface shadow-soft;
+    @apply rounded-xl border bg-surface shadow-soft;
   }
 
   .xt-card {
-    @apply rounded-lg border bg-surface-2 p-4;
-  }
-
-  .xt-headline {
-    font-family: "Rajdhani", "IBM Plex Sans", sans-serif;
-    @apply text-3xl font-semibold uppercase tracking-[0.01em] md:text-4xl;
+    @apply rounded-xl border bg-surface-2 p-5;
   }
 
   .xt-title {
     font-family: "Rajdhani", "IBM Plex Sans", sans-serif;
-    @apply text-3xl font-semibold tracking-[0.01em];
+    @apply text-[2.15rem] font-bold leading-tight tracking-[0.01em];
   }
 
   .xt-section-title {
@@ -110,18 +105,18 @@
 
   .xt-chip-danger {
     @apply xt-chip border-transparent;
-    background: color-mix(in srgb, hsl(var(--danger)), hsl(var(--surface)) 82%);
+    background: color-mix(in srgb, hsl(var(--danger)), hsl(var(--surface)) 80%);
   }
 
   .xt-btn {
-    @apply inline-flex min-h-9 items-center justify-center gap-2 rounded-md border px-3 text-sm font-semibold transition;
+    @apply inline-flex min-h-10 items-center justify-center gap-2 rounded-md border px-3.5 text-sm font-semibold transition;
     @apply border-transparent;
-    background: color-mix(in srgb, hsl(var(--accent)), hsl(var(--surface)) 72%);
+    background: color-mix(in srgb, hsl(var(--accent)), hsl(var(--surface)) 68%);
     color: hsl(var(--text));
   }
 
   .xt-btn:hover {
-    background: color-mix(in srgb, hsl(var(--accent)), hsl(var(--surface)) 66%);
+    background: color-mix(in srgb, hsl(var(--accent)), hsl(var(--surface)) 60%);
   }
 
   .xt-btn:disabled {
@@ -129,25 +124,25 @@
   }
 
   .xt-btn-ghost {
-    @apply inline-flex min-h-9 items-center justify-center rounded-md border bg-surface-2 px-3 text-sm font-semibold text-muted transition;
+    @apply inline-flex min-h-10 items-center justify-center rounded-md border bg-surface-2 px-3.5 text-sm font-semibold text-muted transition;
   }
 
   .xt-btn-ghost:hover {
     @apply text-text;
-    background: color-mix(in srgb, hsl(var(--surface-2)), #fff 4%);
+    background: color-mix(in srgb, hsl(var(--surface-2)), white 3%);
   }
 
   .xt-input,
   .xt-select,
   .xt-textarea {
-    @apply min-h-9 w-full rounded-md border bg-surface-2 px-3 text-sm text-text outline-none transition;
+    @apply min-h-10 w-full rounded-md border bg-surface-2 px-3 text-sm text-text outline-none transition;
   }
 
   .xt-input:focus,
   .xt-select:focus,
   .xt-textarea:focus {
     border-color: color-mix(in srgb, hsl(var(--accent)), hsl(var(--border)) 52%);
-    box-shadow: 0 0 0 2px color-mix(in srgb, hsl(var(--accent)), transparent 80%);
+    box-shadow: 0 0 0 2px color-mix(in srgb, hsl(var(--accent)), transparent 84%);
   }
 
   .xt-textarea {
@@ -155,7 +150,7 @@
   }
 
   .xt-nav-link {
-    @apply inline-flex min-h-9 w-full items-center rounded-md border bg-surface-2 px-3 text-sm font-semibold text-muted transition;
+    @apply inline-flex min-h-10 w-full items-center rounded-md border bg-surface-2 px-3.5 text-sm font-semibold text-muted transition;
   }
 
   .xt-nav-link:hover {
@@ -164,7 +159,7 @@
 
   .xt-nav-link-active {
     @apply border-transparent text-text;
-    background: color-mix(in srgb, hsl(var(--accent)), hsl(var(--surface)) 76%);
+    background: color-mix(in srgb, hsl(var(--accent)), hsl(var(--surface)) 74%);
   }
 
   .xt-kpi {
@@ -173,30 +168,30 @@
 
   .xt-kpi-value {
     font-family: "Rajdhani", "IBM Plex Sans", sans-serif;
-    @apply text-5xl font-semibold leading-none;
+    @apply text-[2.85rem] font-semibold leading-none;
   }
 
   .xt-kpi-label {
-    @apply mt-2 text-sm text-muted;
+    @apply mt-1.5 text-sm text-muted;
   }
 
   .xt-alert {
-    @apply rounded-md border px-3 py-2 text-sm;
+    @apply rounded-md border px-3 py-2.5 text-sm;
   }
 
   .xt-alert-danger {
     @apply xt-alert;
-    background: color-mix(in srgb, hsl(var(--danger)), hsl(var(--surface)) 86%);
+    background: color-mix(in srgb, hsl(var(--danger)), hsl(var(--surface)) 84%);
   }
 
   .xt-alert-warn {
     @apply xt-alert;
-    background: color-mix(in srgb, hsl(var(--warn)), hsl(var(--surface)) 88%);
+    background: color-mix(in srgb, hsl(var(--warn)), hsl(var(--surface)) 87%);
   }
 
   .xt-alert-ok {
     @apply xt-alert;
-    background: color-mix(in srgb, hsl(var(--accent)), hsl(var(--surface)) 87%);
+    background: color-mix(in srgb, hsl(var(--accent)), hsl(var(--surface)) 86%);
   }
 
   .xt-table {
@@ -213,53 +208,57 @@
   }
 
   .rt-sidebar {
-    @apply flex h-full min-h-[calc(100vh-2rem)] flex-col gap-4 p-4 lg:sticky lg:top-4;
+    @apply flex h-full min-h-[calc(100vh-2.5rem)] flex-col gap-4 p-4 lg:sticky lg:top-5;
   }
 
   .rt-brand-title {
     font-family: "Rajdhani", "IBM Plex Sans", sans-serif;
-    @apply text-3xl font-semibold tracking-[0.01em];
+    @apply text-[2.2rem] font-semibold leading-none tracking-[0.01em];
   }
 
   .rt-brand-subtitle {
-    @apply text-xs tracking-[0.06em] text-muted;
-  }
-
-  .rt-main {
-    @apply grid gap-4;
-  }
-
-  .rt-topbar {
-    @apply flex flex-col gap-4 p-4 md:flex-row md:items-center md:justify-between;
-  }
-
-  .rt-topbar-title {
-    font-family: "Rajdhani", "IBM Plex Sans", sans-serif;
-    @apply text-2xl font-semibold tracking-[0.01em];
-  }
-
-  .rt-content {
-    @apply p-5 md:p-6;
-  }
-
-  .rt-contextbar {
-    @apply grid gap-3 p-4 md:grid-cols-3;
+    @apply text-xs tracking-[0.08em] text-muted;
   }
 
   .rt-nav {
     @apply grid gap-2;
   }
 
+  .rt-main {
+    @apply grid gap-4;
+  }
+
+  .rt-header {
+    @apply flex flex-col gap-4 p-5 md:flex-row md:items-start md:justify-between;
+  }
+
+  .rt-topbar-title {
+    font-family: "Rajdhani", "IBM Plex Sans", sans-serif;
+    @apply text-[2.05rem] font-semibold leading-tight tracking-[0.01em];
+  }
+
   .rt-toolbar {
     @apply flex flex-wrap items-center gap-2;
   }
 
-  .rt-info-block {
-    @apply space-y-2 rounded-md border bg-surface-2 p-3;
+  .rt-session-strip {
+    @apply grid gap-3 p-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto];
   }
 
-  .rt-info-block code {
+  .rt-strip-item {
+    @apply rounded-lg border bg-surface-2 p-3;
+  }
+
+  .rt-strip-item code {
     @apply block overflow-hidden text-ellipsis whitespace-nowrap text-sm;
+  }
+
+  .rt-strip-actions {
+    @apply flex flex-wrap items-end gap-2;
+  }
+
+  .rt-content {
+    @apply p-6;
   }
 }
 

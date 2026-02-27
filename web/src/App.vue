@@ -15,6 +15,11 @@ interface StatusPill {
   tone: "neutral" | "ok" | "warn" | "danger";
 }
 
+interface SectionMeta {
+  title: string;
+  subtitle: string;
+}
+
 const navItems = [
   { label: "Dashboard", to: "/" },
   { label: "Tools", to: "/tools" },
@@ -24,6 +29,38 @@ const navItems = [
   { label: "Config", to: "/config" },
 ] as const;
 
+const defaultSection: SectionMeta = {
+  title: "Dashboard",
+  subtitle: "Check continuity posture, clear blockers, and start recall with one stable session flow.",
+};
+
+const sectionMeta: Record<string, SectionMeta> = {
+  "/": {
+    title: "Dashboard",
+    subtitle: "Check continuity posture, clear blockers, and start recall with one stable session flow.",
+  },
+  "/tools": {
+    title: "Tools",
+    subtitle: "Manage per-tool sync scope and category propagation, then reconcile drifted targets.",
+  },
+  "/search": {
+    title: "Search",
+    subtitle: "Retrieve relevant session context before editing so implementation starts with constraints in scope.",
+  },
+  "/knowledge": {
+    title: "Knowledge",
+    subtitle: "Load decisions, fixes, conventions, and FAQs that should shape this session.",
+  },
+  "/sources": {
+    title: "Sources",
+    subtitle: "Verify ingestion coverage and session indexing health across your assistant tools.",
+  },
+  "/config": {
+    title: "Config",
+    subtitle: "Inspect effective policy and rendered tool outputs managed by xtctx sync.",
+  },
+};
+
 const { isDark, toggleTheme } = useTheme();
 const router = useRouter();
 const route = useRoute();
@@ -32,6 +69,16 @@ const health = ref<HealthResponse | null>(null);
 const sourceStatus = ref<SourceStatusResponse | null>(null);
 const continuity = ref<ContinuityToolsStatusResponse | null>(null);
 const starter = "xtctx_search -> xtctx_project_knowledge";
+
+const activeSection = computed<SectionMeta>(() => {
+  return sectionMeta[route.path] ?? defaultSection;
+});
+
+const driftedCount = computed(() => {
+  const tools = continuity.value?.tools ?? [];
+  return tools.filter((tool) => tool.enabled && (tool.state === "drifted" || tool.state === "missing_target"))
+    .length;
+});
 
 const runtimePill = computed<StatusPill>(() => {
   if (!health.value) {
@@ -59,24 +106,17 @@ const syncPill = computed<StatusPill>(() => {
   const tools = continuity.value?.tools ?? [];
 
   if (tools.length === 0) {
-    return { label: "sync unavailable", tone: "neutral" };
+    return { label: "tool sync unavailable", tone: "neutral" };
   }
 
-  const driftedCount = tools.filter(
-    (tool) => tool.enabled && (tool.state === "drifted" || tool.state === "missing_target"),
-  ).length;
-
-  if (driftedCount > 0) {
-    return { label: `${driftedCount} tool warnings`, tone: "warn" };
+  if (driftedCount.value > 0) {
+    return { label: `${driftedCount.value} tool warnings`, tone: "warn" };
   }
 
   return { label: "tool sync aligned", tone: "ok" };
 });
 
 const projectRoot = computed(() => health.value?.projectRoot ?? "Project root unavailable");
-const activeSectionLabel = computed(
-  () => navItems.find((item) => item.to === route.path)?.label ?? "Workspace",
-);
 
 function pillClass(pill: StatusPill): string {
   if (pill.tone === "ok") {
@@ -143,9 +183,14 @@ onMounted(async () => {
         </RouterLink>
       </nav>
 
-      <section class="rt-info-block">
-        <p class="xt-eyebrow">Project root</p>
-        <code>{{ projectRoot }}</code>
+      <section class="xt-card space-y-3">
+        <p class="xt-eyebrow">Daily loop</p>
+        <ol class="space-y-1 text-sm leading-relaxed text-muted">
+          <li>1. Recall task context.</li>
+          <li>2. Load knowledge and FAQs.</li>
+          <li>3. Implement and verify.</li>
+          <li>4. Write back validated outcomes.</li>
+        </ol>
       </section>
 
       <div class="mt-auto space-y-2">
@@ -153,16 +198,15 @@ onMounted(async () => {
           <a class="xt-btn-ghost" href="/health" target="_blank" rel="noreferrer">Health</a>
           <a class="xt-btn-ghost" href="/api/sources" target="_blank" rel="noreferrer">Sources API</a>
         </div>
-        <button class="xt-btn w-full" type="button" @click="router.push('/search')">Start recall</button>
       </div>
     </aside>
 
     <section class="rt-main">
-      <header class="xt-panel rt-topbar">
+      <header class="xt-panel rt-header">
         <div class="space-y-1">
           <p class="xt-eyebrow">xtctx runtime</p>
-          <h2 class="rt-topbar-title">{{ activeSectionLabel }}</h2>
-          <p class="text-sm text-muted">Local app shell for cross-tool context operations.</p>
+          <h2 class="rt-topbar-title">{{ activeSection.title }}</h2>
+          <p class="text-sm text-muted">{{ activeSection.subtitle }}</p>
         </div>
 
         <div class="rt-toolbar">
@@ -175,21 +219,19 @@ onMounted(async () => {
         </div>
       </header>
 
-      <section class="xt-panel rt-contextbar">
-        <div class="rt-info-block">
+      <section class="xt-panel rt-session-strip">
+        <div class="rt-strip-item">
           <p class="xt-eyebrow">Project root</p>
           <code>{{ projectRoot }}</code>
         </div>
-        <div class="rt-info-block">
+        <div class="rt-strip-item">
           <p class="xt-eyebrow">Session opener</p>
           <code>{{ starter }}</code>
         </div>
-        <div class="rt-info-block">
-          <p class="xt-eyebrow">Quick actions</p>
-          <div class="rt-toolbar">
-            <button class="xt-btn-ghost" type="button" @click="router.push('/search')">Open search</button>
-            <button class="xt-btn-ghost" type="button" @click="router.push('/knowledge')">Open knowledge</button>
-          </div>
+        <div class="rt-strip-actions">
+          <button class="xt-btn-ghost" type="button" @click="router.push('/search')">Open search</button>
+          <button class="xt-btn-ghost" type="button" @click="router.push('/knowledge')">Open knowledge</button>
+          <button class="xt-btn" type="button" @click="router.push('/search')">Start recall</button>
         </div>
       </section>
 

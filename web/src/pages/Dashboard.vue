@@ -89,52 +89,61 @@ onMounted(async () => {
   <section class="space-y-6">
     <header class="space-y-3">
       <p class="xt-eyebrow">Continuity posture</p>
-      <h2 class="xt-title">Dashboard</h2>
+      <h2 class="xt-title">Session readiness</h2>
       <p class="max-w-3xl text-base leading-relaxed text-muted">
-        Verify readiness before implementation so every session follows the same continuity loop.
+        Use this view as an operator checklist: confirm posture, recover context, then write back outcomes.
       </p>
     </header>
 
     <div v-if="error" class="xt-alert-danger">{{ error }}</div>
 
-    <div class="xt-alert" :class="readinessClass">{{ readinessText }}</div>
-
-    <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-      <article class="xt-kpi">
-        <p class="xt-kpi-value">{{ connectedSources }}</p>
-        <p class="xt-kpi-label">Connected sources</p>
-      </article>
-      <article class="xt-kpi">
-        <p class="xt-kpi-value">{{ indexedRecords }}</p>
-        <p class="xt-kpi-label">Indexed records</p>
-      </article>
-      <article class="xt-kpi">
-        <p class="xt-kpi-value">{{ inSyncTools }}</p>
-        <p class="xt-kpi-label">In-sync tools</p>
-      </article>
-      <article class="xt-kpi">
-        <p class="xt-kpi-value">{{ sessionsCount }}</p>
-        <p class="xt-kpi-label">Recent sessions</p>
-      </article>
-    </div>
-
     <section class="xt-card space-y-4">
-      <h3 class="xt-section-title text-xl">Tool sync strip</h3>
-      <div class="flex flex-wrap gap-2">
-        <span v-for="tool in continuity?.tools ?? []" :key="tool.tool" class="xt-chip-neutral">
-          {{ tool.tool }}: {{ tool.state.replace(/_/g, " ") }}
-        </span>
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <h3 class="xt-section-title text-xl">Readiness summary</h3>
+        <RouterLink v-if="warningCount > 0" to="/tools" custom v-slot="{ navigate }">
+          <button class="xt-btn-ghost" type="button" @click="navigate">Review tool warnings</button>
+        </RouterLink>
+      </div>
+
+      <div class="xt-alert" :class="readinessClass">{{ readinessText }}</div>
+
+      <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <article class="xt-kpi">
+          <p class="xt-kpi-value">{{ connectedSources }}</p>
+          <p class="xt-kpi-label">Connected sources</p>
+        </article>
+        <article class="xt-kpi">
+          <p class="xt-kpi-value">{{ indexedRecords }}</p>
+          <p class="xt-kpi-label">Indexed records</p>
+        </article>
+        <article class="xt-kpi">
+          <p class="xt-kpi-value">{{ inSyncTools }}</p>
+          <p class="xt-kpi-label">In-sync tools</p>
+        </article>
+        <article class="xt-kpi">
+          <p class="xt-kpi-value">{{ sessionsCount }}</p>
+          <p class="xt-kpi-label">Recent sessions</p>
+        </article>
+      </div>
+
+      <div class="space-y-2">
+        <p class="xt-eyebrow">Tool sync strip</p>
+        <p v-if="!continuity?.tools.length" class="text-sm text-muted">Tool sync status unavailable.</p>
+        <div v-else class="flex flex-wrap gap-2">
+          <span v-for="tool in continuity?.tools ?? []" :key="tool.tool" class="xt-chip-neutral">
+            {{ tool.tool }}: {{ tool.state.replace(/_/g, " ") }}
+          </span>
+        </div>
       </div>
     </section>
 
     <div class="grid gap-4 xl:grid-cols-2">
       <section class="xt-card space-y-4">
-        <h3 class="xt-section-title text-xl">Session starter</h3>
+        <h3 class="xt-section-title text-xl">Start this session</h3>
         <ol class="list-decimal space-y-2 pl-5 text-base leading-relaxed">
-          <li>Run <code>xtctx_search</code> for the active task or failure signature.</li>
-          <li>Run <code>xtctx_project_knowledge</code> with <code>type: all</code>.</li>
+          <li>Search the active task or failure signature.</li>
+          <li>Load project knowledge with <code>type: all</code>.</li>
           <li>Implement with recovered constraints in scope.</li>
-          <li>Write back validated outcomes for the next handoff.</li>
         </ol>
 
         <div class="flex flex-wrap gap-2">
@@ -148,10 +157,13 @@ onMounted(async () => {
       </section>
 
       <section class="xt-card space-y-4">
-        <h3 class="xt-section-title text-xl">Writeback targets</h3>
-        <p class="text-base leading-relaxed text-muted">
-          Capture verified outcomes so the next assistant session starts with decisions, fixes, and FAQs in scope.
-        </p>
+        <h3 class="xt-section-title text-xl">Writeback checklist</h3>
+        <ul class="list-disc space-y-2 pl-5 text-base leading-relaxed text-muted">
+          <li>Persist a decision for design or implementation choices.</li>
+          <li>Capture fix patterns using error solutions when failures occur.</li>
+          <li>Store reusable Q&A as FAQ records for future sessions.</li>
+        </ul>
+
         <div class="flex flex-wrap gap-2">
           <span class="xt-chip-ok">xtctx_save_decision</span>
           <span class="xt-chip-neutral">xtctx_save_error_solution</span>
@@ -162,6 +174,11 @@ onMounted(async () => {
 
     <section v-if="!loading && (warnings?.warnings.length ?? 0) > 0" class="xt-card space-y-4">
       <h3 class="xt-section-title text-xl">Drift and warnings</h3>
+      <div class="flex flex-wrap gap-2">
+        <RouterLink to="/tools" custom v-slot="{ navigate }">
+          <button class="xt-btn-ghost" type="button" @click="navigate">Open tools page</button>
+        </RouterLink>
+      </div>
       <ul class="list-disc space-y-2 pl-5 text-base leading-relaxed">
         <li v-for="entry in warnings?.warnings ?? []" :key="`${entry.tool}-${entry.warning}`">
           <strong>{{ entry.tool }}</strong>: {{ entry.warning }}
