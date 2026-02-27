@@ -101,6 +101,21 @@ export interface SyncToolConfigResult {
   tools: SyncResult[];
 }
 
+export interface ToolRenderPreview {
+  tool: string;
+  scope: ContinuityScope;
+  enabled: boolean;
+  categories: Record<ContinuityCategory, boolean>;
+  rendered_content: string;
+  targets: Array<{
+    path: string;
+    exists: boolean;
+    drifted: boolean;
+    expected_managed_block: string;
+    current_managed_block: string | null;
+  }>;
+}
+
 const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
   claude: {
     projectPath: "CLAUDE.md",
@@ -196,6 +211,43 @@ export async function getToolContinuityStatuses(
   }
 
   return statuses;
+}
+
+export async function previewToolContinuity(
+  tool: string,
+  projectPath?: string,
+): Promise<ToolRenderPreview> {
+  const context = await loadSyncContext(projectPath);
+  const policy = resolveToolFromPolicy(context.policy, tool);
+  const targets = resolveToolTargets(context.projectRoot, tool, policy.scope);
+  const categories = categoriesFromPolicy(policy);
+  const content = renderToolContent(tool, policy, context.inventory, context.policy, context.projectRoot);
+
+  const targetPreviews = await Promise.all(targets.map(async (target) => {
+    const existing = await readUtf8IfExists(target.path);
+    const expectedManaged = renderManagedSection(content, target.markers);
+    const currentManaged = existing ? extractManagedSection(existing, target.markers) : null;
+    const drifted = currentManaged
+      ? normalizeNewlines(currentManaged).trim() !== normalizeNewlines(expectedManaged).trim()
+      : false;
+
+    return {
+      path: target.path,
+      exists: Boolean(existing),
+      drifted,
+      expected_managed_block: expectedManaged,
+      current_managed_block: currentManaged,
+    };
+  }));
+
+  return {
+    tool,
+    scope: policy.scope,
+    enabled: policy.enabled,
+    categories,
+    rendered_content: content,
+    targets: targetPreviews,
+  };
 }
 
 async function loadSyncContext(projectPath?: string): Promise<SyncContext> {

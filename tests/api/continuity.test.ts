@@ -68,6 +68,15 @@ describe("Continuity API routes", () => {
     }) as { tool: string; state: string };
     expect(syncCodex.tool).toBe("codex");
 
+    const renderCodex = await fetchJson(`${baseUrl}/api/continuity/render/codex`) as {
+      tool: string;
+      rendered_content: string;
+      targets: Array<{ path: string; expected_managed_block: string }>;
+    };
+    expect(renderCodex.tool).toBe("codex");
+    expect(renderCodex.rendered_content).toContain("xtctx Continuity Policy");
+    expect(renderCodex.targets.length).toBeGreaterThan(0);
+
     const updateCodex = await fetchJson(`${baseUrl}/api/continuity/tools/codex`, {
       method: "PUT",
       headers: { "content-type": "application/json" },

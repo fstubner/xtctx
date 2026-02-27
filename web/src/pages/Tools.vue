@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from "vue";
 import Button from "primevue/button";
 import Card from "primevue/card";
 import Checkbox from "primevue/checkbox";
+import Dialog from "primevue/dialog";
 import Message from "primevue/message";
 import SelectButton from "primevue/selectbutton";
 import Tag from "primevue/tag";
@@ -13,6 +14,7 @@ import type {
   ContinuityScope,
   ContinuityToolsStatusResponse,
   EffectivePolicyResponse,
+  ToolRenderPreviewResponse,
   ToolContinuityStatus,
 } from "../types";
 
@@ -31,6 +33,10 @@ const tools = ref<ToolContinuityStatus[]>([]);
 const editor = reactive<Record<string, ToolEditorState>>({});
 const pendingSave = reactive<Record<string, boolean>>({});
 const pendingSync = reactive<Record<string, boolean>>({});
+const previewVisible = ref(false);
+const previewLoading = ref(false);
+const previewMode = ref<"render" | "diff">("render");
+const preview = ref<ToolRenderPreviewResponse | null>(null);
 
 const scopeOptions: Array<{ label: string; value: ContinuityScope }> = [
   { label: "Project only", value: "project" },
@@ -170,6 +176,27 @@ async function saveTool(tool: string): Promise<void> {
     });
   } finally {
     pendingSave[tool] = false;
+  }
+}
+
+async function openPreview(tool: string, mode: "render" | "diff"): Promise<void> {
+  try {
+    previewMode.value = mode;
+    previewVisible.value = true;
+    previewLoading.value = true;
+    preview.value = await apiGet<ToolRenderPreviewResponse>(
+      `/api/continuity/render/${encodeURIComponent(tool)}`,
+    );
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err);
+    toast.add({
+      severity: "error",
+      summary: "Preview failed",
+      detail: error.value,
+      life: 3200,
+    });
+  } finally {
+    previewLoading.value = false;
   }
 }
 
@@ -369,6 +396,18 @@ function isContinuityCategory(value: string): value is ContinuityCategory {
 
             <div class="tool-actions">
               <Button
+                label="View rendered output"
+                icon="pi pi-file"
+                text
+                @click="openPreview(toolStatus.tool, 'render')"
+              />
+              <Button
+                label="View managed block diff"
+                icon="pi pi-code"
+                text
+                @click="openPreview(toolStatus.tool, 'diff')"
+              />
+              <Button
                 label="Save policy"
                 icon="pi pi-save"
                 outlined
@@ -386,5 +425,47 @@ function isContinuityCategory(value: string): value is ContinuityCategory {
         </template>
       </Card>
     </div>
+
+    <Dialog
+      v-model:visible="previewVisible"
+      modal
+      :header="preview ? `${preview.tool} preview` : 'Preview'"
+      :style="{ width: 'min(1080px, 96vw)' }"
+    >
+      <div v-if="previewLoading" class="helper-copy">Loading preview…</div>
+      <div v-else-if="preview" class="preview-content">
+        <Card class="surface-card">
+          <template #title>Rendered output</template>
+          <template #content>
+            <pre class="code-block">{{ preview.rendered_content }}</pre>
+          </template>
+        </Card>
+
+        <Card class="surface-card" v-if="previewMode === 'diff'">
+          <template #title>Managed block diff</template>
+          <template #content>
+            <div class="preview-target-grid">
+              <article
+                v-for="target in preview.targets"
+                :key="target.path"
+                class="preview-target"
+              >
+                <div class="preview-target-head">
+                  <code>{{ target.path }}</code>
+                  <Tag
+                    :severity="target.drifted ? 'warn' : 'success'"
+                    :value="target.drifted ? 'drifted' : 'aligned'"
+                  />
+                </div>
+                <p class="tool-field-label">Current managed block</p>
+                <pre class="code-block">{{ target.current_managed_block ?? "(none)" }}</pre>
+                <p class="tool-field-label">Expected managed block</p>
+                <pre class="code-block">{{ target.expected_managed_block }}</pre>
+              </article>
+            </div>
+          </template>
+        </Card>
+      </div>
+    </Dialog>
   </section>
 </template>

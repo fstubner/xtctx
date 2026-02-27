@@ -144,6 +144,21 @@ export interface ContinuityWarningsResponse {
   }>;
 }
 
+export interface ToolRenderPreviewResponse {
+  tool: string;
+  scope: ContinuityScope;
+  enabled: boolean;
+  categories: Record<ContinuityCategory, boolean>;
+  rendered_content: string;
+  targets: Array<{
+    path: string;
+    exists: boolean;
+    drifted: boolean;
+    expected_managed_block: string;
+    current_managed_block: string | null;
+  }>;
+}
+
 export interface ConfigListResponse {
   type: string;
   count: number;

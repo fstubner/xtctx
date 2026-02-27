@@ -10,6 +10,7 @@ import {
 } from "../../config/policy.js";
 import {
   getToolContinuityStatuses,
+  previewToolContinuity,
   syncToolConfigByName,
   syncToolConfigs,
 } from "../../config/sync.js";
@@ -58,6 +59,21 @@ export function createContinuityRouter(deps: ContinuityRouteDependencies): Route
 
       const result = await syncToolConfigByName(tool, deps.projectRoot);
       res.json(result);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/render/:tool", async (req, res, next) => {
+    try {
+      const tool = String(req.params.tool ?? "").trim();
+      if (!tool) {
+        res.status(400).json({ error: "tool is required" });
+        return;
+      }
+
+      const preview = await previewToolContinuity(tool, deps.projectRoot);
+      res.json(preview);
     } catch (error) {
       next(error);
     }
