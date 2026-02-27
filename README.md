@@ -1,158 +1,169 @@
 # xtctx
 
-[![CI](https://github.com/fstubner/xtctx/actions/workflows/ci.yml/badge.svg)](https://github.com/fstubner/xtctx/actions/workflows/ci.yml)
-[![Release Please](https://github.com/fstubner/xtctx/actions/workflows/release-please.yml/badge.svg)](https://github.com/fstubner/xtctx/actions/workflows/release-please.yml)
-[![Latest Release](https://img.shields.io/github/v/release/fstubner/xtctx?sort=semver)](https://github.com/fstubner/xtctx/releases)
+[![CI](https://github.com/fstubner/xtctx/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/fstubner/xtctx/actions/workflows/ci.yml)
+[![Landing Deploy](https://github.com/fstubner/xtctx/actions/workflows/deploy-landing.yml/badge.svg?branch=main)](https://github.com/fstubner/xtctx/actions/workflows/deploy-landing.yml)
+[![Release Please](https://github.com/fstubner/xtctx/actions/workflows/release-please.yml/badge.svg?branch=main)](https://github.com/fstubner/xtctx/actions/workflows/release-please.yml)
+[![npm Publish](https://github.com/fstubner/xtctx/actions/workflows/publish.yml/badge.svg)](https://github.com/fstubner/xtctx/actions/workflows/publish.yml)
+[![Latest Release](https://img.shields.io/github/v/release/fstubner/xtctx?display_name=tag&sort=semver)](https://github.com/fstubner/xtctx/releases)
 [![License](https://img.shields.io/github/license/fstubner/xtctx)](LICENSE)
 [![Node >=20](https://img.shields.io/badge/node-%3E%3D20-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 
-Cross-tool context for AI coding agents.
+xtctx is a **cross-tool continuity orchestrator** for AI coding workflows.
 
-xtctx is a local-first context layer that ingests session history and project knowledge, then exposes it consistently through:
+It keeps project context portable across assistants by:
 
-- MCP tools (for agents)
-- HTTP API (`/api/*`)
-- bundled web UI (`/`)
+1. ingesting local conversation history and project memory;
+2. indexing it for recall (`xtctx_search`, `xtctx_project_knowledge`);
+3. syncing shared tool behavior (skills, commands, agents, MCP/slash config, whitelist policy);
+4. letting you resume in any tool without re-briefing.
 
-## Features
+## Core Workflow
 
-- Multi-tool ingestion support (Claude Code, Codex CLI, Cursor, Copilot, Gemini).
-- Hybrid search (semantic + keyword fusion) across indexed context.
-- Knowledge repository with auto-tagging and dedup/supersession behavior.
-- Config sync for tool-native files (`AGENTS.md`, `CLAUDE.md`, `.cursorrules`, Copilot instructions).
-- Single `xtctx serve` runtime with API + web UI + MCP.
-- Secure-by-default local API behavior (localhost bind, CORS filtering, optional token auth, rate limiting).
+```text
+Init -> Sync -> Serve -> Recall -> Writeback
+```
+
+1. `xtctx init` scaffolds `.xtctx/` (config, policy, memory folders).
+2. `xtctx sync` renders managed continuity blocks into tool-native targets.
+3. `xtctx serve` runs MCP + API + runtime web UI, and auto-reconciles sync drift.
+4. At session start, call recall tools first.
+5. After validated implementation, write outcomes back for the next handoff.
 
 ## Quick Start
-
-Install and build:
 
 ```bash
 npm ci
 npm --prefix web ci
+npm --prefix landing ci
 npm run build
-```
 
-Initialize in your project:
-
-```bash
 npx xtctx init
+npx xtctx sync
+npx xtctx serve
 ```
 
-Ingest data:
+Open:
+
+- Runtime UI: `http://127.0.0.1:3232/`
+- Health: `http://127.0.0.1:3232/health`
+- API: `http://127.0.0.1:3232/api/*`
+
+Optional full re-index:
 
 ```bash
 npx xtctx ingest --full
 ```
 
-Run services:
+## Practical Cross-Tool Session Pattern
 
-```bash
-npx xtctx serve
+Use this pattern in Claude/Codex/Cursor/Copilot/Gemini sessions:
+
+```text
+Before coding:
+1) xtctx_search(<task/failure signature>)
+2) xtctx_project_knowledge(type: "all")
+
+After coding:
+3) xtctx_save_decision / xtctx_save_error_solution / xtctx_save_insight / xtctx_save_faq
 ```
 
-Then open:
+This is the handoff loop that keeps context continuity stable across assistant boundaries.
 
-- Web UI: `http://127.0.0.1:3232/`
-- Health: `http://127.0.0.1:3232/health`
-- API: `http://127.0.0.1:3232/api/*`
+## Continuity Policy Model
 
-## CLI Commands
+Repo policy lives in:
 
-- `xtctx init [path]`: scaffold `.xtctx/` config and knowledge structure.
-- `xtctx serve [--mcp-only]`: start runtime services.
-- `xtctx ingest [--full]`: run ingestion on demand.
-- `xtctx sync`: generate/update managed tool-native config sections.
-
-## Configuration (File-First)
-
-xtctx is configured from `.xtctx/config.yaml`. No environment variables are required for normal usage.
-
-Default config:
-
-```yaml
-version: "1"
-project:
-  name: ""
-  root: "."
-ingestion:
-  scrapers: []
-  watchPaths: []
-  pollIntervalMs: 30000
-  excludePatterns:
-    - node_modules/**
-    - dist/**
-compaction:
-  strategy: rule-based
-  sessionBoundaryMinutes: 30
-search:
-  defaultMode: hybrid
-  defaultDepth: summary
-  defaultLimit: 10
-domainTags: {}
-web:
-  port: 3232
-api:
-  security:
-    token: ""
-    allowedOrigins: []
-    allowLocalhostOrigins: true
-    rateLimitWindowMs: 60000
-    rateLimitMax: 120
+```text
+.xtctx/tool-config/shared.yaml
 ```
 
-`api.security.token` is optional:
+Optional global baseline:
 
-- `""` (empty): no API auth required.
-- non-empty token: `/api/*` requires `Authorization: Bearer <token>` (or `X-Xtctx-Api-Token`).
-- `/health` remains unauthenticated.
+```text
+~/.xtctx/global-policy.yaml
+```
 
-Environment variables are optional explicit overrides (useful for temporary local sessions/CI):
+Merge order:
+
+1. global baseline
+2. repo policy
+3. runtime overrides (future)
+
+Per-tool controls:
+
+- scope: `project` | `global` | `hybrid`
+- categories: Core 7
+  - `context_feed`
+  - `skills`
+  - `commands`
+  - `agents`
+  - `mcp_servers`
+  - `slash_commands`
+  - `whitelist_policy`
+
+## Sync + Status Surfaces
+
+### CLI
+
+- `xtctx sync`: manual reconciliation
+- `xtctx serve`: startup sync + periodic drift reconciliation
+
+### API
+
+- `GET /api/continuity/effective-policy`
+- `GET /api/continuity/tools-status`
+- `POST /api/continuity/sync`
+- `POST /api/continuity/sync/:tool`
+- `PUT /api/continuity/tools/:tool`
+- `GET /api/continuity/warnings`
+
+### MCP tools
+
+- `xtctx_continuity_status`
+- `xtctx_effective_policy`
+- Existing recall/writeback/config tools remain available.
+
+## Knowledge Types
+
+xtctx stores structured records in `.xtctx/knowledge/*`:
+
+- `decision`
+- `error_solution`
+- `insight`
+- `convention`
+- `gotcha`
+- `faq`
+
+## Config Philosophy
+
+- Primary source: `.xtctx/config.yaml` and `.xtctx/tool-config/shared.yaml`
+- Environment variables are override-only for explicit temporary use
+
+Security overrides:
 
 - `XTCTX_API_TOKEN`
-- `XTCTX_ALLOWED_ORIGINS` (comma-separated)
-- `XTCTX_ALLOW_LOCALHOST_ORIGINS` (`true`/`false`)
+- `XTCTX_ALLOWED_ORIGINS`
+- `XTCTX_ALLOW_LOCALHOST_ORIGINS`
 - `XTCTX_RATE_LIMIT_WINDOW_MS`
 - `XTCTX_RATE_LIMIT_MAX`
 
-Example (file-based token):
+## Project Layout
 
-```yaml
-api:
-  security:
-    token: "change-me-local-token"
-```
+- `src/`: CLI, API, MCP, ingestion, storage, sync engine
+- `web/`: runtime operations console served by `xtctx serve`
+- `landing/`: public site deployed via GitHub Pages
+- `tests/`: unit/integration/security suites
 
-Then call:
-
-```bash
-curl -H "Authorization: Bearer change-me-local-token" http://127.0.0.1:3232/api/sources/status
-```
-
-## Security Defaults
-
-- API binds to `127.0.0.1`.
-- `/api/*` is rate limited.
-- CORS is restricted to localhost/same-origin patterns by default.
-- API token auth is available when `api.security.token` is set.
-
-## Development
-
-Run full verification:
+## Development + Release
 
 ```bash
 npm run verify:release
 ```
 
-Run packaging smoke check:
+Release automation:
 
-```bash
-npm pack --dry-run
-```
+- Conventional commits -> Release Please release PR
+- Merge release PR on `main` -> GitHub Release
+- Published GitHub release -> npm publish (OIDC trusted publishing)
 
-## Maintainers
-
-- Conventional commits drive release notes/versioning via Release Please.
-- Merge release PRs on `main` to create GitHub releases.
-- GitHub release publish triggers npm publish with OIDC trusted publishing.
-- For contribution expectations, see `CONTRIBUTING.md`.
+See `CONTRIBUTING.md` and `SECURITY.md` for contributor and security policy details.
