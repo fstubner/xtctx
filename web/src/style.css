@@ -1,5 +1,3 @@
-@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Rajdhani:wght@600;700&display=swap");
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -45,13 +43,13 @@
 
   body {
     @apply m-0 bg-bg text-text antialiased;
-    font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+    font-family: "Segoe UI Variable Text", "Segoe UI", "Noto Sans", "Liberation Sans", sans-serif;
     background-image: linear-gradient(180deg, hsl(var(--bg)), color-mix(in srgb, hsl(var(--bg)), black 6%));
   }
 
   code,
   pre {
-    font-family: "IBM Plex Mono", Consolas, monospace;
+    font-family: "Cascadia Mono", "Cascadia Code", Consolas, "Courier New", monospace;
   }
 }
 
@@ -69,18 +67,18 @@
   }
 
   .xt-title {
-    font-family: "Rajdhani", "IBM Plex Sans", sans-serif;
+    font-family: "Bahnschrift", "Segoe UI", "Noto Sans", sans-serif;
     @apply text-[2.15rem] font-bold leading-tight tracking-[0.01em];
   }
 
   .xt-section-title {
-    font-family: "Rajdhani", "IBM Plex Sans", sans-serif;
+    font-family: "Bahnschrift", "Segoe UI", "Noto Sans", sans-serif;
     @apply text-2xl font-semibold tracking-[0.01em];
   }
 
   .xt-eyebrow {
     @apply text-[11px] uppercase tracking-[0.18em] text-muted;
-    font-family: "IBM Plex Mono", Consolas, monospace;
+    font-family: "Cascadia Mono", "Cascadia Code", Consolas, "Courier New", monospace;
   }
 
   .xt-chip {
@@ -165,7 +163,7 @@
   }
 
   .xt-kpi-value {
-    font-family: "Rajdhani", "IBM Plex Sans", sans-serif;
+    font-family: "Bahnschrift", "Segoe UI", "Noto Sans", sans-serif;
     @apply text-[2.85rem] font-semibold leading-none;
   }
 
@@ -198,7 +196,7 @@
 
   .xt-table th {
     @apply border-b py-2 text-left text-[11px] uppercase tracking-[0.14em] text-muted;
-    font-family: "IBM Plex Mono", Consolas, monospace;
+    font-family: "Cascadia Mono", "Cascadia Code", Consolas, "Courier New", monospace;
   }
 
   .xt-table td {
@@ -210,7 +208,7 @@
   }
 
   .rt-brand-title {
-    font-family: "Rajdhani", "IBM Plex Sans", sans-serif;
+    font-family: "Bahnschrift", "Segoe UI", "Noto Sans", sans-serif;
     @apply text-[2.2rem] font-semibold leading-none tracking-[0.01em];
   }
 
@@ -231,7 +229,7 @@
   }
 
   .rt-topbar-title {
-    font-family: "Rajdhani", "IBM Plex Sans", sans-serif;
+    font-family: "Bahnschrift", "Segoe UI", "Noto Sans", sans-serif;
     @apply text-[2.05rem] font-semibold leading-tight tracking-[0.01em];
   }
 
