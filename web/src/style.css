@@ -3,35 +3,35 @@
 
 :root {
   color-scheme: dark;
-  --bg: #050a18;
-  --bg-soft: #0a1226;
-  --panel: #0f1830;
-  --panel-strong: #131f3e;
+  --bg: #060b16;
+  --bg-soft: #0b1424;
+  --panel: #101a2e;
+  --panel-strong: #141f33;
   --border: #24385f;
   --text: #d8e5ff;
-  --text-muted: #93a7cc;
-  --text-dim: #6f84af;
-  --accent: #2ad7b5;
-  --accent-2: #30a5ff;
-  --warn: #ffb76d;
+  --text-muted: #9db0d1;
+  --text-dim: #7488b0;
+  --accent: #3f8ee0;
+  --accent-2: #316fad;
+  --warn: #d2a26f;
   --radius: 18px;
   --radius-sm: 12px;
-  --shadow: 0 12px 34px rgba(2, 7, 18, 0.38);
+  --shadow: 0 10px 26px rgba(2, 7, 18, 0.28);
 }
 
 :root.light-mode {
   color-scheme: light;
-  --bg: #eaf2ff;
-  --bg-soft: #dfe9fb;
+  --bg: #ecf2fd;
+  --bg-soft: #e4ecfa;
   --panel: #f8fbff;
   --panel-strong: #ffffff;
   --border: #cfdef6;
   --text: #182a47;
-  --text-muted: #4e6389;
-  --text-dim: #6e83ab;
-  --accent: #0d967d;
-  --accent-2: #1e75d7;
-  --warn: #b96c24;
+  --text-muted: #53678d;
+  --text-dim: #7387ac;
+  --accent: #2d76c6;
+  --accent-2: #3f8ee0;
+  --warn: #9f6f3f;
   --shadow: 0 14px 28px rgba(23, 47, 89, 0.12);
 }
 
@@ -48,8 +48,8 @@ body,
 body {
   margin: 0;
   background:
-    radial-gradient(circle at 10% -10%, color-mix(in srgb, var(--accent-2), transparent 84%), transparent 40%),
-    radial-gradient(circle at 88% -8%, color-mix(in srgb, var(--accent), transparent 84%), transparent 35%),
+    radial-gradient(circle at 10% -16%, color-mix(in srgb, var(--accent-2), transparent 91%), transparent 38%),
+    radial-gradient(circle at 88% -14%, color-mix(in srgb, var(--accent), transparent 92%), transparent 34%),
     linear-gradient(180deg, var(--bg), var(--bg-soft));
   color: var(--text);
   font-family: "Outfit", var(--xt-font-body);
@@ -173,9 +173,9 @@ pre {
 }
 
 .nav-item.active {
-  background: linear-gradient(118deg, var(--accent), var(--accent-2));
-  color: #041623;
-  border-color: transparent;
+  background: color-mix(in srgb, var(--accent), var(--panel) 62%);
+  color: #ecf4ff;
+  border-color: color-mix(in srgb, var(--accent), var(--border) 55%);
 }
 
 :root.light-mode .nav-item.active {
@@ -185,7 +185,7 @@ pre {
 .workspace-main {
   min-height: calc(100vh - 18rem);
   padding: 1.6rem;
-  background: linear-gradient(180deg, var(--panel), color-mix(in srgb, var(--panel), #000 6%));
+  background: linear-gradient(180deg, var(--panel), color-mix(in srgb, var(--panel), #000 4%));
 }
 
 .page-shell {
@@ -520,9 +520,9 @@ pre {
 }
 
 .p-button:not(.p-button-outlined):not(.p-button-text):not(.p-button-secondary) {
-  border: 1px solid transparent;
-  background: linear-gradient(118deg, var(--accent), var(--accent-2));
-  color: #061621;
+  border: 1px solid color-mix(in srgb, var(--accent), var(--border) 52%);
+  background: color-mix(in srgb, var(--accent), var(--panel) 58%);
+  color: #ecf4ff;
 }
 
 :root.light-mode .p-button:not(.p-button-outlined):not(.p-button-text):not(.p-button-secondary) {
@@ -584,8 +584,66 @@ pre {
 
 .p-tag {
   border-radius: 8px;
+  border: 1px solid var(--border);
   font-size: 0.74rem;
   font-weight: 700;
+  background: color-mix(in srgb, var(--panel), #000 10%);
+  color: var(--text-muted);
+}
+
+.p-tag.p-tag-success {
+  background: color-mix(in srgb, var(--accent), var(--panel) 86%);
+  color: var(--text);
+}
+
+.p-tag.p-tag-info {
+  background: color-mix(in srgb, var(--accent-2), var(--panel) 86%);
+  color: var(--text);
+}
+
+.p-tag.p-tag-warn {
+  background: color-mix(in srgb, var(--warn), var(--panel) 84%);
+  color: var(--text);
+}
+
+.p-tag.p-tag-danger {
+  background: color-mix(in srgb, #bd6270, var(--panel) 82%);
+  color: var(--text);
+}
+
+.p-tag.p-tag-contrast,
+.p-tag.p-tag-secondary {
+  background: color-mix(in srgb, var(--panel-strong), #000 6%);
+  color: var(--text-muted);
+}
+
+.p-message {
+  border-radius: 10px;
+  border-width: 1px;
+}
+
+.p-message.p-message-warn {
+  background: color-mix(in srgb, var(--warn), var(--panel) 87%);
+  border-color: color-mix(in srgb, var(--warn), var(--border) 60%);
+  color: var(--text);
+}
+
+.p-message.p-message-success {
+  background: color-mix(in srgb, var(--accent), var(--panel) 89%);
+  border-color: color-mix(in srgb, var(--accent), var(--border) 62%);
+  color: var(--text);
+}
+
+.p-message.p-message-error {
+  background: color-mix(in srgb, #bd6270, var(--panel) 85%);
+  border-color: color-mix(in srgb, #bd6270, var(--border) 58%);
+  color: var(--text);
+}
+
+.p-message.p-message-info {
+  background: color-mix(in srgb, var(--accent-2), var(--panel) 88%);
+  border-color: color-mix(in srgb, var(--accent-2), var(--border) 62%);
+  color: var(--text);
 }
 
 .p-button:focus-visible,
