@@ -1,12 +1,30 @@
-shared:
-  skills:
-    - xtctx-search
-  commands:
-    - npm test
-  agents:
-    - reviewer
-toolPreferences:
-  claude-code:
-    alwaysCallRecentSessions: true
+defaults:
+  sync_enabled: true
+  categories_enabled:
+    - context_feed
+    - skills
+    - commands
+    - agents
+    - mcp_servers
+    - slash_commands
+    - whitelist_policy
+  scope: project
+tools:
+  claude:
+    enabled: true
+    scope: project
+    categories: {}
+    preferences:
+      alwaysCallRecentSessions: true
   codex:
-    enforceTests: true
+    enabled: true
+    scope: project
+    categories: {}
+    preferences:
+      enforceTests: true
+policy:
+  whitelist:
+    allowed_patterns:
+      - npm test
+    denied_patterns: []
+    advisory_level: warn
