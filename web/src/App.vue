@@ -112,49 +112,26 @@ onMounted(async () => {
 
 <template>
   <div class="xt-shell">
-    <header class="xt-panel px-6 py-6 md:px-8 md:py-7">
-      <div class="grid gap-6 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
-        <div class="space-y-3">
-          <p class="xt-eyebrow">xtctx continuity runtime</p>
-          <h1 class="xt-headline">Cross-tool continuity console</h1>
-          <p class="max-w-3xl text-lg leading-relaxed text-muted">
-            Keep each coding session consistent: recover context before edits, keep tool policy aligned,
-            then write validated outcomes for handoff.
-          </p>
-        </div>
-
-        <div class="flex flex-wrap items-start justify-start gap-2 md:justify-end">
-          <span :class="pillClass(runtimePill)">{{ runtimePill.label }}</span>
-          <span :class="pillClass(contextPill)">{{ contextPill.label }}</span>
-          <span :class="pillClass(syncPill)">{{ syncPill.label }}</span>
-          <button class="xt-btn-ghost" type="button" @click="toggleTheme">
-            {{ isDark ? "Light" : "Dark" }}
-          </button>
-        </div>
+    <aside class="xt-panel rt-sidebar">
+      <div class="space-y-3">
+        <p class="xt-eyebrow">xtctx runtime</p>
+        <h1 class="rt-brand-title">Workspace</h1>
+        <p class="text-sm leading-relaxed text-muted">
+          Operate continuity state for this repository.
+        </p>
       </div>
-    </header>
 
-    <section class="xt-panel px-6 py-5 md:px-8">
-      <div class="grid gap-5 md:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_auto] md:items-end">
-        <div class="space-y-2">
-          <p class="xt-eyebrow">Project root</p>
-          <code class="block overflow-hidden text-ellipsis whitespace-nowrap text-sm md:text-base">{{ projectRoot }}</code>
-        </div>
+      <section class="rt-info-block">
+        <p class="xt-eyebrow">Project root</p>
+        <code>{{ projectRoot }}</code>
+      </section>
 
-        <div class="space-y-2">
-          <p class="xt-eyebrow">Session opener</p>
-          <code class="block text-sm md:text-base">{{ starter }}</code>
-        </div>
+      <section class="rt-info-block">
+        <p class="xt-eyebrow">Session opener</p>
+        <code>{{ starter }}</code>
+      </section>
 
-        <div class="flex flex-wrap gap-2">
-          <a class="xt-btn-ghost" href="/health" target="_blank" rel="noreferrer">Health</a>
-          <a class="xt-btn-ghost" href="/api/sources" target="_blank" rel="noreferrer">Sources API</a>
-        </div>
-      </div>
-    </section>
-
-    <nav class="xt-panel flex flex-col gap-4 px-4 py-4 md:flex-row md:items-center md:justify-between md:px-6" aria-label="Primary navigation">
-      <div class="flex flex-wrap gap-2">
+      <nav class="rt-nav" aria-label="Primary navigation">
         <RouterLink
           v-for="item in navItems"
           :key="item.to"
@@ -171,15 +148,37 @@ onMounted(async () => {
             {{ item.label }}
           </a>
         </RouterLink>
+      </nav>
+
+      <div class="mt-auto space-y-2">
+        <div class="rt-toolbar">
+          <a class="xt-btn-ghost" href="/health" target="_blank" rel="noreferrer">Health</a>
+          <a class="xt-btn-ghost" href="/api/sources" target="_blank" rel="noreferrer">Sources API</a>
+        </div>
+        <button class="xt-btn w-full" type="button" @click="$router.push('/search')">Start recall</button>
       </div>
+    </aside>
 
-      <RouterLink to="/search" custom v-slot="{ navigate }">
-        <button class="xt-btn" type="button" @click="navigate">Start recall</button>
-      </RouterLink>
-    </nav>
+    <section class="rt-main">
+      <header class="xt-panel rt-topbar">
+        <div class="space-y-2">
+          <p class="xt-eyebrow">runtime status</p>
+          <h2 class="rt-topbar-title">Continuity operator console</h2>
+        </div>
 
-    <main class="xt-panel p-6 md:p-8">
-      <RouterView />
-    </main>
+        <div class="rt-toolbar">
+          <span :class="pillClass(runtimePill)">{{ runtimePill.label }}</span>
+          <span :class="pillClass(contextPill)">{{ contextPill.label }}</span>
+          <span :class="pillClass(syncPill)">{{ syncPill.label }}</span>
+          <button class="xt-btn-ghost" type="button" @click="toggleTheme">
+            {{ isDark ? "Light" : "Dark" }}
+          </button>
+        </div>
+      </header>
+
+      <main class="xt-panel rt-content">
+        <RouterView />
+      </main>
+    </section>
   </div>
 </template>
