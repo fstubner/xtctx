@@ -8,27 +8,44 @@ const mode = ref<"hybrid" | "semantic" | "keyword">("hybrid");
 const loading = ref(false);
 const error = ref("");
 const results = ref<SearchResponse["results"]>([]);
+const hasSearched = ref(false);
+
+const starterPrompts = [
+  "release workflow failed after merge",
+  "where is trusted publishing oidc configured",
+  "recent context for FAQ implementation",
+  "github pages custom domain dns settings",
+];
 
 async function runSearch(): Promise<void> {
   if (!query.value.trim()) {
+    hasSearched.value = false;
     results.value = [];
     return;
   }
 
+  loading.value = true;
+  error.value = "";
+  hasSearched.value = true;
+
   try {
-    loading.value = true;
-    error.value = "";
     const payload = await apiGet<SearchResponse>("/api/search", {
       query: query.value,
       mode: mode.value,
       limit: 10,
     });
+
     results.value = payload.results;
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err);
   } finally {
     loading.value = false;
   }
+}
+
+function usePrompt(prompt: string): void {
+  query.value = prompt;
+  void runSearch();
 }
 
 function parseMetadata(metadata: string): Record<string, unknown> {
@@ -41,47 +58,79 @@ function parseMetadata(metadata: string): Record<string, unknown> {
 </script>
 
 <template>
-  <section class="page">
-    <div class="page-head">
-      <h1>Search</h1>
-      <p>Query indexed project context from the API.</p>
-    </div>
+  <section class="space-y-6">
+    <header class="space-y-3">
+      <p class="xt-eyebrow">Recall</p>
+      <h2 class="xt-title">Search memory</h2>
+      <p class="max-w-3xl text-base leading-relaxed text-muted">
+        Query prior conversations and project records before editing. Start with concrete failure language.
+      </p>
+    </header>
 
-    <div class="card search-controls">
-      <input
-        v-model="query"
-        type="text"
-        placeholder="Try: vitest setup, postgres error, deployment workflow"
-        @keydown.enter.prevent="runSearch"
-      />
-      <select v-model="mode">
-        <option value="hybrid">Hybrid</option>
-        <option value="semantic">Semantic</option>
-        <option value="keyword">Keyword</option>
-      </select>
-      <button @click="runSearch" :disabled="loading">
-        {{ loading ? "Searching..." : "Search" }}
-      </button>
-    </div>
+    <section class="xt-card space-y-4">
+      <div class="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px_auto] md:items-center">
+        <input
+          v-model="query"
+          class="xt-input"
+          placeholder="Try: npm publish failed with provenance validation"
+          @keydown.enter.prevent="runSearch"
+        />
+        <select v-model="mode" class="xt-select">
+          <option value="hybrid">Hybrid</option>
+          <option value="semantic">Semantic</option>
+          <option value="keyword">Keyword</option>
+        </select>
+        <button class="xt-btn" type="button" :disabled="loading" @click="runSearch">
+          {{ loading ? "Searching..." : "Search" }}
+        </button>
+      </div>
 
-    <div v-if="error" class="card error">{{ error }}</div>
+      <div class="flex flex-wrap gap-2">
+        <button
+          v-for="prompt in starterPrompts"
+          :key="prompt"
+          class="xt-btn-ghost"
+          type="button"
+          @click="usePrompt(prompt)"
+        >
+          {{ prompt }}
+        </button>
+      </div>
+    </section>
 
-    <div class="results">
-      <article v-for="item in results" :key="item.id" class="card">
-        <header class="result-head">
-          <h3>{{ parseMetadata(item.metadata).title ?? item.id }}</h3>
-          <span class="score">score {{ item.fusedScore.toFixed(3) }}</span>
-        </header>
-        <p class="muted">
-          {{ parseMetadata(item.metadata).type ?? "unknown" }} ·
+    <div v-if="error" class="xt-alert-danger">{{ error }}</div>
+
+    <section v-if="results.length > 0" class="space-y-4">
+      <article v-for="item in results" :key="item.id" class="xt-card space-y-3">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <h3 class="text-lg font-semibold">{{ parseMetadata(item.metadata).title ?? item.id }}</h3>
+          <span class="xt-chip-neutral">score {{ item.fusedScore.toFixed(3) }}</span>
+        </div>
+
+        <p class="text-sm text-muted">
+          {{ parseMetadata(item.metadata).type ?? "unknown" }}
+          ·
           {{ parseMetadata(item.metadata).source_tool ?? "unknown source" }}
         </p>
-        <p>{{ item.text }}</p>
-      </article>
 
-      <div v-if="!loading && !error && results.length === 0" class="card">
-        No results yet. Enter a query to search.
-      </div>
-    </div>
+        <p class="text-base leading-relaxed">{{ item.text }}</p>
+
+        <div class="flex flex-wrap gap-2">
+          <span class="xt-chip-neutral">{{ String(parseMetadata(item.metadata).source_path ?? "no source path") }}</span>
+        </div>
+      </article>
+    </section>
+
+    <section v-else class="xt-card space-y-2">
+      <h3 class="text-lg font-semibold">
+        {{ hasSearched ? "No matching context found." : "No query yet." }}
+      </h3>
+      <p class="text-base leading-relaxed text-muted" v-if="hasSearched">
+        Broaden the phrase or use hybrid mode to mix keyword and semantic retrieval.
+      </p>
+      <p class="text-base leading-relaxed text-muted" v-else>
+        Start from one of the prompts above or paste a task-specific error string.
+      </p>
+    </section>
   </section>
 </template>

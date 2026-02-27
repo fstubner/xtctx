@@ -1,10 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { RouterLink } from "vue-router";
-import Button from "primevue/button";
-import Card from "primevue/card";
-import Message from "primevue/message";
-import Tag from "primevue/tag";
 import { apiGet } from "../composables/useApi";
 import type {
   ContinuityToolsStatusResponse,
@@ -29,36 +25,37 @@ const indexedRecords = computed(() => sourcesStatus.value?.knowledgeRecords ?? 0
 const sessionsCount = computed(() => sources.value?.sessions.length ?? 0);
 const warningCount = computed(() => warnings.value?.count ?? 0);
 
-const readinessSeverity = computed(() => {
-  if (!sourcesStatus.value || !continuity.value) {
-    return "warn" as const;
-  }
-
-  if (warningCount.value > 0) {
-    return "warn" as const;
-  }
-
-  return sourcesStatus.value.toolPortabilityReady ? "success" as const : "warn" as const;
-});
-
-const readinessMessage = computed(() => {
+const readinessText = computed(() => {
   if (!sourcesStatus.value || !continuity.value) {
     return "Loading continuity posture...";
   }
 
   if (warningCount.value > 0) {
-    return `Continuity warnings detected (${warningCount.value}). Open Tools to reconcile drift.`;
+    return `Continuity warnings detected (${warningCount.value}). Review tool drift and reconcile.`;
   }
 
   if (!sourcesStatus.value.toolPortabilityReady) {
-    return "No tool history sources are detected yet. Validate scraper paths before relying on handoff recall.";
+    return "No tool histories are detected yet. Configure scraper paths before relying on handoff recall.";
   }
 
   return "Continuity posture is healthy. Start with recall, then write back validated outcomes.";
 });
 
+const readinessClass = computed(() => {
+  if (!sourcesStatus.value || !continuity.value) {
+    return "xt-alert-warn";
+  }
+
+  if (warningCount.value > 0) {
+    return "xt-alert-warn";
+  }
+
+  return sourcesStatus.value.toolPortabilityReady ? "xt-chip-ok" : "xt-alert-warn";
+});
+
 onMounted(async () => {
   loading.value = true;
+
   const [statusPayload, sourcePayload, continuityPayload, warningsPayload] = await Promise.allSettled([
     apiGet<SourceStatusResponse>("/api/sources/status"),
     apiGet<SourcesResponse>("/api/sources"),
@@ -86,123 +83,90 @@ onMounted(async () => {
 
   loading.value = false;
 });
-
-function toolSeverity(state: string) {
-  if (state === "in_sync") {
-    return "success";
-  }
-
-  if (state === "disabled_by_policy") {
-    return "secondary";
-  }
-
-  if (state === "missing_target") {
-    return "warn";
-  }
-
-  return "danger";
-}
 </script>
 
 <template>
-  <section class="page-shell">
-    <div class="page-head">
-      <p class="page-eyebrow">Continuity posture</p>
-      <h2>Dashboard</h2>
-      <p>
-        Run the same workflow every session: verify tool sync posture, recall context,
-        implement with constraints in scope, then write back.
+  <section class="space-y-6">
+    <header class="space-y-3">
+      <p class="xt-eyebrow">Continuity posture</p>
+      <h2 class="xt-title">Dashboard</h2>
+      <p class="max-w-3xl text-base leading-relaxed text-muted">
+        Verify readiness before implementation so every session follows the same continuity loop.
       </p>
+    </header>
+
+    <div v-if="error" class="xt-alert-danger">{{ error }}</div>
+
+    <div class="xt-alert" :class="readinessClass">{{ readinessText }}</div>
+
+    <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <article class="xt-kpi">
+        <p class="xt-kpi-value">{{ connectedSources }}</p>
+        <p class="xt-kpi-label">Connected sources</p>
+      </article>
+      <article class="xt-kpi">
+        <p class="xt-kpi-value">{{ indexedRecords }}</p>
+        <p class="xt-kpi-label">Indexed records</p>
+      </article>
+      <article class="xt-kpi">
+        <p class="xt-kpi-value">{{ inSyncTools }}</p>
+        <p class="xt-kpi-label">In-sync tools</p>
+      </article>
+      <article class="xt-kpi">
+        <p class="xt-kpi-value">{{ sessionsCount }}</p>
+        <p class="xt-kpi-label">Recent sessions</p>
+      </article>
     </div>
 
-    <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
-    <Message v-else :severity="readinessSeverity" :closable="false">{{ readinessMessage }}</Message>
+    <section class="xt-card space-y-4">
+      <h3 class="xt-section-title text-xl">Tool sync strip</h3>
+      <div class="flex flex-wrap gap-2">
+        <span v-for="tool in continuity?.tools ?? []" :key="tool.tool" class="xt-chip-neutral">
+          {{ tool.tool }}: {{ tool.state.replace(/_/g, " ") }}
+        </span>
+      </div>
+    </section>
 
-    <div class="kpi-grid">
-      <Card class="surface-card kpi-card">
-        <template #content>
-          <p class="kpi-value">{{ connectedSources }}</p>
-          <p class="kpi-label">Connected sources</p>
-        </template>
-      </Card>
-      <Card class="surface-card kpi-card">
-        <template #content>
-          <p class="kpi-value">{{ indexedRecords }}</p>
-          <p class="kpi-label">Indexed records</p>
-        </template>
-      </Card>
-      <Card class="surface-card kpi-card">
-        <template #content>
-          <p class="kpi-value">{{ inSyncTools }}</p>
-          <p class="kpi-label">In-sync tools</p>
-        </template>
-      </Card>
-      <Card class="surface-card kpi-card">
-        <template #content>
-          <p class="kpi-value">{{ sessionsCount }}</p>
-          <p class="kpi-label">Recent sessions</p>
-        </template>
-      </Card>
-    </div>
+    <div class="grid gap-4 xl:grid-cols-2">
+      <section class="xt-card space-y-4">
+        <h3 class="xt-section-title text-xl">Session starter</h3>
+        <ol class="list-decimal space-y-2 pl-5 text-base leading-relaxed">
+          <li>Run <code>xtctx_search</code> for the active task or failure signature.</li>
+          <li>Run <code>xtctx_project_knowledge</code> with <code>type: all</code>.</li>
+          <li>Implement with recovered constraints in scope.</li>
+          <li>Write back validated outcomes for the next handoff.</li>
+        </ol>
 
-    <Card class="surface-card">
-      <template #title>Tool sync strip</template>
-      <template #content>
-        <div class="chip-row">
-          <Tag
-            v-for="tool in continuity?.tools ?? []"
-            :key="tool.tool"
-            :severity="toolSeverity(tool.state)"
-            :value="`${tool.tool}: ${tool.state.replace(/_/g, ' ')}`"
-          />
+        <div class="flex flex-wrap gap-2">
+          <RouterLink to="/search" custom v-slot="{ navigate }">
+            <button class="xt-btn" type="button" @click="navigate">Open search</button>
+          </RouterLink>
+          <RouterLink to="/knowledge" custom v-slot="{ navigate }">
+            <button class="xt-btn-ghost" type="button" @click="navigate">Open knowledge</button>
+          </RouterLink>
         </div>
-      </template>
-    </Card>
+      </section>
 
-    <div class="dashboard-grid">
-      <Card class="surface-card">
-        <template #title>Session starter</template>
-        <template #content>
-          <ol class="flow-list">
-            <li>Run <code>xtctx_search</code> for the active task or failure signature.</li>
-            <li>Open <code>xtctx_project_knowledge</code> with <code>type: all</code>.</li>
-            <li>Implement with recovered constraints in scope.</li>
-          </ol>
-          <div class="chip-row chip-row-top">
-            <RouterLink to="/search" custom v-slot="{ navigate }">
-              <Button label="Open search" icon="pi pi-search" @click="navigate" />
-            </RouterLink>
-            <RouterLink to="/knowledge" custom v-slot="{ navigate }">
-              <Button label="Open knowledge" icon="pi pi-book" outlined @click="navigate" />
-            </RouterLink>
-          </div>
-        </template>
-      </Card>
-
-      <Card class="surface-card">
-        <template #title>Writeback targets</template>
-        <template #content>
-          <p class="helper-copy">
-            Capture validated outcomes so the next assistant session can resume without re-briefing.
-          </p>
-          <div class="chip-row chip-row-top">
-            <Tag severity="success" value="xtctx_save_decision" />
-            <Tag severity="danger" value="xtctx_save_error_solution" />
-            <Tag severity="info" value="xtctx_save_faq" />
-          </div>
-        </template>
-      </Card>
+      <section class="xt-card space-y-4">
+        <h3 class="xt-section-title text-xl">Writeback targets</h3>
+        <p class="text-base leading-relaxed text-muted">
+          Capture verified outcomes so the next assistant session starts with decisions, fixes, and FAQs in scope.
+        </p>
+        <div class="flex flex-wrap gap-2">
+          <span class="xt-chip-ok">xtctx_save_decision</span>
+          <span class="xt-chip-neutral">xtctx_save_error_solution</span>
+          <span class="xt-chip-neutral">xtctx_save_faq</span>
+        </div>
+      </section>
     </div>
 
-    <Card class="surface-card" v-if="!loading && (warnings?.warnings.length ?? 0) > 0">
-      <template #title>Drift and warning queue</template>
-      <template #content>
-        <ul class="warning-list">
-          <li v-for="entry in warnings?.warnings ?? []" :key="`${entry.tool}-${entry.warning}`">
-            <strong>{{ entry.tool }}</strong>: {{ entry.warning }}
-          </li>
-        </ul>
-      </template>
-    </Card>
+    <section v-if="!loading && (warnings?.warnings.length ?? 0) > 0" class="xt-card space-y-4">
+      <h3 class="xt-section-title text-xl">Drift and warnings</h3>
+      <ul class="list-disc space-y-2 pl-5 text-base leading-relaxed">
+        <li v-for="entry in warnings?.warnings ?? []" :key="`${entry.tool}-${entry.warning}`">
+          <strong>{{ entry.tool }}</strong>: {{ entry.warning }}
+        </li>
+      </ul>
+    </section>
   </section>
 </template>

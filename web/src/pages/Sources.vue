@@ -1,10 +1,5 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import Card from "primevue/card";
-import Column from "primevue/column";
-import DataTable from "primevue/datatable";
-import Message from "primevue/message";
-import Tag from "primevue/tag";
 import { apiGet } from "../composables/useApi";
 import type { SourceStatusResponse, SourcesResponse } from "../types";
 
@@ -22,112 +17,116 @@ const enabledCount = computed(
 );
 
 onMounted(async () => {
-  try {
-    loading.value = true;
-    const [statusPayload, sourcesPayload] = await Promise.all([
-      apiGet<SourceStatusResponse>("/api/sources/status"),
-      apiGet<SourcesResponse>("/api/sources"),
-    ]);
+  loading.value = true;
 
-    status.value = statusPayload;
-    sources.value = sourcesPayload;
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : String(err);
-  } finally {
-    loading.value = false;
+  const [statusPayload, sourcesPayload] = await Promise.allSettled([
+    apiGet<SourceStatusResponse>("/api/sources/status"),
+    apiGet<SourcesResponse>("/api/sources"),
+  ]);
+
+  if (statusPayload.status === "fulfilled") {
+    status.value = statusPayload.value;
+  } else {
+    error.value = "Unable to load scraper health.";
   }
+
+  if (sourcesPayload.status === "fulfilled") {
+    sources.value = sourcesPayload.value;
+  } else if (!error.value) {
+    error.value = "Unable to load source inventory.";
+  }
+
+  loading.value = false;
 });
+
+function yesNo(value: boolean): string {
+  return value ? "yes" : "no";
+}
+
+function stateClass(value: boolean): string {
+  return value ? "xt-chip-ok" : "xt-chip-neutral";
+}
 </script>
 
 <template>
-  <section class="page-shell">
-    <div class="page-head">
-      <p class="page-eyebrow">Ingestion coverage</p>
-      <h2>Sources</h2>
-      <p>
-        Confirm which tool histories are detected and whether session continuity is actually ingesting.
+  <section class="space-y-6">
+    <header class="space-y-3">
+      <p class="xt-eyebrow">Ingestion coverage</p>
+      <h2 class="xt-title">Sources</h2>
+      <p class="max-w-3xl text-base leading-relaxed text-muted">
+        Verify which tool histories are detected and whether session ingestion is producing continuity context.
       </p>
+    </header>
+
+    <div v-if="error" class="xt-alert-danger">{{ error }}</div>
+
+    <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <article class="xt-kpi">
+        <p class="xt-kpi-value">{{ enabledCount }}</p>
+        <p class="xt-kpi-label">Enabled scrapers</p>
+      </article>
+      <article class="xt-kpi">
+        <p class="xt-kpi-value">{{ detectedCount }}</p>
+        <p class="xt-kpi-label">Detected sources</p>
+      </article>
+      <article class="xt-kpi">
+        <p class="xt-kpi-value">{{ status?.knowledgeRecords ?? 0 }}</p>
+        <p class="xt-kpi-label">Indexed records</p>
+      </article>
+      <article class="xt-kpi">
+        <p class="xt-kpi-value">{{ sources?.sessions.length ?? 0 }}</p>
+        <p class="xt-kpi-label">Recent sessions</p>
+      </article>
     </div>
 
-    <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
+    <div class="grid gap-4 xl:grid-cols-2">
+      <section class="xt-card overflow-x-auto">
+        <h3 class="xt-section-title mb-4 text-xl">Scraper health</h3>
+        <table class="xt-table min-w-[640px]">
+          <thead>
+            <tr>
+              <th>Tool</th>
+              <th>Enabled</th>
+              <th>Detected</th>
+              <th>Path</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="scraper in status?.scrapers ?? []" :key="`${scraper.tool}-${scraper.path}`">
+              <td>{{ scraper.tool }}</td>
+              <td><span :class="stateClass(scraper.enabled)">{{ yesNo(scraper.enabled) }}</span></td>
+              <td><span :class="stateClass(scraper.detected)">{{ yesNo(scraper.detected) }}</span></td>
+              <td><code class="text-xs">{{ scraper.path }}</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
 
-    <div class="kpi-grid">
-      <Card class="surface-card kpi-card">
-        <template #content>
-          <p class="kpi-value">{{ enabledCount }}</p>
-          <p class="kpi-label">Enabled scrapers</p>
-        </template>
-      </Card>
-      <Card class="surface-card kpi-card">
-        <template #content>
-          <p class="kpi-value">{{ detectedCount }}</p>
-          <p class="kpi-label">Detected sources</p>
-        </template>
-      </Card>
-      <Card class="surface-card kpi-card">
-        <template #content>
-          <p class="kpi-value">{{ status?.knowledgeRecords ?? 0 }}</p>
-          <p class="kpi-label">Indexed records</p>
-        </template>
-      </Card>
-      <Card class="surface-card kpi-card">
-        <template #content>
-          <p class="kpi-value">{{ sources?.sessions.length ?? 0 }}</p>
-          <p class="kpi-label">Recent sessions</p>
-        </template>
-      </Card>
-    </div>
+      <section class="xt-card overflow-x-auto">
+        <h3 class="xt-section-title mb-4 text-xl">Recent sessions</h3>
+        <table class="xt-table min-w-[640px]">
+          <thead>
+            <tr>
+              <th>Session</th>
+              <th>Tool</th>
+              <th>Started</th>
+              <th>Messages</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="session in sources?.sessions ?? []" :key="session.session_ref">
+              <td><code class="text-xs">{{ session.session_ref }}</code></td>
+              <td>{{ session.tool }}</td>
+              <td>{{ new Date(session.started_at).toLocaleString() }}</td>
+              <td>{{ session.message_count ?? 0 }}</td>
+            </tr>
+          </tbody>
+        </table>
 
-    <div class="split-grid">
-      <Card class="surface-card">
-        <template #title>Scraper health</template>
-        <template #content>
-          <DataTable
-            :value="status?.scrapers ?? []"
-            stripedRows
-            responsiveLayout="scroll"
-            :loading="loading"
-          >
-            <Column field="tool" header="Tool" />
-            <Column field="enabled" header="Enabled">
-              <template #body="{ data }">
-                <Tag :severity="data.enabled ? 'info' : 'secondary'" :value="data.enabled ? 'yes' : 'no'" />
-              </template>
-            </Column>
-            <Column field="detected" header="Detected">
-              <template #body="{ data }">
-                <Tag :severity="data.detected ? 'success' : 'warn'" :value="data.detected ? 'yes' : 'no'" />
-              </template>
-            </Column>
-            <Column field="path" header="Path">
-              <template #body="{ data }">
-                <code>{{ data.path }}</code>
-              </template>
-            </Column>
-          </DataTable>
-        </template>
-      </Card>
-
-      <Card class="surface-card">
-        <template #title>Recent sessions</template>
-        <template #content>
-          <DataTable
-            :value="sources?.sessions ?? []"
-            stripedRows
-            responsiveLayout="scroll"
-            :loading="loading"
-          >
-            <Column field="session_ref" header="Session" />
-            <Column field="tool" header="Tool" />
-            <Column field="started_at" header="Started">
-              <template #body="{ data }">
-                {{ new Date(data.started_at).toLocaleString() }}
-              </template>
-            </Column>
-            <Column field="message_count" header="Msgs" />
-          </DataTable>
-        </template>
-      </Card>
+        <p v-if="!loading && (sources?.sessions.length ?? 0) === 0" class="mt-3 text-sm text-muted">
+          No ingested sessions yet.
+        </p>
+      </section>
     </div>
   </section>
 </template>

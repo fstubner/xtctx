@@ -17,8 +17,9 @@ onMounted(async () => {
 });
 
 async function loadList(): Promise<void> {
+  loading.value = true;
+
   try {
-    loading.value = true;
     list.value = await apiGet<ConfigListResponse>("/api/config/list", { type: "all" });
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err);
@@ -34,11 +35,10 @@ async function loadConfig(): Promise<void> {
   }
 
   try {
-    const result = await apiGet<Record<string, unknown>>("/api/config/get", {
+    selectedConfig.value = await apiGet<Record<string, unknown>>("/api/config/get", {
       type: selectedType.value,
       name: selectedName.value,
     });
-    selectedConfig.value = result;
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err);
   }
@@ -58,48 +58,74 @@ async function loadToolPreferences(): Promise<void> {
 </script>
 
 <template>
-  <section class="page">
-    <div class="page-head">
-      <h1>Config</h1>
-      <p>Shared config view for skills, commands, agents, and tool preferences.</p>
-    </div>
+  <section class="space-y-6">
+    <header class="space-y-3">
+      <p class="xt-eyebrow">Config</p>
+      <h2 class="xt-title">Configuration</h2>
+      <p class="max-w-3xl text-base leading-relaxed text-muted">
+        Inspect synced skills, commands, and agent defaults generated from <code>.xtctx/tool-config</code>.
+      </p>
+    </header>
 
-    <div v-if="loading" class="card">Loading config...</div>
-    <div v-else-if="error" class="card error">{{ error }}</div>
+    <div v-if="error" class="xt-alert-danger">{{ error }}</div>
 
-    <div v-else class="grid">
-      <article class="card">
-        <h3>Config Inventory</h3>
-        <p class="muted">entries: {{ list?.count ?? 0 }}</p>
-        <ul>
-          <li v-for="item in list?.configs ?? []" :key="`${item.type}:${item.name}`">
-            {{ item.type }} · {{ item.name }}
-          </li>
-        </ul>
-      </article>
+    <section class="xt-card">
+      <p class="text-sm text-muted">
+        Config-first defaults are preferred. Environment variables should be temporary override only.
+      </p>
+      <p class="mt-2 text-sm text-muted">{{ list?.configs.length ?? 0 }} config entries available.</p>
+    </section>
 
-      <article class="card">
-        <h3>Get Config</h3>
-        <div class="search-controls compact">
-          <select v-model="selectedType">
+    <div class="grid gap-4 xl:grid-cols-2">
+      <section class="xt-card overflow-x-auto">
+        <h3 class="xt-section-title mb-4 text-xl">Config inventory</h3>
+        <table class="xt-table min-w-[420px]">
+          <thead>
+            <tr>
+              <th>Type</th>
+              <th>Name</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="entry in list?.configs ?? []" :key="`${entry.type}-${entry.name}`">
+              <td>{{ entry.type }}</td>
+              <td>{{ entry.name }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="xt-card space-y-4">
+        <h3 class="xt-section-title text-xl">Config lookup</h3>
+        <div class="grid gap-3 md:grid-cols-[180px_minmax(0,1fr)_auto] md:items-center">
+          <select v-model="selectedType" class="xt-select">
             <option value="skill">skill</option>
             <option value="command">command</option>
             <option value="agent">agent</option>
           </select>
-          <input v-model="selectedName" type="text" placeholder="config name" />
-          <button @click="loadConfig">Load</button>
+          <input v-model="selectedName" class="xt-input" placeholder="config name" />
+          <button class="xt-btn" type="button" @click="loadConfig">Load</button>
         </div>
-        <pre>{{ selectedConfig ? JSON.stringify(selectedConfig, null, 2) : "No config loaded." }}</pre>
-      </article>
 
-      <article class="card">
-        <h3>Tool Preferences</h3>
-        <div class="search-controls compact">
-          <input v-model="tool" type="text" placeholder="tool name (e.g. claude-code)" />
-          <button @click="loadToolPreferences">Refresh</button>
+        <pre class="rounded-lg border bg-surface p-4 text-xs leading-relaxed">{{ selectedConfig ? JSON.stringify(selectedConfig, null, 2) : "No config loaded." }}</pre>
+      </section>
+
+      <section class="xt-card space-y-4 xl:col-span-2">
+        <h3 class="xt-section-title text-xl">Tool preferences</h3>
+        <div class="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+          <input
+            v-model="tool"
+            class="xt-input"
+            placeholder="tool name (example: claude-code)"
+            @keydown.enter.prevent="loadToolPreferences"
+          />
+          <button class="xt-btn-ghost" type="button" @click="loadToolPreferences">Refresh</button>
         </div>
-        <pre>{{ JSON.stringify(toolPrefs, null, 2) }}</pre>
-      </article>
+
+        <pre class="rounded-lg border bg-surface p-4 text-xs leading-relaxed">{{ JSON.stringify(toolPrefs, null, 2) }}</pre>
+      </section>
     </div>
+
+    <p v-if="loading" class="text-sm text-muted">Loading config inventory...</p>
   </section>
 </template>
