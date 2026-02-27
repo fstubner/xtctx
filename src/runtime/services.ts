@@ -3,21 +3,8 @@ import { extname, join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { KnowledgeRepository } from "../knowledge/repository.js";
 import type { ConfigStore, ConfigType, NamedConfig } from "../mcp/tools/config.js";
-import type { SessionMessage, SessionService, SessionSummary } from "../mcp/tools/sessions.js";
-
-export class EmptySessionService implements SessionService {
-  async listRecentSessions(_limit: number, _toolFilter?: string[]): Promise<SessionSummary[]> {
-    return [];
-  }
-
-  async getSessionDetail(
-    _sessionRef: string,
-    _offset: number,
-    _limit: number,
-  ): Promise<SessionMessage[]> {
-    return [];
-  }
-}
+import type { SessionService } from "../mcp/tools/sessions.js";
+import { createIndexedSessionService } from "./sessions.js";
 
 export class FileConfigStore implements ConfigStore {
   constructor(private readonly configRoot: string) {}
@@ -129,7 +116,7 @@ export interface ProjectServices {
     excludePatterns: string[];
   };
   knowledge: KnowledgeRepository;
-  sessions: EmptySessionService;
+  sessions: SessionService;
   configs: FileConfigStore;
 }
 
@@ -147,6 +134,7 @@ export async function createProjectServices(projectPath?: string): Promise<Proje
 
   const knowledge = new KnowledgeRepository(knowledgeDir);
   await knowledge.initialize();
+  const sessions = await createSessionService(storeDir);
 
   return {
     projectRoot,
@@ -159,9 +147,34 @@ export async function createProjectServices(projectPath?: string): Promise<Proje
     apiSecurity,
     ingestion,
     knowledge,
-    sessions: new EmptySessionService(),
+    sessions,
     configs: new FileConfigStore(configRoot),
   };
+}
+
+async function createSessionService(storeDir: string): Promise<SessionService> {
+  try {
+    return await createIndexedSessionService(storeDir);
+  } catch {
+    return new EmptySessionService();
+  }
+}
+
+class EmptySessionService implements SessionService {
+  async listRecentSessions(
+    _limit: number,
+    _toolFilter?: string[],
+  ): Promise<[]> {
+    return [];
+  }
+
+  async getSessionDetail(
+    _sessionRef: string,
+    _offset: number,
+    _limit: number,
+  ): Promise<[]> {
+    return [];
+  }
 }
 
 async function loadProjectConfig(xtctxDir: string): Promise<Record<string, unknown>> {

@@ -14,6 +14,12 @@ export interface SearchResult {
   score: number;
 }
 
+export interface QueryRowsOptions {
+  where?: string;
+  limit?: number;
+  offset?: number;
+}
+
 export class LanceStore {
   private db: lancedb.Connection | null = null;
 
@@ -84,6 +90,38 @@ export class LanceStore {
       text: row.text as string,
       metadata: row.metadata as string,
       score: 1 / (1 + index),
+    }));
+  }
+
+  async queryRows(
+    tableName: string,
+    options: QueryRowsOptions = {},
+  ): Promise<Array<{ id: string; text: string; metadata: string }>> {
+    const db = this.requireDb();
+    if (!(await this.tableExists(tableName))) {
+      return [];
+    }
+
+    const table = await db.openTable(tableName);
+    let query = table.query();
+
+    if (options.where) {
+      query = query.where(options.where);
+    }
+
+    if (typeof options.offset === "number" && options.offset > 0) {
+      query = query.offset(Math.floor(options.offset));
+    }
+
+    if (typeof options.limit === "number" && options.limit > 0) {
+      query = query.limit(Math.floor(options.limit));
+    }
+
+    const rows = await query.toArray();
+    return rows.map((row) => ({
+      id: String(row.id),
+      text: String(row.text ?? ""),
+      metadata: String(row.metadata ?? "{}"),
     }));
   }
 

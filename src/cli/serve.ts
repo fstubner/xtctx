@@ -1,5 +1,7 @@
 import { startApiServer } from "../api/server.js";
+import { loadEffectiveContinuityPolicy } from "../config/policy.js";
 import { syncToolConfigs } from "../config/sync.js";
+import { getToolContinuityStatuses } from "../config/sync.js";
 import { startMcpServer, type McpToolDependencies } from "../mcp/server.js";
 import { createIngestionRuntime } from "../runtime/ingestion.js";
 import { createProjectServices } from "../runtime/services.js";
@@ -54,6 +56,10 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
     writer: services.knowledge,
     sessions: services.sessions,
     configs: services.configs,
+    continuity: {
+      effectivePolicy: async () => loadEffectiveContinuityPolicy(services.projectRoot),
+      toolStatuses: async () => getToolContinuityStatuses(services.projectRoot),
+    },
   };
 
   try {

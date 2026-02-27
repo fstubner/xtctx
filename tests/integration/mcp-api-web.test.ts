@@ -60,6 +60,8 @@ describe("Integration: MCP + API + Web data paths", () => {
     const tools = buildToolDefinitions();
     expect(tools.some((tool) => tool.name === "xtctx_search")).toBe(true);
     expect(tools.some((tool) => tool.name === "xtctx_tool_preferences")).toBe(true);
+    expect(tools.some((tool) => tool.name === "xtctx_continuity_status")).toBe(true);
+    expect(tools.some((tool) => tool.name === "xtctx_effective_policy")).toBe(true);
 
     const services = await createProjectServices(projectDir);
     const handlers = createToolHandlers({
@@ -70,12 +72,42 @@ describe("Integration: MCP + API + Web data paths", () => {
       knowledge: services.knowledge,
       writer: services.knowledge,
       configs: services.configs,
+      continuity: {
+        effectivePolicy: async () => ({
+          defaults: {
+            sync_enabled: true,
+            categories_enabled: [
+              "context_feed",
+              "skills",
+              "commands",
+              "agents",
+              "mcp_servers",
+              "slash_commands",
+              "whitelist_policy",
+            ],
+            scope: "project",
+          },
+          tools: {},
+          policy: {
+            whitelist: {
+              allowed_patterns: [],
+              denied_patterns: [],
+              advisory_level: "warn",
+            },
+          },
+          source_layers: [],
+          resolved_at: new Date().toISOString(),
+        }),
+        toolStatuses: async () => [],
+      },
     });
 
     const projectKnowledge = handlers.get("xtctx_project_knowledge");
     const toolPreferences = handlers.get("xtctx_tool_preferences");
+    const effectivePolicy = handlers.get("xtctx_effective_policy");
     expect(projectKnowledge).toBeDefined();
     expect(toolPreferences).toBeDefined();
+    expect(effectivePolicy).toBeDefined();
 
     const mcpKnowledge = (await projectKnowledge!({
       type: "all",

@@ -11,6 +11,11 @@ import {
   type ConfigStore,
 } from "./tools/config.js";
 import {
+  createContinuityStatusHandler,
+  createEffectivePolicyHandler,
+  type ContinuityReader,
+} from "./tools/continuity.js";
+import {
   createProjectKnowledgeHandler,
   type KnowledgeStore,
 } from "./tools/knowledge.js";
@@ -46,6 +51,7 @@ export interface McpToolDependencies {
   writer?: KnowledgeWriter;
   findSimilar?: SimilarityLookup;
   configs?: ConfigStore;
+  continuity?: ContinuityReader;
 }
 
 export function buildToolDefinitions(): ToolDefinition[] {
@@ -78,7 +84,8 @@ export function buildToolDefinitions(): ToolDefinition[] {
           type_filter: {
             type: "array",
             items: { type: "string" },
-            description: "Filter by type: decision, error_solution, insight",
+            description:
+              "Filter by type: decision, error_solution, insight, convention, gotcha, faq",
           },
           time_range: {
             type: "object",
@@ -133,16 +140,51 @@ export function buildToolDefinitions(): ToolDefinition[] {
     {
       name: "xtctx_project_knowledge",
       description:
-        "Get shared project knowledge (architectural decisions, error solutions, insights).",
+        "Get shared project knowledge (decisions, error solutions, insights, conventions, gotchas, FAQs).",
       inputSchema: {
         type: "object",
         properties: {
           type: {
             type: "string",
-            enum: ["decision", "error_solution", "insight", "all"],
+            enum: ["decision", "error_solution", "insight", "convention", "gotcha", "faq", "all"],
             description: "Filter by type. Default: all",
           },
           query: { type: "string", description: "Optional semantic filter" },
+        },
+      },
+    },
+    {
+      name: "xtctx_continuity_status",
+      description:
+        "Get continuity orchestration posture per tool (state, scope, enabled categories, and warnings).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tool_filter: {
+            type: "array",
+            items: { type: "string" },
+            description: "Optional filter for tool ids (e.g. codex, claude, cursor).",
+          },
+          format: {
+            type: "string",
+            enum: ["markdown", "json"],
+            description: "Response format. Default: markdown",
+          },
+        },
+      },
+    },
+    {
+      name: "xtctx_effective_policy",
+      description:
+        "Read the merged continuity policy from global baseline + repo policy with resolved tool settings.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          format: {
+            type: "string",
+            enum: ["markdown", "json"],
+            description: "Response format. Default: markdown",
+          },
         },
       },
     },
@@ -194,6 +236,20 @@ export function buildToolDefinitions(): ToolDefinition[] {
           context: { type: "string", description: "Supporting context" },
         },
         required: ["insight"],
+      },
+    },
+    {
+      name: "xtctx_save_faq",
+      description:
+        "Record a frequently asked project question and its answer for future sessions.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          question: { type: "string", description: "Question text" },
+          answer: { type: "string", description: "Answer text" },
+          context: { type: "string", description: "Optional supporting context" },
+        },
+        required: ["question", "answer"],
       },
     },
     {
@@ -265,6 +321,16 @@ export function createToolHandlers(
     handlers.set("xtctx_project_knowledge", missingDependency("knowledge store"));
   }
 
+  if (dependencies.continuity) {
+    const continuityStatus = createContinuityStatusHandler(dependencies.continuity);
+    const effectivePolicy = createEffectivePolicyHandler(dependencies.continuity);
+    handlers.set("xtctx_continuity_status", (params) => continuityStatus(params as any));
+    handlers.set("xtctx_effective_policy", (params) => effectivePolicy(params as any));
+  } else {
+    handlers.set("xtctx_continuity_status", missingDependency("continuity service"));
+    handlers.set("xtctx_effective_policy", missingDependency("continuity service"));
+  }
+
   if (dependencies.writer) {
     const writeHandlers = createWriteHandlers(dependencies.writer, dependencies.findSimilar);
     handlers.set("xtctx_save_decision", (params) => writeHandlers.saveDecision(params as any));
@@ -272,10 +338,12 @@ export function createToolHandlers(
       writeHandlers.saveErrorSolution(params as any),
     );
     handlers.set("xtctx_save_insight", (params) => writeHandlers.saveInsight(params as any));
+    handlers.set("xtctx_save_faq", (params) => writeHandlers.saveFaq(params as any));
   } else {
     handlers.set("xtctx_save_decision", missingDependency("knowledge writer"));
     handlers.set("xtctx_save_error_solution", missingDependency("knowledge writer"));
     handlers.set("xtctx_save_insight", missingDependency("knowledge writer"));
+    handlers.set("xtctx_save_faq", missingDependency("knowledge writer"));
   }
 
   if (dependencies.configs) {
