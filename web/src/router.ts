@@ -5,6 +5,7 @@ import KnowledgePage from "./pages/Knowledge.vue";
 import SearchPage from "./pages/Search.vue";
 import SourcesPage from "./pages/Sources.vue";
 import ToolsPage from "./pages/Tools.vue";
+import ActivityPage from "./pages/Activity.vue";
 
 const router = createRouter({
   history: createWebHistory(),
@@ -14,6 +15,7 @@ const router = createRouter({
     { path: "/search", name: "search", component: SearchPage },
     { path: "/knowledge", name: "knowledge", component: KnowledgePage },
     { path: "/sources", name: "sources", component: SourcesPage },
+    { path: "/activity", name: "activity", component: ActivityPage },
     { path: "/config", name: "config", component: ConfigPage },
   ],
 });

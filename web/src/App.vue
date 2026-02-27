@@ -22,10 +22,11 @@ interface SectionMeta {
 
 const navItems = [
   { label: "Dashboard", to: "/" },
+  { label: "Sources", to: "/sources" },
   { label: "Tools", to: "/tools" },
+  { label: "Activity", to: "/activity" },
   { label: "Search", to: "/search" },
   { label: "Knowledge", to: "/knowledge" },
-  { label: "Sources", to: "/sources" },
   { label: "Config", to: "/config" },
 ] as const;
 
@@ -42,6 +43,10 @@ const sectionMeta: Record<string, SectionMeta> = {
   "/tools": {
     title: "Tools",
     subtitle: "Manage per-tool sync scope and category propagation, then reconcile drifted targets.",
+  },
+  "/activity": {
+    title: "Activity",
+    subtitle: "Inspect recent ingestion and sync operations to verify continuity automation behavior.",
   },
   "/search": {
     title: "Search",
@@ -68,7 +73,6 @@ const route = useRoute();
 const health = ref<HealthResponse | null>(null);
 const sourceStatus = ref<SourceStatusResponse | null>(null);
 const continuity = ref<ContinuityToolsStatusResponse | null>(null);
-const starter = "xtctx_search -> xtctx_project_knowledge";
 
 const activeSection = computed<SectionMeta>(() => {
   return sectionMeta[route.path] ?? defaultSection;
@@ -117,6 +121,18 @@ const syncPill = computed<StatusPill>(() => {
 });
 
 const projectRoot = computed(() => health.value?.projectRoot ?? "Project root unavailable");
+const enabledSourceCount = computed(
+  () => sourceStatus.value?.scrapers.filter((item) => item.enabled).length ?? 0,
+);
+const detectedSourceCount = computed(
+  () => sourceStatus.value?.scrapers.filter((item) => item.enabled && item.detected).length ?? 0,
+);
+const inSyncToolCount = computed(
+  () => continuity.value?.tools.filter((tool) => tool.enabled && tool.state === "in_sync").length ?? 0,
+);
+const totalToolCount = computed(
+  () => continuity.value?.tools.filter((tool) => tool.enabled).length ?? 0,
+);
 
 function pillClass(pill: StatusPill): string {
   if (pill.tone === "ok") {
@@ -184,13 +200,10 @@ onMounted(async () => {
       </nav>
 
       <section class="xt-card space-y-3">
-        <p class="xt-eyebrow">Daily loop</p>
-        <ol class="space-y-1 text-sm leading-relaxed text-muted">
-          <li>1. Recall task context.</li>
-          <li>2. Load knowledge and FAQs.</li>
-          <li>3. Implement and verify.</li>
-          <li>4. Write back validated outcomes.</li>
-        </ol>
+        <p class="xt-eyebrow">Control plane</p>
+        <p class="text-sm leading-relaxed text-muted">
+          Manage source ingestion and cross-tool sync policy. Runtime continuity executes automatically in the background.
+        </p>
       </section>
 
       <div class="mt-auto space-y-2">
@@ -225,13 +238,17 @@ onMounted(async () => {
           <code>{{ projectRoot }}</code>
         </div>
         <div class="rt-strip-item">
-          <p class="xt-eyebrow">Session opener</p>
-          <code>{{ starter }}</code>
+          <p class="xt-eyebrow">Source coverage</p>
+          <code>{{ detectedSourceCount }} / {{ enabledSourceCount }} detected</code>
+        </div>
+        <div class="rt-strip-item">
+          <p class="xt-eyebrow">Tool sync posture</p>
+          <code>{{ inSyncToolCount }} / {{ totalToolCount }} in sync</code>
         </div>
         <div class="rt-strip-actions">
-          <button class="xt-btn-ghost" type="button" @click="router.push('/search')">Open search</button>
-          <button class="xt-btn-ghost" type="button" @click="router.push('/knowledge')">Open knowledge</button>
-          <button class="xt-btn" type="button" @click="router.push('/search')">Start recall</button>
+          <button class="xt-btn-ghost" type="button" @click="router.push('/sources')">Manage sources</button>
+          <button class="xt-btn-ghost" type="button" @click="router.push('/tools')">Manage tools</button>
+          <button class="xt-btn" type="button" @click="router.push('/activity')">View activity</button>
         </div>
       </section>
 

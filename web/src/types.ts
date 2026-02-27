@@ -71,6 +71,34 @@ export interface SourceStatusResponse {
   }>;
 }
 
+export interface SourcesConfigResponse {
+  watchPaths: string[];
+  pollIntervalMs: number;
+  excludePatterns: string[];
+  scrapers: Array<{
+    tool: string;
+    path: string;
+    enabled: boolean;
+    detected: boolean;
+  }>;
+}
+
+export interface ScraperConfigUpdateResponse {
+  tool: string;
+  scraper: {
+    tool: string;
+    path: string;
+    enabled: boolean;
+    detected: boolean;
+  } | null;
+  scrapers: Array<{
+    tool: string;
+    path: string;
+    enabled: boolean;
+    detected: boolean;
+  }>;
+}
+
 export type ContinuityCategory =
   | "context_feed"
   | "skills"
@@ -141,6 +169,22 @@ export interface ContinuityWarningsResponse {
   warnings: Array<{
     tool: string;
     warning: string;
+  }>;
+}
+
+export interface ContinuitySyncResult {
+  updated: number;
+  created: number;
+  unchanged: number;
+  warnings: string[];
+  tools: Array<{
+    tool: string;
+    state: ToolState;
+    scope: ContinuityScope;
+    targets_updated: number;
+    targets_created: number;
+    targets_unchanged: number;
+    duration_ms: number;
   }>;
 }
 
