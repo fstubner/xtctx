@@ -60,8 +60,8 @@ const compatibility = {
       </a>
 
       <nav aria-label="Primary navigation">
-        <a href="#mechanism">Mechanism</a>
-        <a href="#proof">Capabilities</a>
+        <a href="#mechanism">How it works</a>
+        <a href="#proof">Coverage</a>
         <a href="#quickstart">Quick start</a>
       </nav>
 
@@ -84,8 +84,8 @@ const compatibility = {
         <Tag value="Local-first orchestration runtime" severity="info" />
         <h1>Resume in any tool instantly.</h1>
         <p>
-          xtctx orchestrates continuity across assistants by ingesting local
-          conversation history and synchronizing shared tool behavior per project.
+          xtctx ingests local assistant history, indexes what matters, and synchronizes
+          shared behavior so each session starts with the same context.
         </p>
 
         <div class="hero-actions">
@@ -95,9 +95,7 @@ const compatibility = {
           </a>
         </div>
 
-        <p class="hero-note">
-          Sync defaults are on. Scope and categories are selectable per tool.
-        </p>
+        <p class="hero-note">Defaults are sync-on. Scope and categories are adjustable per tool.</p>
       </div>
 
       <aside class="hero-proof">
@@ -119,7 +117,7 @@ xtctx_save_faq</code></pre>
         </Card>
 
         <Card class="proof-card preview-card">
-          <template #title>Runtime operations console</template>
+          <template #title>Runtime console</template>
           <template #content>
             <img :src="runtimePreview" alt="xtctx runtime operations console screenshot" />
           </template>
@@ -130,7 +128,7 @@ xtctx_save_faq</code></pre>
     <section id="mechanism" class="section-block shell-panel">
       <div class="section-head">
         <p>Mechanism</p>
-        <h2>Ingest -> Index -> Sync -> Resume</h2>
+        <h2>Ingest -> index -> sync -> resume</h2>
       </div>
 
       <div class="mechanism-grid">
@@ -146,7 +144,7 @@ xtctx_save_faq</code></pre>
     <section id="proof" class="section-block shell-panel">
       <div class="section-head">
         <p>Capabilities</p>
-        <h2>Built for cross-assistant engineering continuity</h2>
+        <h2>Coverage for cross-assistant continuity</h2>
       </div>
 
       <div class="proof-grid">

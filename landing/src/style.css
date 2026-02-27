@@ -1,36 +1,36 @@
-@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Outfit:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700;800&family=Sora:wght@500;600;700;800&display=swap");
 @import "../../styles/xtctx-tokens.css";
 
 :root {
   color-scheme: dark;
-  --land-bg: #040914;
-  --land-bg-soft: #091327;
-  --land-panel: #0e1932;
-  --land-panel-strong: #121f3d;
-  --land-border: #274069;
-  --land-text: #d8e6ff;
-  --land-text-muted: #95a9cf;
-  --land-text-dim: #6f85b3;
-  --land-accent: #2cd9b6;
-  --land-accent-2: #2f9dff;
-  --land-radius: 18px;
+  --land-bg: #0b1018;
+  --land-bg-soft: #111927;
+  --land-panel: #141f2f;
+  --land-panel-strong: #1a2536;
+  --land-border: rgba(145, 166, 198, 0.24);
+  --land-text: #e9f0fb;
+  --land-text-muted: #acbdd8;
+  --land-text-dim: #8799b6;
+  --land-accent: #7ea8de;
+  --land-accent-2: #6d93ca;
+  --land-radius: 16px;
   --land-radius-sm: 12px;
-  --land-shadow: 0 18px 32px rgba(2, 7, 17, 0.36);
+  --land-shadow: 0 12px 28px rgba(4, 8, 13, 0.24);
 }
 
 :root.light-mode {
   color-scheme: light;
-  --land-bg: #edf4ff;
-  --land-bg-soft: #e1ebfb;
+  --land-bg: #eff4fb;
+  --land-bg-soft: #e8eef7;
   --land-panel: #f8fbff;
   --land-panel-strong: #ffffff;
-  --land-border: #ceddf7;
-  --land-text: #182b4d;
-  --land-text-muted: #4f658d;
-  --land-text-dim: #6f84ac;
-  --land-accent: #0d957d;
-  --land-accent-2: #1e75d7;
-  --land-shadow: 0 14px 28px rgba(21, 46, 89, 0.12);
+  --land-border: rgba(102, 124, 156, 0.22);
+  --land-text: #1d2b42;
+  --land-text-muted: #5d7194;
+  --land-text-dim: #7f92b0;
+  --land-accent: #3f76b9;
+  --land-accent-2: #5f93d1;
+  --land-shadow: 0 10px 24px rgba(21, 46, 89, 0.1);
 }
 
 * {
@@ -46,11 +46,11 @@ body,
 body {
   margin: 0;
   color: var(--land-text);
-  font-family: "Outfit", var(--xt-font-body);
+  font-family: "Manrope", var(--xt-font-body);
   line-height: 1.5;
   background:
-    radial-gradient(circle at 12% -8%, color-mix(in srgb, var(--land-accent-2), transparent 84%), transparent 38%),
-    radial-gradient(circle at 90% -12%, color-mix(in srgb, var(--land-accent), transparent 84%), transparent 32%),
+    radial-gradient(circle at 12% -18%, color-mix(in srgb, var(--land-accent-2), transparent 95%), transparent 36%),
+    radial-gradient(circle at 90% -22%, color-mix(in srgb, var(--land-accent), transparent 95%), transparent 34%),
     linear-gradient(180deg, var(--land-bg), var(--land-bg-soft));
 }
 
@@ -65,10 +65,10 @@ pre {
 }
 
 .landing-shell {
-  width: min(1240px, calc(100% - 3.4rem));
-  margin: 1.75rem auto 3.6rem;
+  width: min(1180px, calc(100% - 3.6rem));
+  margin: 2.1rem auto 4rem;
   display: grid;
-  gap: 1.4rem;
+  gap: 1.9rem;
 }
 
 .shell-panel {
@@ -80,9 +80,9 @@ pre {
 
 .site-nav {
   position: sticky;
-  top: 0.8rem;
+  top: 1rem;
   z-index: 10;
-  padding: 1rem 1.25rem;
+  padding: 1.05rem 1.3rem;
   display: grid;
   grid-template-columns: auto 1fr auto;
   gap: 1rem;
@@ -95,10 +95,10 @@ pre {
 }
 
 .brand span {
-  font-family: "Space Grotesk", var(--xt-font-heading);
-  font-size: 2rem;
+  font-family: "Sora", var(--xt-font-heading);
+  font-size: 2.02rem;
   line-height: 0.95;
-  letter-spacing: -0.03em;
+  letter-spacing: -0.02em;
 }
 
 .brand small {
@@ -121,13 +121,13 @@ pre {
   border-radius: 10px;
   padding: 0.5rem 0.85rem;
   color: var(--land-text-muted);
-  font-weight: 600;
+  font-weight: 650;
   font-size: 0.92rem;
 }
 
 .site-nav nav a:hover {
   border-color: var(--land-border);
-  background: color-mix(in srgb, var(--land-panel), #000 10%);
+  background: color-mix(in srgb, var(--land-panel-strong), transparent 8%);
   color: var(--land-text);
 }
 
@@ -139,25 +139,25 @@ pre {
 }
 
 .hero {
-  padding: 1.7rem;
+  padding: 2rem;
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
-  gap: 1.25rem;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  gap: 1.5rem;
 }
 
 .hero-copy {
   display: grid;
   align-content: start;
-  gap: 1rem;
+  gap: 1.1rem;
 }
 
 .hero-copy h1 {
   margin: 0;
-  max-width: 9.4ch;
-  font-family: "Space Grotesk", var(--xt-font-heading);
-  font-size: clamp(2.35rem, 5vw, 4.4rem);
-  line-height: 0.95;
-  letter-spacing: -0.045em;
+  max-width: 10.5ch;
+  font-family: "Sora", var(--xt-font-heading);
+  font-size: clamp(2.6rem, 5vw, 4.45rem);
+  line-height: 1.02;
+  letter-spacing: -0.035em;
 }
 
 .hero-copy p {
@@ -176,12 +176,12 @@ pre {
 .hero-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.55rem;
+  gap: 0.65rem;
 }
 
 .hero-proof {
   display: grid;
-  gap: 0.95rem;
+  gap: 1.1rem;
 }
 
 .proof-card {
@@ -191,7 +191,7 @@ pre {
 }
 
 .proof-card .p-card-body {
-  padding: 1.15rem;
+  padding: 1.22rem;
 }
 
 .proof-card pre {
@@ -199,7 +199,7 @@ pre {
   padding: 1rem;
   border-radius: 10px;
   border: 1px solid var(--land-border);
-  background: color-mix(in srgb, var(--land-panel), #000 15%);
+  background: color-mix(in srgb, var(--land-panel), #000 12%);
   color: var(--land-text);
   overflow: auto;
   font-size: 0.79rem;
@@ -214,9 +214,13 @@ pre {
 }
 
 .section-block {
-  padding: 1.5rem;
+  padding: 1.75rem;
   display: grid;
-  gap: 1.25rem;
+  gap: 1.35rem;
+}
+
+.section-block:nth-of-type(odd) {
+  background: color-mix(in srgb, var(--land-panel), #fff 2%);
 }
 
 .section-head {
@@ -237,7 +241,7 @@ pre {
 .section-head h2 {
   margin: 0;
   max-width: 24ch;
-  font-family: "Space Grotesk", var(--xt-font-heading);
+  font-family: "Sora", var(--xt-font-heading);
   font-size: clamp(1.65rem, 3vw, 2.4rem);
   line-height: 1.13;
   letter-spacing: -0.03em;
@@ -248,7 +252,7 @@ pre {
 .quick-grid {
   display: grid;
   gap: 1rem;
-  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
 }
 
 .mechanism-card,
@@ -257,6 +261,7 @@ pre {
   border: 1px solid var(--land-border);
   border-radius: var(--land-radius-sm);
   background: var(--land-panel-strong);
+  box-shadow: 0 8px 20px rgba(5, 8, 13, 0.12);
 }
 
 .mechanism-card .p-card-body,
@@ -275,7 +280,7 @@ pre {
 .compat-row {
   border: 1px solid var(--land-border);
   border-radius: var(--land-radius-sm);
-  background: color-mix(in srgb, var(--land-panel), #000 8%);
+  background: color-mix(in srgb, var(--land-panel), #000 4%);
   padding: 1.15rem;
   display: grid;
   gap: 1rem;
@@ -301,10 +306,11 @@ pre {
   padding: 0.95rem;
   border: 1px solid var(--land-border);
   border-radius: 10px;
-  background: color-mix(in srgb, var(--land-panel), #000 16%);
+  background: color-mix(in srgb, var(--land-panel), #000 12%);
   color: var(--land-text);
   overflow: auto;
   font-size: 0.79rem;
+  line-height: 1.58;
 }
 
 .p-card {
@@ -313,20 +319,21 @@ pre {
 }
 
 .p-card .p-card-title {
-  font-family: "Space Grotesk", var(--xt-font-heading);
-  font-size: 1rem;
+  font-family: "Sora", var(--xt-font-heading);
+  font-size: 1.08rem;
+  line-height: 1.3;
 }
 
 .p-button {
   border-radius: 10px;
-  min-height: 2.42rem;
-  font-weight: 700;
+  min-height: 2.52rem;
+  font-weight: 650;
 }
 
 .p-button:not(.p-button-outlined):not(.p-button-text):not(.p-button-secondary) {
-  border: 1px solid transparent;
-  color: #06141e;
-  background: linear-gradient(118deg, var(--land-accent), var(--land-accent-2));
+  border: 1px solid color-mix(in srgb, var(--land-accent), var(--land-border) 86%);
+  color: #f2f7ff;
+  background: color-mix(in srgb, var(--land-accent), var(--land-panel) 72%);
 }
 
 :root.light-mode .p-button:not(.p-button-outlined):not(.p-button-text):not(.p-button-secondary) {
@@ -337,12 +344,13 @@ pre {
 .p-button.p-button-text {
   border-color: var(--land-border);
   color: var(--land-text-muted);
+  background: color-mix(in srgb, var(--land-panel-strong), transparent 8%);
 }
 
 .p-button.p-button-outlined:hover,
 .p-button.p-button-text:hover {
   color: var(--land-text);
-  background: color-mix(in srgb, var(--land-panel), #000 8%);
+  background: color-mix(in srgb, var(--land-panel), #000 4%);
 }
 
 .p-tag {
@@ -359,7 +367,7 @@ a:focus-visible {
 
 @media (max-width: 1060px) {
   .landing-shell {
-    width: calc(100% - 2.1rem);
+    width: calc(100% - 2.4rem);
   }
 
   .site-nav {
@@ -387,7 +395,7 @@ a:focus-visible {
 
   .hero,
   .section-block {
-    padding: 1.1rem;
+    padding: 1.2rem;
   }
 
   .hero-copy h1 {
