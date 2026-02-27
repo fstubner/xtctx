@@ -1,6 +1,7 @@
 import { Router } from "express";
-import { stat } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute, join, resolve } from "node:path";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type { SessionService } from "../../mcp/tools/sessions.js";
 import type { ContextRecord } from "../../types/context.js";
 
@@ -10,6 +11,9 @@ export interface SourcesRouteDependencies {
   stateDir: string;
   ingestion: {
     scrapers: Array<{ tool: string; enabled: boolean; customStorePath?: string }>;
+    watchPaths: string[];
+    pollIntervalMs: number;
+    excludePatterns: string[];
   };
   sessions: SessionService;
   knowledgeRecords: () => Promise<ContextRecord[]>;
@@ -75,7 +79,185 @@ export function createSourcesRouter(deps: SourcesRouteDependencies): Router {
     }
   });
 
+  router.get("/config", async (_req, res, next) => {
+    try {
+      const scraperStatuses = await buildScraperStatuses(deps.ingestion.scrapers);
+      res.json({
+        watchPaths: deps.ingestion.watchPaths,
+        pollIntervalMs: deps.ingestion.pollIntervalMs,
+        excludePatterns: deps.ingestion.excludePatterns,
+        scrapers: scraperStatuses,
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.put("/scrapers/:tool", async (req, res, next) => {
+    try {
+      const tool = normalizeTool(String(req.params.tool ?? "").trim());
+      if (!tool) {
+        res.status(400).json({ error: "tool is required" });
+        return;
+      }
+
+      const patch = parseScraperPatch(req.body);
+      if (!patch.hasPatch) {
+        res.status(400).json({ error: "At least one of enabled or customStorePath is required." });
+        return;
+      }
+
+      const runtimePath = patch.customStorePath === undefined
+        ? undefined
+        : patch.customStorePath
+          ? resolveCustomStorePath(patch.customStorePath, deps.projectRoot)
+          : null;
+
+      upsertRuntimeScraper(deps.ingestion.scrapers, tool, patch.enabled, runtimePath);
+      await upsertPersistedScraperConfig(deps.projectRoot, tool, patch.enabled, patch.customStorePath);
+
+      const scraperStatuses = await buildScraperStatuses(deps.ingestion.scrapers);
+      const scraper = scraperStatuses.find((item) => normalizeTool(item.tool) === tool);
+
+      res.json({
+        tool,
+        scraper,
+        scrapers: scraperStatuses,
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   return router;
+}
+
+interface ScraperPatch {
+  hasPatch: boolean;
+  enabled?: boolean;
+  customStorePath?: string | null;
+}
+
+function parseScraperPatch(input: unknown): ScraperPatch {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return { hasPatch: false };
+  }
+
+  const raw = input as Record<string, unknown>;
+  const patch: ScraperPatch = { hasPatch: false };
+
+  if (typeof raw.enabled === "boolean") {
+    patch.enabled = raw.enabled;
+    patch.hasPatch = true;
+  }
+
+  if (typeof raw.customStorePath === "string") {
+    const value = raw.customStorePath.trim();
+    patch.customStorePath = value.length > 0 ? value : null;
+    patch.hasPatch = true;
+  } else if (raw.customStorePath === null) {
+    patch.customStorePath = null;
+    patch.hasPatch = true;
+  }
+
+  return patch;
+}
+
+function resolveCustomStorePath(input: string, projectRoot: string): string {
+  return isAbsolute(input) ? input : resolve(projectRoot, input);
+}
+
+function upsertRuntimeScraper(
+  scrapers: Array<{ tool: string; enabled: boolean; customStorePath?: string }>,
+  tool: string,
+  enabled?: boolean,
+  runtimePath?: string | null,
+): void {
+  const index = scrapers.findIndex((item) => normalizeTool(item.tool) === tool);
+  const current = index >= 0
+    ? { ...scrapers[index] }
+    : { tool, enabled: true };
+
+  if (typeof enabled === "boolean") {
+    current.enabled = enabled;
+  }
+
+  if (runtimePath === null) {
+    delete current.customStorePath;
+  } else if (typeof runtimePath === "string") {
+    current.customStorePath = runtimePath;
+  }
+
+  if (index >= 0) {
+    scrapers[index] = current;
+  } else {
+    scrapers.push(current);
+  }
+}
+
+async function upsertPersistedScraperConfig(
+  projectRoot: string,
+  tool: string,
+  enabled?: boolean,
+  customStorePath?: string | null,
+): Promise<void> {
+  const configPath = join(projectRoot, ".xtctx", "config.yaml");
+  const document = await loadConfigDocument(configPath);
+
+  const ingestion = readRecord(document, "ingestion");
+  const scraperList = Array.isArray(ingestion.scrapers) ? ingestion.scrapers : [];
+  const parsedScrapers = scraperList
+    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item))
+    .map((item) => ({ ...item }));
+
+  const index = parsedScrapers.findIndex((item) => normalizeTool(String(item.tool ?? "")) === tool);
+  const current = index >= 0 ? parsedScrapers[index] : { tool };
+
+  current.tool = tool;
+
+  if (typeof enabled === "boolean") {
+    current.enabled = enabled;
+  }
+
+  if (customStorePath === null) {
+    delete current.customStorePath;
+  } else if (typeof customStorePath === "string") {
+    current.customStorePath = customStorePath;
+  }
+
+  if (index >= 0) {
+    parsedScrapers[index] = current;
+  } else {
+    parsedScrapers.push(current);
+  }
+
+  ingestion.scrapers = parsedScrapers;
+  document.ingestion = ingestion;
+  await mkdir(dirname(configPath), { recursive: true });
+  await writeFile(configPath, stringifyYaml(document), "utf-8");
+}
+
+async function loadConfigDocument(path: string): Promise<Record<string, unknown>> {
+  try {
+    const raw = await readFile(path, "utf-8");
+    const parsed = parseYaml(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // ignore and return defaults
+  }
+
+  return {};
+}
+
+function readRecord(source: Record<string, unknown>, key: string): Record<string, unknown> {
+  const value = source[key];
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return { ...(value as Record<string, unknown>) };
+  }
+
+  return {};
 }
 
 function resolveClaudeProjectsDir(): string {
