@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { RouterLink, RouterView } from "vue-router";
+import { RouterLink, RouterView, useRoute, useRouter } from "vue-router";
 import { apiGet } from "./composables/useApi";
 import { useTheme } from "./composables/useTheme";
 import type { ContinuityToolsStatusResponse, SourceStatusResponse } from "./types";
@@ -25,6 +25,8 @@ const navItems = [
 ] as const;
 
 const { isDark, toggleTheme } = useTheme();
+const router = useRouter();
+const route = useRoute();
 
 const health = ref<HealthResponse | null>(null);
 const sourceStatus = ref<SourceStatusResponse | null>(null);
@@ -72,6 +74,9 @@ const syncPill = computed<StatusPill>(() => {
 });
 
 const projectRoot = computed(() => health.value?.projectRoot ?? "Project root unavailable");
+const activeSectionLabel = computed(
+  () => navItems.find((item) => item.to === route.path)?.label ?? "Workspace",
+);
 
 function pillClass(pill: StatusPill): string {
   if (pill.tone === "ok") {
@@ -113,25 +118,13 @@ onMounted(async () => {
 <template>
   <div class="xt-shell">
     <aside class="xt-panel rt-sidebar">
-      <div class="space-y-3">
-        <p class="xt-eyebrow">xtctx runtime</p>
-        <h1 class="rt-brand-title">Workspace</h1>
-        <p class="text-sm leading-relaxed text-muted">
-          Operate continuity state for this repository.
-        </p>
+      <div class="space-y-1">
+        <h1 class="rt-brand-title">xtctx</h1>
+        <p class="rt-brand-subtitle">cross tool context management</p>
       </div>
 
-      <section class="rt-info-block">
-        <p class="xt-eyebrow">Project root</p>
-        <code>{{ projectRoot }}</code>
-      </section>
-
-      <section class="rt-info-block">
-        <p class="xt-eyebrow">Session opener</p>
-        <code>{{ starter }}</code>
-      </section>
-
       <nav class="rt-nav" aria-label="Primary navigation">
+        <p class="xt-eyebrow">Navigation</p>
         <RouterLink
           v-for="item in navItems"
           :key="item.to"
@@ -150,20 +143,26 @@ onMounted(async () => {
         </RouterLink>
       </nav>
 
+      <section class="rt-info-block">
+        <p class="xt-eyebrow">Project root</p>
+        <code>{{ projectRoot }}</code>
+      </section>
+
       <div class="mt-auto space-y-2">
         <div class="rt-toolbar">
           <a class="xt-btn-ghost" href="/health" target="_blank" rel="noreferrer">Health</a>
           <a class="xt-btn-ghost" href="/api/sources" target="_blank" rel="noreferrer">Sources API</a>
         </div>
-        <button class="xt-btn w-full" type="button" @click="$router.push('/search')">Start recall</button>
+        <button class="xt-btn w-full" type="button" @click="router.push('/search')">Start recall</button>
       </div>
     </aside>
 
     <section class="rt-main">
       <header class="xt-panel rt-topbar">
-        <div class="space-y-2">
-          <p class="xt-eyebrow">runtime status</p>
-          <h2 class="rt-topbar-title">Continuity operator console</h2>
+        <div class="space-y-1">
+          <p class="xt-eyebrow">xtctx runtime</p>
+          <h2 class="rt-topbar-title">{{ activeSectionLabel }}</h2>
+          <p class="text-sm text-muted">Local app shell for cross-tool context operations.</p>
         </div>
 
         <div class="rt-toolbar">
@@ -175,6 +174,24 @@ onMounted(async () => {
           </button>
         </div>
       </header>
+
+      <section class="xt-panel rt-contextbar">
+        <div class="rt-info-block">
+          <p class="xt-eyebrow">Project root</p>
+          <code>{{ projectRoot }}</code>
+        </div>
+        <div class="rt-info-block">
+          <p class="xt-eyebrow">Session opener</p>
+          <code>{{ starter }}</code>
+        </div>
+        <div class="rt-info-block">
+          <p class="xt-eyebrow">Quick actions</p>
+          <div class="rt-toolbar">
+            <button class="xt-btn-ghost" type="button" @click="router.push('/search')">Open search</button>
+            <button class="xt-btn-ghost" type="button" @click="router.push('/knowledge')">Open knowledge</button>
+          </div>
+        </div>
+      </section>
 
       <main class="xt-panel rt-content">
         <RouterView />

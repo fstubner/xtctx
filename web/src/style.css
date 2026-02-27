@@ -218,7 +218,11 @@
 
   .rt-brand-title {
     font-family: "Rajdhani", "IBM Plex Sans", sans-serif;
-    @apply text-3xl font-semibold uppercase tracking-[0.01em];
+    @apply text-3xl font-semibold tracking-[0.01em];
+  }
+
+  .rt-brand-subtitle {
+    @apply text-xs tracking-[0.06em] text-muted;
   }
 
   .rt-main {
@@ -231,11 +235,15 @@
 
   .rt-topbar-title {
     font-family: "Rajdhani", "IBM Plex Sans", sans-serif;
-    @apply text-2xl font-semibold uppercase tracking-[0.01em];
+    @apply text-2xl font-semibold tracking-[0.01em];
   }
 
   .rt-content {
     @apply p-5 md:p-6;
+  }
+
+  .rt-contextbar {
+    @apply grid gap-3 p-4 md:grid-cols-3;
   }
 
   .rt-nav {
