@@ -1,16 +1,36 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
+import Card from "primevue/card";
+import Column from "primevue/column";
+import DataTable from "primevue/datatable";
+import Message from "primevue/message";
+import Tag from "primevue/tag";
 import { apiGet } from "../composables/useApi";
-import type { SourcesResponse } from "../types";
+import type { SourceStatusResponse, SourcesResponse } from "../types";
 
 const loading = ref(true);
 const error = ref("");
-const data = ref<SourcesResponse | null>(null);
+const status = ref<SourceStatusResponse | null>(null);
+const sources = ref<SourcesResponse | null>(null);
+
+const detectedCount = computed(
+  () => status.value?.scrapers.filter((scraper) => scraper.enabled && scraper.detected).length ?? 0,
+);
+
+const enabledCount = computed(
+  () => status.value?.scrapers.filter((scraper) => scraper.enabled).length ?? 0,
+);
 
 onMounted(async () => {
   try {
     loading.value = true;
-    data.value = await apiGet<SourcesResponse>("/api/sources");
+    const [statusPayload, sourcesPayload] = await Promise.all([
+      apiGet<SourceStatusResponse>("/api/sources/status"),
+      apiGet<SourcesResponse>("/api/sources"),
+    ]);
+
+    status.value = statusPayload;
+    sources.value = sourcesPayload;
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err);
   } finally {
@@ -20,37 +40,94 @@ onMounted(async () => {
 </script>
 
 <template>
-  <section class="page">
+  <section class="page-shell">
     <div class="page-head">
-      <h1>Sources</h1>
-      <p>Data sources and scraper status for this project.</p>
+      <p class="page-eyebrow">Ingestion coverage</p>
+      <h2>Sources</h2>
+      <p>
+        Confirm which tool histories are detected and whether session continuity is actually ingesting.
+      </p>
     </div>
 
-    <div v-if="loading" class="card">Loading sources...</div>
-    <div v-else-if="error" class="card error">{{ error }}</div>
+    <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
 
-    <div v-else-if="data" class="grid">
-      <article v-for="source in data.sources" :key="source.name" class="card">
-        <header class="result-head">
-          <h3>{{ source.name }}</h3>
-          <span class="pill">{{ source.kind }}</span>
-        </header>
-        <p class="muted">{{ source.path }}</p>
-        <p v-if="source.records !== undefined">records: {{ source.records }}</p>
-        <p v-if="source.detected !== undefined">
-          detected: <strong>{{ source.detected ? "yes" : "no" }}</strong>
-        </p>
-      </article>
+    <div class="kpi-grid">
+      <Card class="surface-card kpi-card">
+        <template #content>
+          <p class="kpi-value">{{ enabledCount }}</p>
+          <p class="kpi-label">Enabled scrapers</p>
+        </template>
+      </Card>
+      <Card class="surface-card kpi-card">
+        <template #content>
+          <p class="kpi-value">{{ detectedCount }}</p>
+          <p class="kpi-label">Detected sources</p>
+        </template>
+      </Card>
+      <Card class="surface-card kpi-card">
+        <template #content>
+          <p class="kpi-value">{{ status?.knowledgeRecords ?? 0 }}</p>
+          <p class="kpi-label">Indexed records</p>
+        </template>
+      </Card>
+      <Card class="surface-card kpi-card">
+        <template #content>
+          <p class="kpi-value">{{ sources?.sessions.length ?? 0 }}</p>
+          <p class="kpi-label">Recent sessions</p>
+        </template>
+      </Card>
+    </div>
 
-      <article class="card">
-        <h3>Recent Sessions</h3>
-        <ul v-if="data.sessions.length">
-          <li v-for="session in data.sessions" :key="session.session_ref">
-            {{ session.session_ref }} · {{ session.tool }}
-          </li>
-        </ul>
-        <p v-else class="muted">No sessions available yet.</p>
-      </article>
+    <div class="split-grid">
+      <Card class="surface-card">
+        <template #title>Scraper health</template>
+        <template #content>
+          <DataTable
+            :value="status?.scrapers ?? []"
+            stripedRows
+            responsiveLayout="scroll"
+            :loading="loading"
+          >
+            <Column field="tool" header="Tool" />
+            <Column field="enabled" header="Enabled">
+              <template #body="{ data }">
+                <Tag :severity="data.enabled ? 'info' : 'secondary'" :value="data.enabled ? 'yes' : 'no'" />
+              </template>
+            </Column>
+            <Column field="detected" header="Detected">
+              <template #body="{ data }">
+                <Tag :severity="data.detected ? 'success' : 'warn'" :value="data.detected ? 'yes' : 'no'" />
+              </template>
+            </Column>
+            <Column field="path" header="Path">
+              <template #body="{ data }">
+                <code>{{ data.path }}</code>
+              </template>
+            </Column>
+          </DataTable>
+        </template>
+      </Card>
+
+      <Card class="surface-card">
+        <template #title>Recent sessions</template>
+        <template #content>
+          <DataTable
+            :value="sources?.sessions ?? []"
+            stripedRows
+            responsiveLayout="scroll"
+            :loading="loading"
+          >
+            <Column field="session_ref" header="Session" />
+            <Column field="tool" header="Tool" />
+            <Column field="started_at" header="Started">
+              <template #body="{ data }">
+                {{ new Date(data.started_at).toLocaleString() }}
+              </template>
+            </Column>
+            <Column field="message_count" header="Msgs" />
+          </DataTable>
+        </template>
+      </Card>
     </div>
   </section>
 </template>

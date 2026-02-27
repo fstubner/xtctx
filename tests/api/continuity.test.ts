@@ -68,6 +68,26 @@ describe("Continuity API routes", () => {
     }) as { tool: string; state: string };
     expect(syncCodex.tool).toBe("codex");
 
+    const updateCodex = await fetchJson(`${baseUrl}/api/continuity/tools/codex`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        scope: "hybrid",
+        categories: {
+          slash_commands: false,
+        },
+      }),
+    }) as {
+      tool: string;
+      toolStatus: {
+        scope: string;
+        categories: Record<string, boolean>;
+      };
+    };
+    expect(updateCodex.tool).toBe("codex");
+    expect(updateCodex.toolStatus.scope).toBe("hybrid");
+    expect(updateCodex.toolStatus.categories.slash_commands).toBe(false);
+
     const warnings = await fetchJson(`${baseUrl}/api/continuity/warnings`) as {
       warnings: Array<{ tool: string; warning: string }>;
       count: number;

@@ -4,11 +4,13 @@ import DashboardPage from "./pages/Dashboard.vue";
 import KnowledgePage from "./pages/Knowledge.vue";
 import SearchPage from "./pages/Search.vue";
 import SourcesPage from "./pages/Sources.vue";
+import ToolsPage from "./pages/Tools.vue";
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: "/", name: "dashboard", component: DashboardPage },
+    { path: "/tools", name: "tools", component: ToolsPage },
     { path: "/search", name: "search", component: SearchPage },
     { path: "/knowledge", name: "knowledge", component: KnowledgePage },
     { path: "/sources", name: "sources", component: SourcesPage },

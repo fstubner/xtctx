@@ -1,6 +1,6 @@
-import { readFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
-import { parse as parseYaml } from "yaml";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 export const CONTINUITY_CATEGORIES = [
   "context_feed",
@@ -130,6 +130,24 @@ export async function loadEffectiveContinuityPolicy(
     ],
     resolved_at: new Date().toISOString(),
   };
+}
+
+export async function loadRepoContinuityPolicyLayer(
+  projectPath?: string,
+): Promise<ContinuityPolicyLayer> {
+  const path = getRepoContinuityPolicyPath(projectPath);
+  const layer = await loadContinuityPolicyLayer(path, "repo");
+  return layer ?? createEmptyLayer();
+}
+
+export async function writeRepoContinuityPolicyLayer(
+  layer: ContinuityPolicyLayer,
+  projectPath?: string,
+): Promise<void> {
+  const filePath = getRepoContinuityPolicyPath(projectPath);
+  const normalized = normalizeLayerForWrite(layer);
+  await mkdir(dirname(filePath), { recursive: true });
+  await writeFile(filePath, `${stringifyYaml(normalized).trimEnd()}\n`, "utf-8");
 }
 
 export function mergeContinuityPolicyLayers(
@@ -595,5 +613,61 @@ function createEmptyLayer(): ContinuityPolicyLayer {
     defaults: {},
     tools: {},
     policy: { whitelist: {} },
+  };
+}
+
+function normalizeLayerForWrite(layer: ContinuityPolicyLayer): Record<string, unknown> {
+  return {
+    defaults: normalizeDefaultsForWrite(layer.defaults),
+    tools: normalizeToolsForWrite(layer.tools),
+    policy: {
+      whitelist: normalizeWhitelistForWrite(layer.policy.whitelist),
+    },
+  };
+}
+
+function normalizeDefaultsForWrite(defaults: Partial<ContinuityDefaults>): Record<string, unknown> {
+  const categories = defaults.categories_enabled
+    ? dedupeCategories(defaults.categories_enabled)
+    : undefined;
+
+  return {
+    sync_enabled: defaults.sync_enabled ?? true,
+    categories_enabled: categories ?? [...CONTINUITY_CATEGORIES],
+    scope: defaults.scope ?? "project",
+  };
+}
+
+function normalizeToolsForWrite(
+  tools: Record<string, ToolPolicyOverrides>,
+): Record<string, unknown> {
+  const output: Record<string, unknown> = {};
+  for (const [tool, config] of Object.entries(tools)) {
+    const normalizedCategories: Record<string, boolean> = {};
+    for (const category of CONTINUITY_CATEGORIES) {
+      const value = config.categories?.[category];
+      if (typeof value === "boolean") {
+        normalizedCategories[category] = value;
+      }
+    }
+
+    output[tool] = {
+      enabled: config.enabled ?? true,
+      scope: config.scope ?? "project",
+      categories: normalizedCategories,
+      preferences: config.preferences ?? {},
+    };
+  }
+
+  return output;
+}
+
+function normalizeWhitelistForWrite(
+  whitelist: Partial<WhitelistPolicy>,
+): Record<string, unknown> {
+  return {
+    allowed_patterns: dedupeStrings(whitelist.allowed_patterns ?? []),
+    denied_patterns: dedupeStrings(whitelist.denied_patterns ?? []),
+    advisory_level: whitelist.advisory_level ?? "warn",
   };
 }
