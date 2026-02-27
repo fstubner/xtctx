@@ -58,24 +58,33 @@ const readinessMessage = computed(() => {
 });
 
 onMounted(async () => {
-  try {
-    loading.value = true;
-    const [statusPayload, sourcePayload, continuityPayload, warningsPayload] = await Promise.all([
-      apiGet<SourceStatusResponse>("/api/sources/status"),
-      apiGet<SourcesResponse>("/api/sources"),
-      apiGet<ContinuityToolsStatusResponse>("/api/continuity/tools-status"),
-      apiGet<ContinuityWarningsResponse>("/api/continuity/warnings"),
-    ]);
+  loading.value = true;
+  const [statusPayload, sourcePayload, continuityPayload, warningsPayload] = await Promise.allSettled([
+    apiGet<SourceStatusResponse>("/api/sources/status"),
+    apiGet<SourcesResponse>("/api/sources"),
+    apiGet<ContinuityToolsStatusResponse>("/api/continuity/tools-status"),
+    apiGet<ContinuityWarningsResponse>("/api/continuity/warnings"),
+  ]);
 
-    sourcesStatus.value = statusPayload;
-    sources.value = sourcePayload;
-    continuity.value = continuityPayload;
-    warnings.value = warningsPayload;
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : String(err);
-  } finally {
-    loading.value = false;
+  if (statusPayload.status === "fulfilled") {
+    sourcesStatus.value = statusPayload.value;
   }
+
+  if (sourcePayload.status === "fulfilled") {
+    sources.value = sourcePayload.value;
+  }
+
+  if (continuityPayload.status === "fulfilled") {
+    continuity.value = continuityPayload.value;
+  } else {
+    error.value = "Tool sync service is unavailable. Check .xtctx/tool-config/shared.yaml.";
+  }
+
+  if (warningsPayload.status === "fulfilled") {
+    warnings.value = warningsPayload.value;
+  }
+
+  loading.value = false;
 });
 
 function toolSeverity(state: string) {

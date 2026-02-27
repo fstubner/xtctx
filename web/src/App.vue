@@ -58,7 +58,7 @@ const contextTag = computed(() => {
 const continuityTag = computed(() => {
   const tools = continuity.value?.tools ?? [];
   if (tools.length === 0) {
-    return { severity: "warn" as const, label: "no tool sync status" };
+    return { severity: "contrast" as const, label: "sync unavailable" };
   }
 
   const drifted = tools.filter(
@@ -74,18 +74,22 @@ const continuityTag = computed(() => {
 const projectRoot = computed(() => health.value?.projectRoot ?? "Project root unavailable");
 
 onMounted(async () => {
-  try {
-    const [healthResponse, sourceResponse, continuityResponse] = await Promise.all([
-      apiGet<HealthResponse>("/health"),
-      apiGet<SourceStatusResponse>("/api/sources/status"),
-      apiGet<ContinuityToolsStatusResponse>("/api/continuity/tools-status"),
-    ]);
+  const [healthResponse, sourceResponse, continuityResponse] = await Promise.allSettled([
+    apiGet<HealthResponse>("/health"),
+    apiGet<SourceStatusResponse>("/api/sources/status"),
+    apiGet<ContinuityToolsStatusResponse>("/api/continuity/tools-status"),
+  ]);
 
-    health.value = healthResponse;
-    sourceStatus.value = sourceResponse;
-    continuity.value = continuityResponse;
-  } catch {
-    // Errors are surfaced by page-level calls; shell remains functional.
+  if (healthResponse.status === "fulfilled") {
+    health.value = healthResponse.value;
+  }
+
+  if (sourceResponse.status === "fulfilled") {
+    sourceStatus.value = sourceResponse.value;
+  }
+
+  if (continuityResponse.status === "fulfilled") {
+    continuity.value = continuityResponse.value;
   }
 });
 </script>
@@ -96,11 +100,11 @@ onMounted(async () => {
 
     <header class="shell-header shell-panel">
       <div class="header-brand">
-        <p class="eyebrow">xtctx continuity runtime</p>
-        <h1>Cross-tool continuity console</h1>
+        <p class="eyebrow">xtctx runtime</p>
+        <h1>Continuity operations</h1>
         <p>
-          Orchestrate policy sync across assistants, recall context before edits,
-          and write validated outcomes back into project memory.
+          Recall context before edits, keep tool behavior aligned, and write validated
+          outcomes back to project memory.
         </p>
       </div>
 
@@ -124,7 +128,7 @@ onMounted(async () => {
         <code>{{ projectRoot }}</code>
       </div>
       <div>
-        <p class="eyebrow">Session starter</p>
+        <p class="eyebrow">Session opener</p>
         <code>{{ starter }}</code>
       </div>
       <div class="shell-context-links">
