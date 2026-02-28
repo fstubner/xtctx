@@ -1,7 +1,8 @@
 import { createReadStream } from "node:fs";
-import { readdir, stat } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { stat } from "node:fs/promises";
+import { basename } from "node:path";
 import { createInterface } from "node:readline";
+import { glob } from "glob";
 import type { CodexChunk, ConversationScraper, ScraperState } from "../types/scraper.js";
 import { estimateTokens, ScraperStateManager } from "./base.js";
 
@@ -78,45 +79,144 @@ export class CodexCliScraper implements ConversationScraper<CodexChunk> {
     await this.stateManager.save(this.tool, state);
   }
 
+  /**
+   * Processes Codex JSONL session files, which use an event-stream format.
+   *
+   * Each line is a JSON event with `type` ∈ {session_meta, turn_context,
+   * response_item, event_msg, compacted}. Conversation messages live inside
+   * `response_item` events where `payload.type === "message"`.
+   *
+   * Session-level state (session ID, approval mode, sandbox flag) is tracked
+   * across events so that every message chunk carries accurate metadata.
+   */
   private async *readAllSessions(since: Date): AsyncIterable<CodexChunk> {
     const files = await this.resolveJsonlFiles();
 
     for (const filePath of files) {
-      const sessionId = inferSessionId(filePath);
+      const sessionIdFromFile = inferSessionId(filePath);
       const reader = createInterface({
         input: createReadStream(filePath, { encoding: "utf8" }),
         crlfDelay: Infinity,
       });
 
+      // Session-level state, updated as we encounter meta/context events.
+      let sessionId = sessionIdFromFile;
+      let approvalMode: ApprovalMode = "suggest";
+      let sandboxed = false;
       let messageIndex = 0;
+
       for await (const line of reader) {
         if (!line.trim()) {
           continue;
         }
 
+        let parsed: Record<string, unknown>;
         try {
-          const parsed = JSON.parse(line) as Record<string, unknown>;
+          parsed = JSON.parse(line) as Record<string, unknown>;
+        } catch {
+          continue;
+        }
+
+        const eventType = toStringValue(parsed.type);
+
+        // session_meta carries the canonical session UUID.
+        if (eventType === "session_meta") {
+          const payload = parsed.payload;
+          if (isRecord(payload)) {
+            sessionId = toStringValue(payload.id) ?? sessionIdFromFile;
+          }
+          continue;
+        }
+
+        // turn_context carries the approval policy and sandbox mode.
+        if (eventType === "turn_context") {
+          const payload = parsed.payload;
+          if (isRecord(payload)) {
+            approvalMode =
+              normalizeApprovalMode(toStringValue(payload.approval_policy)) ?? approvalMode;
+            const sandboxPolicy = payload.sandbox_policy;
+            sandboxed =
+              isRecord(sandboxPolicy) && toStringValue(sandboxPolicy.type) !== "none";
+          }
+          continue;
+        }
+
+        // Actual user messages arrive as event_msg with type "user_message".
+        // response_item events with role "user" are system-injected context
+        // (AGENTS.md, permissions, environment) and are intentionally skipped.
+        if (eventType === "event_msg") {
+          const payload = parsed.payload;
+          if (!isRecord(payload) || payload.type !== "user_message") continue;
+
+          const content = toStringValue(payload.message);
+          if (!content) {
+            messageIndex++;
+            continue;
+          }
+
           const timestamp = toDate(parsed.timestamp ?? parsed.created_at ?? parsed.createdAt);
           if (timestamp <= since) {
-            messageIndex += 1;
+            messageIndex++;
             continue;
           }
 
           yield this.parseRaw({
-            ...parsed,
-            sessionId: parsed.sessionId ?? parsed.session_id ?? sessionId,
+            sessionId,
             messageIndex,
             timestamp,
-            approvalMode: parsed.approvalMode ?? parsed.approval_mode,
+            role: "user",
+            content,
+            approvalMode,
+            sandboxed,
           });
-          messageIndex += 1;
-        } catch {
-          // Skip malformed lines.
+          messageIndex++;
+          continue;
         }
+
+        // Only assistant messages from response_item events are conversation turns.
+        if (eventType !== "response_item") continue;
+
+        const payload = parsed.payload;
+        if (!isRecord(payload) || payload.type !== "message") continue;
+
+        // Skip system-injected context which Codex sends as "user" role items.
+        const role = toStringValue(payload.role);
+        if (role !== "assistant") {
+          messageIndex++;
+          continue;
+        }
+
+        // Extract text from the content-part array (or plain string fallback).
+        const content = extractContent(payload.content);
+        if (!content) {
+          messageIndex++;
+          continue;
+        }
+
+        const timestamp = toDate(parsed.timestamp ?? parsed.created_at ?? parsed.createdAt);
+        if (timestamp <= since) {
+          messageIndex++;
+          continue;
+        }
+
+        yield this.parseRaw({
+          sessionId,
+          messageIndex,
+          timestamp,
+          role,
+          content,
+          approvalMode,
+          sandboxed,
+        });
+        messageIndex++;
       }
     }
   }
 
+  /**
+   * Recursively resolves JSONL files under the sessions directory.
+   * Codex stores sessions in year/month/day subdirectories.
+   */
   private async resolveJsonlFiles(): Promise<string[]> {
     try {
       const target = await stat(this.codexSessionsPath);
@@ -124,14 +224,40 @@ export class CodexCliScraper implements ConversationScraper<CodexChunk> {
         return this.codexSessionsPath.endsWith(".jsonl") ? [this.codexSessionsPath] : [];
       }
 
-      const files = await readdir(this.codexSessionsPath);
-      return files
-        .filter((file) => file.endsWith(".jsonl"))
-        .map((file) => join(this.codexSessionsPath, file));
+      if (!target.isDirectory()) {
+        return [];
+      }
+
+      return await glob("**/*.jsonl", {
+        cwd: this.codexSessionsPath,
+        absolute: true,
+        nodir: true,
+      });
     } catch {
       return [];
     }
   }
+}
+
+/**
+ * Extracts text from a Codex content-part value.
+ * Content is an array of {type, text} objects or a plain string.
+ */
+function extractContent(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
+
+  if (Array.isArray(value)) {
+    const texts = value
+      .map((item) => (isRecord(item) ? toStringValue(item.text) : undefined))
+      .filter((t): t is string => t !== undefined);
+    const joined = texts.join("\n").trim();
+    return joined.length > 0 ? joined : undefined;
+  }
+
+  return undefined;
 }
 
 function normalizeRole(value?: string): CodexChunk["role"] {
@@ -209,4 +335,8 @@ function toDate(value: unknown): Date {
   }
 
   return new Date(0);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

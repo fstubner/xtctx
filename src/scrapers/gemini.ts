@@ -1,5 +1,6 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
+import { glob } from "glob";
 import type { ConversationScraper, GeminiChunk, ScraperState } from "../types/scraper.js";
 import { estimateTokens, ScraperStateManager } from "./base.js";
 
@@ -8,6 +9,7 @@ const ROLE_MAP: Record<string, GeminiChunk["role"]> = {
   human: "user",
   assistant: "assistant",
   model: "assistant",
+  gemini: "assistant",
   system: "system",
   tool: "tool",
 };
@@ -120,6 +122,11 @@ export class GeminiCliScraper implements ConversationScraper<GeminiChunk> {
     }
   }
 
+  /**
+   * Resolves JSON files to parse. Prefers the Gemini CLI chat session layout:
+   *   <geminiHistoryPath>/<project>/chats/session-*.json
+   * Falls back to flat *.json files in the directory for custom/legacy paths.
+   */
   private async resolveJsonFiles(): Promise<string[]> {
     try {
       const target = await stat(this.geminiHistoryPath);
@@ -127,6 +134,22 @@ export class GeminiCliScraper implements ConversationScraper<GeminiChunk> {
         return this.geminiHistoryPath.endsWith(".json") ? [this.geminiHistoryPath] : [];
       }
 
+      if (!target.isDirectory()) {
+        return [];
+      }
+
+      // Primary: Gemini CLI stores sessions under <project>/chats/session-*.json
+      const sessionFiles = await glob("**/chats/session-*.json", {
+        cwd: this.geminiHistoryPath,
+        absolute: true,
+        nodir: true,
+      });
+
+      if (sessionFiles.length > 0) {
+        return sessionFiles;
+      }
+
+      // Fallback: flat directory of *.json files (custom or legacy layout)
       const files = await readdir(this.geminiHistoryPath);
       return files
         .filter((file) => file.endsWith(".json"))
@@ -137,6 +160,15 @@ export class GeminiCliScraper implements ConversationScraper<GeminiChunk> {
   }
 }
 
+/**
+ * Extracts conversation messages from a parsed Gemini session file.
+ *
+ * Supports three layouts:
+ *  1. Gemini CLI format: { sessionId, messages: [{type, content, timestamp}] }
+ *     where type ∈ {"user","gemini","error","info"} and content is a [{text}] array or string.
+ *  2. Sessions-with-turns: { sessions: [{ turns: [{prompt, response}] }] }
+ *  3. Flat array of messages: [{role, content, timestamp}]
+ */
 function extractGeminiMessages(input: unknown, fallbackSessionId: string): ParsedGeminiMessage[] {
   if (Array.isArray(input)) {
     return input
@@ -148,13 +180,46 @@ function extractGeminiMessages(input: unknown, fallbackSessionId: string): Parse
     return [];
   }
 
+  // Gemini CLI native format: { sessionId, messages: [...] }
   if (Array.isArray(input.messages)) {
     const sessionId = toStringValue(input.sessionId ?? input.session_id) ?? fallbackSessionId;
-    return input.messages
-      .filter((entry): entry is Record<string, unknown> => isRecord(entry))
-      .map((entry) => mapSimpleMessage(entry, sessionId));
+    const rows: ParsedGeminiMessage[] = [];
+
+    for (const entry of input.messages) {
+      if (!isRecord(entry)) continue;
+
+      // The Gemini CLI uses 'type' as the role discriminator.
+      const typeField = toStringValue(entry.type);
+
+      // Skip system/error/info messages — they're not conversation turns.
+      if (typeField === "info" || typeField === "error") continue;
+
+      // Resolve role: prefer 'role'/'author' field, fall back to 'type'.
+      const role = toStringValue(entry.role ?? entry.author) ?? typeField;
+      if (!role) continue;
+
+      // Content may be an array of {text} parts or a plain string.
+      const content = extractContent(entry.content);
+      if (!content) continue;
+
+      rows.push({
+        sessionId,
+        role,
+        content,
+        timestamp: (entry.timestamp ?? entry.created_at ?? entry.createdAt) as
+          | string
+          | number
+          | undefined,
+        model: toStringValue(entry.model),
+        promptTokens: toNumberOrUndefined(entry.promptTokens ?? entry.prompt_tokens),
+        responseTokens: toNumberOrUndefined(entry.responseTokens ?? entry.response_tokens),
+      });
+    }
+
+    return rows;
   }
 
+  // Legacy format: { sessions: [{ turns: [{prompt, response}] }] }
   if (Array.isArray(input.sessions)) {
     const rows: ParsedGeminiMessage[] = [];
 
@@ -221,11 +286,12 @@ function extractGeminiMessages(input: unknown, fallbackSessionId: string): Parse
   return [];
 }
 
+/** Maps a flat message record using role/author and content/text fields. */
 function mapSimpleMessage(message: Record<string, unknown>, sessionId: string): ParsedGeminiMessage {
   return {
     sessionId,
     role: toStringValue(message.role ?? message.author),
-    content: toStringValue(message.content ?? message.text),
+    content: extractContent(message.content ?? message.text),
     timestamp: (message.timestamp ?? message.created_at ?? message.createdAt) as
       | string
       | number
@@ -234,6 +300,28 @@ function mapSimpleMessage(message: Record<string, unknown>, sessionId: string): 
     promptTokens: toNumberOrUndefined(message.promptTokens ?? message.prompt_tokens),
     responseTokens: toNumberOrUndefined(message.responseTokens ?? message.response_tokens),
   };
+}
+
+/**
+ * Extracts text content from a value that may be:
+ *  - a plain string
+ *  - an array of {text: string} objects (Gemini CLI content-part format)
+ */
+function extractContent(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
+
+  if (Array.isArray(value)) {
+    const texts = value
+      .map((item) => (isRecord(item) ? toStringValue(item.text) : undefined))
+      .filter((t): t is string => t !== undefined);
+    const joined = texts.join("\n").trim();
+    return joined.length > 0 ? joined : undefined;
+  }
+
+  return undefined;
 }
 
 function normalizeRole(value?: string): GeminiChunk["role"] {

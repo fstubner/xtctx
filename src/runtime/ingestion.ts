@@ -153,7 +153,8 @@ function defaultCopilotHistoryPath(): string {
 
 function defaultGeminiHistoryPath(): string {
   const home = process.env.USERPROFILE ?? process.env.HOME ?? "";
-  return join(home, ".gemini", "history");
+  // Gemini CLI stores session files under ~/.gemini/tmp/<project>/chats/session-*.json
+  return join(home, ".gemini", "tmp");
 }
 
 function uniquePaths(paths: string[]): string[] {
