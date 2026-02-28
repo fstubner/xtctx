@@ -1,4 +1,6 @@
-const API_BASE = (import.meta.env.VITE_XTCTX_API_BASE as string | undefined) ?? "http://127.0.0.1:3232";
+const API_BASE =
+  (import.meta.env.VITE_XTCTX_API_BASE as string | undefined) ??
+  (typeof window !== "undefined" ? window.location.origin : "http://127.0.0.1:3232");
 
 export async function apiGet<T>(
   path: string,
