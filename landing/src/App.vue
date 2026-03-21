@@ -1,178 +1,220 @@
 <script setup lang="ts">
-import { useTheme } from "./composables/useTheme";
+import { ref } from "vue";
 import runtimePreview from "./assets/runtime-screenshot.png";
+import { useTheme } from "./composables/useTheme";
 
 const { isDark, toggleTheme } = useTheme();
+const copied = ref(false);
 
-const mechanism = [
+function copyInstall() {
+  navigator.clipboard.writeText("npx xtctx init && npx xtctx sync && npx xtctx serve").then(() => {
+    copied.value = true;
+    setTimeout(() => {
+      copied.value = false;
+    }, 2000);
+  });
+}
+
+const pillars = [
   {
-    title: "Ingest local history",
-    detail: "Collect conversation traces from tools you use and index them locally per repository.",
+    title: "Context continuity",
+    detail:
+      "Ingest local assistant histories and project writeback so another tool can resume with the same project state.",
   },
   {
-    title: "Normalize continuity memory",
-    detail: "Keep decisions, fixes, and FAQs in one searchable project memory layer.",
+    title: "Tool behavior sync",
+    detail:
+      "Generate and reconcile managed outputs for skills, commands, MCP config, slash commands, and assistant-specific instructions.",
   },
   {
-    title: "Sync tool behavior",
-    detail: "Propagate skills, commands, agents, MCP settings, and policy blocks across assistants.",
-  },
-  {
-    title: "Resume in another tool",
-    detail: "Start each session with recall-first context and consistent tool posture.",
+    title: "Policy and scope control",
+    detail:
+      "Drive project, global, or hybrid behavior from one shared policy file instead of reconfiguring every assistant by hand.",
   },
 ];
 
-const capabilities = [
-  "Cross-tool context continuity scoped to a codebase",
-  "Per-tool project/global/hybrid scope controls",
-  "Drift visibility for managed continuity targets",
-  "FAQ as first-class knowledge beside decisions and fixes",
+const automation = [
+  "Watch enabled local source paths and ingest new assistant sessions.",
+  "Keep managed continuity blocks aligned with the effective tool policy.",
+  "Expose searchable memory, source coverage, and sync status through the runtime UI, API, and MCP tools.",
+];
+
+const generatedOutputs = [
+  "AGENTS.md",
+  "CLAUDE.md",
+  ".cursorrules",
+  "copilot-instructions.md",
+  "MCP + API",
 ];
 </script>
 
 <template>
   <div class="lp-shell">
-    <header class="lp-panel flex flex-wrap items-center justify-between gap-4 px-6 py-4">
-      <a href="#top" class="space-y-1">
-        <p class="text-4xl font-semibold tracking-[-0.02em]" style="font-family: 'Sora', 'Manrope', sans-serif">xtctx</p>
-        <p class="lp-eyebrow">Cross-tool continuity orchestrator</p>
+    <header class="lp-nav">
+      <a href="#top" class="lp-brand">
+        <span class="lp-brand-mark">xt</span>
+        <div>
+          <span class="lp-brand-name">xtctx</span>
+          <p class="lp-brand-subtitle">cross-tool context management</p>
+        </div>
       </a>
 
-      <nav class="flex flex-wrap gap-2 text-sm font-semibold text-muted">
-        <a class="lp-btn-ghost" href="#mechanism">Mechanism</a>
-        <a class="lp-btn-ghost" href="#capabilities">Capabilities</a>
-        <a class="lp-btn-ghost" href="#quickstart">Quick start</a>
+      <nav class="lp-nav-links">
+        <a href="#what-it-manages">What it manages</a>
+        <a href="#automation">Automation</a>
+        <a href="#quickstart">Quick start</a>
       </nav>
 
-      <div class="flex flex-wrap gap-2">
+      <div class="lp-nav-actions">
         <button class="lp-btn-ghost" type="button" @click="toggleTheme">{{ isDark ? "Light" : "Dark" }}</button>
         <a class="lp-btn-ghost" href="https://github.com/fstubner/xtctx" target="_blank" rel="noreferrer">GitHub</a>
       </div>
     </header>
 
-    <section id="top" class="lp-panel grid gap-6 px-6 py-8 md:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] md:px-8 md:py-10">
-      <div class="space-y-5">
-        <p class="lp-eyebrow">Local-first continuity runtime</p>
-        <h1 class="lp-hero-title">Resume in any coding assistant without re-briefing.</h1>
-        <p class="max-w-2xl text-lg leading-relaxed lp-muted">
-          xtctx keeps project context portable by combining local history ingestion, searchable memory,
-          and policy-driven sync outputs for every assistant you use.
+    <section id="top" class="lp-hero">
+      <div class="lp-hero-copy">
+        <p class="lp-eyebrow">Local-first continuity orchestration for AI coding tools</p>
+        <h1 class="lp-hero-title">Keep context, tool behavior, and policy aligned across assistants.</h1>
+        <p class="lp-hero-sub">
+          xtctx ingests local conversation history, keeps project memory searchable per repository, and synchronizes
+          assistant-specific config so switching tools does not reset the working state of the codebase.
         </p>
 
-        <div class="flex flex-wrap gap-2">
-          <a class="lp-btn" href="#quickstart">Run locally</a>
-          <a class="lp-btn-ghost" href="http://127.0.0.1:3232/" target="_blank" rel="noreferrer">Open runtime UI</a>
+        <div class="lp-proof-row">
+          <span>Local-first</span>
+          <span>Per repository</span>
+          <span>Config-first</span>
+          <span>Assistant-agnostic</span>
         </div>
 
-        <div class="flex flex-wrap gap-2">
-          <span class="lp-pill">Local runtime process</span>
-          <span class="lp-pill">Project-scoped memory</span>
-          <span class="lp-pill">Policy-first sync</span>
+        <button class="lp-install" type="button" @click="copyInstall" :title="copied ? 'Copied' : 'Copy command'">
+          <span class="lp-install-prompt">$</span>
+          <code>npx xtctx init &amp;&amp; npx xtctx sync &amp;&amp; npx xtctx serve</code>
+          <span class="lp-install-copy">{{ copied ? "Copied" : "Copy" }}</span>
+        </button>
+
+        <div class="lp-hero-actions">
+          <a class="lp-btn" href="#quickstart">Get started</a>
+          <a class="lp-btn-ghost" href="https://github.com/fstubner/xtctx" target="_blank" rel="noreferrer">Read the repo</a>
         </div>
+
+        <p class="lp-works-with">
+          Works with Claude Code, Cursor, Codex CLI, GitHub Copilot, Gemini CLI, and any workflow that can consume the
+          generated continuity outputs.
+        </p>
       </div>
 
-      <div class="space-y-4">
-        <article class="lp-card space-y-3">
-          <p class="lp-eyebrow">Session policy</p>
-          <pre class="overflow-x-auto rounded-lg border bg-surface p-4 text-xs leading-relaxed">npx xtctx init
-npx xtctx sync
-npx xtctx serve
-
-# before coding
-xtctx_search
-xtctx_project_knowledge
-
-# after implementation
-xtctx_save_decision
-xtctx_save_faq</pre>
+      <div class="lp-hero-visual">
+        <article class="lp-visual-card">
+          <div class="lp-visual-header">
+            <div>
+              <p class="lp-eyebrow">Runtime control plane</p>
+              <h2 class="lp-visual-title">Visibility into the automation, not another assistant UI</h2>
+            </div>
+          </div>
+          <img :src="runtimePreview" alt="xtctx runtime control plane screenshot" class="lp-runtime-preview" />
         </article>
 
-        <article class="lp-card space-y-3">
-          <p class="lp-eyebrow">Runtime preview</p>
-          <img :src="runtimePreview" alt="xtctx runtime console screenshot" class="w-full rounded-lg border" />
+        <article class="lp-visual-card">
+          <div class="lp-generated-grid">
+            <div>
+              <p class="lp-eyebrow">Managed outputs</p>
+              <h2 class="lp-visual-title">One repo policy, rendered into tool-native surfaces</h2>
+            </div>
+            <ul class="lp-generated-list">
+              <li v-for="item in generatedOutputs" :key="item">{{ item }}</li>
+            </ul>
+          </div>
         </article>
       </div>
     </section>
 
-    <section id="mechanism" class="lp-panel space-y-5 px-6 py-7 md:px-8 md:py-8">
-      <header class="space-y-2">
-        <p class="lp-eyebrow">Mechanism</p>
-        <h2 class="lp-h2">Ingest -> Index -> Sync -> Resume</h2>
-      </header>
+    <section id="what-it-manages" class="lp-section">
+      <div class="lp-section-header">
+        <p class="lp-eyebrow">What xtctx manages</p>
+        <h2 class="lp-h2">The product is not just memory. It orchestrates continuity across the full tool surface.</h2>
+      </div>
 
-      <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <article v-for="item in mechanism" :key="item.title" class="lp-card space-y-2">
-          <h3 class="text-xl font-semibold" style="font-family: 'Sora', 'Manrope', sans-serif">{{ item.title }}</h3>
-          <p class="text-base leading-relaxed lp-muted">{{ item.detail }}</p>
+      <div class="lp-pillar-grid">
+        <article v-for="pillar in pillars" :key="pillar.title" class="lp-pillar-card">
+          <h3>{{ pillar.title }}</h3>
+          <p>{{ pillar.detail }}</p>
         </article>
       </div>
     </section>
 
-    <section id="capabilities" class="lp-panel space-y-5 px-6 py-7 md:px-8 md:py-8">
-      <header class="space-y-2">
-        <p class="lp-eyebrow">Capabilities</p>
-        <h2 class="lp-h2">Purpose-built for cross-tool continuity operations</h2>
-      </header>
-
-      <div class="grid gap-4 md:grid-cols-2">
-        <article v-for="item in capabilities" :key="item" class="lp-card">
-          <p class="text-base leading-relaxed">{{ item }}</p>
-        </article>
+    <section id="automation" class="lp-section">
+      <div class="lp-section-header">
+        <p class="lp-eyebrow">What runs automatically</p>
+        <h2 class="lp-h2">Once the runtime is up, xtctx handles the background continuity work.</h2>
       </div>
 
-      <div class="grid gap-4 rounded-xl border bg-surface-2 p-5 md:grid-cols-2">
-        <div>
-          <p class="lp-eyebrow">Inputs</p>
-          <p class="mt-2 text-base leading-relaxed">Claude Code, Cursor, Codex CLI, Copilot, Gemini</p>
+      <div class="lp-automation-layout">
+        <div class="lp-automation-list">
+          <article v-for="(item, index) in automation" :key="item" class="lp-automation-item">
+            <span class="lp-automation-num">{{ String(index + 1).padStart(2, '0') }}</span>
+            <p>{{ item }}</p>
+          </article>
         </div>
-        <div>
-          <p class="lp-eyebrow">Generated outputs</p>
-          <p class="mt-2 text-base leading-relaxed">AGENTS.md, CLAUDE.md, .cursorrules, copilot instructions, MCP + API</p>
-        </div>
+
+        <aside class="lp-callout">
+          <p class="lp-eyebrow">Runtime UI role</p>
+          <h3>Use the web UI as the control plane.</h3>
+          <p>
+            The dashboard exists to inspect source coverage, tool sync drift, indexing state, and runtime activity.
+            Recall and writeback happen through your assistants and MCP tools, not by manually driving the web app.
+          </p>
+        </aside>
       </div>
     </section>
 
-    <section id="quickstart" class="lp-panel space-y-5 px-6 py-7 md:px-8 md:py-8">
-      <header class="space-y-2">
+    <section id="quickstart" class="lp-section">
+      <div class="lp-section-header">
         <p class="lp-eyebrow">Quick start</p>
-        <h2 class="lp-h2">Init -> Sync -> Serve -> Recall -> Writeback</h2>
-      </header>
+        <h2 class="lp-h2">Bootstrap a repository, then let continuity run in the background.</h2>
+      </div>
 
-      <div class="grid gap-4 xl:grid-cols-2">
-        <article class="lp-card space-y-3">
-          <h3 class="text-xl font-semibold" style="font-family: 'Sora', 'Manrope', sans-serif">Install and bootstrap</h3>
-          <ol class="list-decimal space-y-2 pl-5 text-base leading-relaxed lp-muted">
-            <li>Install dependencies and build runtime assets.</li>
-            <li>Initialize project-local continuity policy and memory folders.</li>
-            <li>Start API, MCP, and runtime console.</li>
+      <div class="lp-quickstart-grid">
+        <article class="lp-panel">
+          <h3>Bootstrap the repo</h3>
+          <ol>
+            <li>Initialize `.xtctx` memory and policy files.</li>
+            <li>Render assistant-specific continuity outputs.</li>
+            <li>Start the local API, MCP server, and runtime UI.</li>
           </ol>
-          <pre class="overflow-x-auto rounded-lg border bg-surface p-4 text-xs leading-relaxed">npm ci
-npm --prefix web ci
-npm run build
 
-npx xtctx init
+          <div class="lp-terminal">
+            <div class="lp-terminal-bar">
+              <span class="lp-terminal-dot" style="--c:#ff5f57"></span>
+              <span class="lp-terminal-dot" style="--c:#ffbd2e"></span>
+              <span class="lp-terminal-dot" style="--c:#28c840"></span>
+              <span class="lp-terminal-label">bootstrap</span>
+            </div>
+            <pre>npx xtctx init
 npx xtctx sync
 npx xtctx serve</pre>
+          </div>
         </article>
 
-        <article class="lp-card space-y-3">
-          <h3 class="text-xl font-semibold" style="font-family: 'Sora', 'Manrope', sans-serif">Daily continuity loop</h3>
-          <ol class="list-decimal space-y-2 pl-5 text-base leading-relaxed lp-muted">
-            <li>Recall relevant context before coding.</li>
-            <li>Implement with decisions and FAQs loaded.</li>
-            <li>Write validated outcomes for the next handoff.</li>
-          </ol>
-          <pre class="overflow-x-auto rounded-lg border bg-surface p-4 text-xs leading-relaxed"># recall
-xtctx_search
-xtctx_project_knowledge
+        <article class="lp-panel">
+          <h3>What happens next</h3>
+          <ul>
+            <li>Assistant histories continue to ingest from configured local sources.</li>
+            <li>Managed continuity targets can be inspected and reconciled from the runtime UI.</li>
+            <li>Project decisions, fixes, and FAQs remain queryable through MCP and the memory surface.</li>
+          </ul>
 
-# writeback
-xtctx_save_decision
-xtctx_save_error_solution
-xtctx_save_faq</pre>
+          <div class="lp-note">
+            <p class="lp-eyebrow">Operator model</p>
+            <p>Configure and observe in the web UI. Recall and writeback through your assistant.</p>
+          </div>
         </article>
       </div>
     </section>
+
+    <footer class="lp-footer">
+      <p>xtctx is open source under MIT.</p>
+      <a href="https://github.com/fstubner/xtctx" target="_blank" rel="noreferrer">GitHub</a>
+    </footer>
   </div>
 </template>
