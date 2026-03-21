@@ -5,30 +5,30 @@
 @layer base {
   :root {
     color-scheme: dark;
-    --bg: 221 24% 10%;
-    --surface: 222 22% 14%;
-    --surface-2: 223 20% 17%;
-    --surface-3: 224 18% 21%;
-    --border: 220 22% 31%;
-    --text: 214 32% 93%;
-    --muted: 216 14% 69%;
-    --accent: 192 48% 50%;
-    --warn: 35 58% 58%;
-    --danger: 354 56% 60%;
+    --bg:        222 22% 10%;
+    --surface:   222 20% 14%;
+    --surface-2: 223 18% 17%;
+    --surface-3: 224 17% 21%;
+    --border:    220 18% 28%;
+    --text:      215 28% 92%;
+    --muted:     218 14% 62%;
+    --accent:    220 72% 62%;
+    --warn:      38 75% 55%;
+    --danger:    354 62% 58%;
   }
 
   :root.light-mode {
     color-scheme: light;
-    --bg: 210 24% 95%;
-    --surface: 0 0% 100%;
-    --surface-2: 210 25% 97%;
-    --surface-3: 210 24% 94%;
-    --border: 216 24% 81%;
-    --text: 222 28% 21%;
-    --muted: 218 12% 43%;
-    --accent: 196 66% 38%;
-    --warn: 34 65% 42%;
-    --danger: 356 54% 42%;
+    --bg:        214 32% 96%;
+    --surface:   0 0% 100%;
+    --surface-2: 210 24% 97%;
+    --surface-3: 210 22% 94%;
+    --border:    216 22% 84%;
+    --text:      222 30% 20%;
+    --muted:     218 14% 46%;
+    --accent:    220 72% 50%;
+    --warn:      34 68% 40%;
+    --danger:    356 58% 44%;
   }
 
   * {
@@ -38,115 +38,187 @@
   html,
   body,
   #app {
-    @apply min-h-full;
+    @apply h-full;
   }
 
   body {
     @apply m-0 bg-bg text-text antialiased;
-    font-family: "Segoe UI Variable Text", "Segoe UI", "Noto Sans", "Liberation Sans", sans-serif;
-    background-image: linear-gradient(180deg, hsl(var(--bg)), color-mix(in srgb, hsl(var(--bg)), black 6%));
+    font-family: "Segoe UI Variable Text", "Segoe UI", Inter, ui-sans-serif, system-ui, sans-serif;
   }
 
   code,
   pre {
-    font-family: "Cascadia Mono", "Cascadia Code", Consolas, "Courier New", monospace;
+    font-family: "Cascadia Mono", "Cascadia Code", Consolas, ui-monospace, monospace;
   }
 }
 
 @layer components {
-  .xt-shell {
-    @apply mx-auto grid w-[min(1500px,calc(100%-2rem))] gap-5 py-5 lg:grid-cols-[260px_minmax(0,1fr)];
+  /* ── Shell ──────────────────────────────────────────── */
+
+  /* Full-viewport flex column: topbar + (sidebar | content) */
+  .xt-app {
+    @apply flex min-h-screen flex-col;
   }
 
-  .xt-panel {
-    @apply rounded-xl border bg-surface shadow-soft;
+  /* Topbar: 48px, border-bottom only. Sticky, same bg as page. */
+  .xt-topbar {
+    @apply flex h-14 flex-shrink-0 items-center gap-3 border-b px-5;
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    background: color-mix(in srgb, hsl(var(--bg)), black 4%);
   }
 
-  .xt-card {
-    @apply rounded-xl border bg-surface-2 p-5;
+  /* Body: sidebar + content, fills remaining height */
+  .xt-body {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
   }
 
-  .xt-title {
-    font-family: "Bahnschrift", "Segoe UI", "Noto Sans", sans-serif;
-    @apply text-[2.15rem] font-bold leading-tight tracking-[0.01em];
+  /* Sidebar: 220px, right border only, no background chrome. Desktop only. */
+  .xt-sidebar {
+    display: none;
+    flex-direction: column;
+    flex-shrink: 0;
+    width: 248px;
+    border-right: 1px solid hsl(var(--border));
+    padding: 1.5rem 0 1rem;
+    position: sticky;
+    top: 3.5rem;
+    height: calc(100vh - 3.5rem);
+    overflow: hidden;
+    transition: width 200ms ease;
+    background: color-mix(in srgb, hsl(var(--bg)), black 2%);
   }
 
-  .xt-section-title {
-    font-family: "Bahnschrift", "Segoe UI", "Noto Sans", sans-serif;
-    @apply text-2xl font-semibold tracking-[0.01em];
+  .xt-sidebar-collapsed {
+    width: 0;
+    border-right: none;
+    padding: 0;
   }
 
-  .xt-eyebrow {
-    @apply text-[11px] uppercase tracking-[0.18em] text-muted;
-    font-family: "Cascadia Mono", "Cascadia Code", Consolas, "Courier New", monospace;
+  @media (min-width: 768px) {
+    .xt-sidebar {
+      display: flex;
+    }
+
+    .xt-mobile-nav {
+      display: none !important;
+    }
   }
 
-  .xt-chip {
-    @apply inline-flex items-center rounded-md border px-2.5 py-1 text-xs font-semibold;
+  /* Main content area */
+  .xt-content {
+    flex: 1;
+    min-width: 0;
+    overflow-y: auto;
+    padding: 2rem 2.75rem 3rem;
   }
 
-  .xt-chip-neutral {
-    @apply xt-chip bg-surface-2 text-muted;
+  @media (max-width: 767px) {
+    .xt-content {
+      padding: 1.25rem 1rem;
+    }
   }
 
-  .xt-chip-ok {
-    @apply xt-chip;
-    background: color-mix(in srgb, hsl(var(--accent)), hsl(var(--surface)) 88%);
+  /* Mobile nav: horizontal strip below topbar. 3 items only. */
+  .xt-mobile-nav {
+    @apply flex flex-shrink-0 gap-1 overflow-x-auto border-b px-3 py-2;
+    background: color-mix(in srgb, hsl(var(--bg)), black 2%);
   }
 
-  .xt-chip-warn {
-    @apply xt-chip;
-    background: color-mix(in srgb, hsl(var(--warn)), hsl(var(--surface)) 88%);
+  .xt-mnav-link {
+    @apply flex min-w-max items-center justify-center rounded-md border px-3 py-2 text-sm font-medium text-muted transition-colors;
   }
 
-  .xt-chip-danger {
-    @apply xt-chip;
-    background: color-mix(in srgb, hsl(var(--danger)), hsl(var(--surface)) 88%);
+  .xt-mnav-link:last-child {
+    @apply border-r;
   }
 
-  .xt-btn {
-    @apply inline-flex min-h-10 items-center justify-center gap-2 rounded-md border px-3.5 text-sm font-semibold transition;
-    @apply border-transparent;
-    background: color-mix(in srgb, hsl(var(--accent)), hsl(var(--surface)) 76%);
+  .xt-mnav-link:hover {
+    @apply text-text;
+  }
+
+  .xt-mnav-link-active {
+    @apply text-text;
+    background: hsl(var(--surface-2));
+    border-color: color-mix(in srgb, hsl(var(--accent)), hsl(var(--border)) 48%);
+  }
+
+  /* ── Brand ── */
+  .xt-brand {
+    @apply flex items-center gap-2;
+  }
+
+  .xt-brand-mark {
+    @apply flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-[10px] font-bold;
+    background: hsl(var(--accent));
+    color: hsl(0 0% 100%);
+    letter-spacing: -0.03em;
+  }
+
+  .xt-brand-name {
+    @apply text-sm font-semibold tracking-tight;
+  }
+
+  .xt-topbar-subtitle {
+    @apply mt-0.5 truncate text-[11px] text-muted;
+  }
+
+  /* Sidebar toggle button (topbar) */
+  .xt-sidebar-toggle {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    flex-shrink: 0;
+    color: hsl(var(--muted));
+    transition: color 150ms ease;
+  }
+
+  .xt-sidebar-toggle:hover {
     color: hsl(var(--text));
   }
 
-  .xt-btn:hover {
-    background: color-mix(in srgb, hsl(var(--accent)), hsl(var(--surface)) 68%);
+  @media (min-width: 768px) {
+    .xt-sidebar-toggle {
+      display: flex;
+    }
   }
 
-  .xt-btn:disabled {
-    @apply cursor-not-allowed opacity-60;
+  /* Three horizontal lines icon */
+  .xt-sidebar-toggle-icon {
+    position: relative;
+    display: block;
+    width: 14px;
+    height: 2px;
+    background: currentColor;
+    border-radius: 1px;
   }
 
-  .xt-btn-ghost {
-    @apply inline-flex min-h-10 items-center justify-center rounded-md border bg-surface-2 px-3.5 text-sm font-semibold text-muted transition;
+  .xt-sidebar-toggle-icon::before,
+  .xt-sidebar-toggle-icon::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    width: 14px;
+    height: 2px;
+    background: currentColor;
+    border-radius: 1px;
+    transition: transform 150ms ease, top 150ms ease, bottom 150ms ease;
   }
 
-  .xt-btn-ghost:hover {
-    @apply text-text;
-    background: color-mix(in srgb, hsl(var(--surface-2)), white 3%);
-  }
+  .xt-sidebar-toggle-icon::before { top: -4px; }
+  .xt-sidebar-toggle-icon::after  { bottom: -4px; }
 
-  .xt-input,
-  .xt-select,
-  .xt-textarea {
-    @apply min-h-10 w-full rounded-md border bg-surface-2 px-3 text-sm text-text outline-none transition;
-  }
-
-  .xt-input:focus,
-  .xt-select:focus,
-  .xt-textarea:focus {
-    border-color: color-mix(in srgb, hsl(var(--accent)), hsl(var(--border)) 52%);
-    box-shadow: 0 0 0 2px color-mix(in srgb, hsl(var(--accent)), transparent 84%);
-  }
-
-  .xt-textarea {
-    @apply min-h-[110px] py-2;
-  }
-
+  /* ── Nav links (sidebar) ── */
   .xt-nav-link {
-    @apply inline-flex min-h-10 w-full items-center rounded-md border bg-surface-2 px-3.5 text-sm font-semibold text-muted transition;
+    @apply inline-flex min-h-10 w-full items-center px-5 text-sm font-medium text-muted transition-colors;
+    border-left: 2px solid transparent;
+    white-space: nowrap;
   }
 
   .xt-nav-link:hover {
@@ -155,111 +227,241 @@
 
   .xt-nav-link-active {
     @apply text-text;
-    background: color-mix(in srgb, hsl(var(--accent)), hsl(var(--surface)) 84%);
+    border-left-color: hsl(var(--accent));
+    background: color-mix(in srgb, hsl(var(--surface-2)), hsl(var(--accent)) 4%);
   }
 
-  .xt-kpi {
-    @apply xt-card;
+  .xt-sidebar-header {
+    @apply px-5 pb-5;
   }
 
+  .xt-sidebar-project {
+    @apply mt-1 text-lg font-semibold tracking-tight;
+  }
+
+  .xt-sidebar-nav {
+    @apply flex-1 space-y-1;
+  }
+
+  .xt-sidebar-footer {
+    @apply px-4 pt-4;
+  }
+
+  .xt-sidebar-card {
+    @apply rounded-xl border bg-surface px-4 py-3;
+  }
+
+  .xt-sidebar-path {
+    @apply mt-2 break-all text-xs leading-relaxed text-muted;
+    font-family: "Cascadia Mono", "Cascadia Code", Consolas, ui-monospace, monospace;
+  }
+
+  .xt-sidebar-meta {
+    @apply mt-4 grid grid-cols-2 gap-3 text-xs;
+  }
+
+  .xt-sidebar-meta dt {
+    @apply text-muted;
+  }
+
+  .xt-sidebar-meta dd {
+    @apply mt-1 font-medium text-text;
+  }
+
+  /* ── Typography ── */
+  .xt-title {
+    @apply text-[2rem] font-semibold leading-tight tracking-tight;
+  }
+
+  .xt-section-title {
+    @apply text-base font-semibold;
+  }
+
+  .xt-eyebrow {
+    @apply text-[10px] font-medium uppercase text-muted;
+    letter-spacing: 0.08em;
+  }
+
+  /* ── KPI (no card wrapper — floats on page bg) ── */
   .xt-kpi-value {
-    font-family: "Bahnschrift", "Segoe UI", "Noto Sans", sans-serif;
-    @apply text-[2.85rem] font-semibold leading-none;
+    @apply text-3xl font-semibold leading-none tracking-tight;
   }
 
   .xt-kpi-label {
-    @apply mt-1.5 text-sm text-muted;
+    @apply mt-1.5 text-xs text-muted;
   }
 
+  /* ── Cards (for interactive content blocks, not layout chrome) ── */
+  .xt-card {
+    @apply rounded-2xl border bg-surface-2 p-5;
+  }
+
+  /* ── Tab strip ── */
+  .xt-tabs {
+    @apply flex border-b;
+  }
+
+  .xt-tab {
+    @apply border-b-2 border-transparent px-4 py-2 text-sm font-medium text-muted transition-colors;
+    margin-bottom: -1px;
+  }
+
+  .xt-tab:hover {
+    @apply text-text;
+  }
+
+  .xt-tab-active {
+    @apply text-text;
+    border-bottom-color: hsl(var(--accent));
+  }
+
+  /* ── Status chips — dot + label, no border box ── */
+  .xt-chip {
+    @apply inline-flex items-center gap-1.5 text-xs font-medium;
+  }
+
+  .xt-chip::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .xt-chip-neutral {
+    @apply xt-chip text-muted;
+  }
+
+  .xt-chip-neutral::before {
+    background: hsl(var(--muted));
+    opacity: 0.4;
+  }
+
+  .xt-chip-ok {
+    @apply xt-chip;
+    color: color-mix(in srgb, hsl(var(--accent)), hsl(var(--text)) 30%);
+  }
+
+  .xt-chip-ok::before {
+    background: hsl(var(--accent));
+  }
+
+  .xt-chip-warn {
+    @apply xt-chip;
+    color: color-mix(in srgb, hsl(var(--warn)), hsl(var(--text)) 30%);
+  }
+
+  .xt-chip-warn::before {
+    background: hsl(var(--warn));
+  }
+
+  .xt-chip-danger {
+    @apply xt-chip;
+    color: color-mix(in srgb, hsl(var(--danger)), hsl(var(--text)) 30%);
+  }
+
+  .xt-chip-danger::before {
+    background: hsl(var(--danger));
+  }
+
+  /* ── Buttons ── */
+  .xt-btn {
+    @apply inline-flex min-h-9 items-center justify-center gap-2 rounded-md px-3.5 text-sm font-medium transition;
+    background: hsl(var(--accent));
+    color: hsl(0 0% 100%);
+  }
+
+  .xt-btn:hover {
+    background: color-mix(in srgb, hsl(var(--accent)), white 12%);
+  }
+
+  .xt-btn:disabled {
+    @apply cursor-not-allowed opacity-60;
+  }
+
+  .xt-btn-ghost {
+    @apply inline-flex min-h-9 items-center justify-center rounded-md border px-3.5 text-sm font-medium text-muted transition;
+    background: transparent;
+  }
+
+  .xt-btn-ghost:hover {
+    @apply text-text;
+    background: hsl(var(--surface-2));
+  }
+
+  /* ── Forms ── */
+  .xt-input,
+  .xt-select,
+  .xt-textarea {
+    @apply min-h-9 w-full rounded-md border bg-surface-2 px-3 text-sm text-text outline-none transition;
+  }
+
+  .xt-input:focus,
+  .xt-select:focus,
+  .xt-textarea:focus {
+    border-color: color-mix(in srgb, hsl(var(--accent)), hsl(var(--border)) 48%);
+    box-shadow: 0 0 0 3px color-mix(in srgb, hsl(var(--accent)), transparent 84%);
+  }
+
+  .xt-textarea {
+    @apply min-h-[110px] py-2;
+  }
+
+  /* ── Alerts ── */
   .xt-alert {
-    @apply rounded-md border px-3 py-2.5 text-sm;
+    @apply rounded-md border px-4 py-3 text-sm;
   }
 
   .xt-alert-danger {
     @apply xt-alert;
-    background: color-mix(in srgb, hsl(var(--danger)), hsl(var(--surface)) 84%);
+    background: color-mix(in srgb, hsl(var(--danger)), hsl(var(--surface)) 86%);
+    border-color: color-mix(in srgb, hsl(var(--danger)), hsl(var(--border)) 60%);
   }
 
   .xt-alert-warn {
     @apply xt-alert;
-    background: color-mix(in srgb, hsl(var(--warn)), hsl(var(--surface)) 87%);
+    background: color-mix(in srgb, hsl(var(--warn)), hsl(var(--surface)) 88%);
+    border-color: color-mix(in srgb, hsl(var(--warn)), hsl(var(--border)) 60%);
   }
 
   .xt-alert-ok {
     @apply xt-alert;
-    background: color-mix(in srgb, hsl(var(--accent)), hsl(var(--surface)) 86%);
+    background: color-mix(in srgb, hsl(var(--accent)), hsl(var(--surface)) 88%);
+    border-color: color-mix(in srgb, hsl(var(--accent)), hsl(var(--border)) 60%);
   }
 
+  /* ── Tables ── */
   .xt-table {
     @apply w-full border-collapse text-sm;
   }
 
   .xt-table th {
-    @apply border-b py-2 text-left text-[11px] uppercase tracking-[0.14em] text-muted;
-    font-family: "Cascadia Mono", "Cascadia Code", Consolas, "Courier New", monospace;
+    @apply border-b py-2 text-left text-xs font-medium text-muted;
   }
 
   .xt-table td {
     @apply border-b py-3 align-top;
-  }
-
-  .rt-sidebar {
-    @apply flex h-full min-h-[calc(100vh-2.5rem)] flex-col gap-4 p-4 lg:sticky lg:top-5;
-  }
-
-  .rt-brand-title {
-    font-family: "Bahnschrift", "Segoe UI", "Noto Sans", sans-serif;
-    @apply text-[2.2rem] font-semibold leading-none tracking-[0.01em];
-  }
-
-  .rt-brand-subtitle {
-    @apply text-xs tracking-[0.08em] text-muted;
-  }
-
-  .rt-nav {
-    @apply grid gap-2;
-  }
-
-  .rt-main {
-    @apply grid gap-4;
-  }
-
-  .rt-header {
-    @apply flex flex-col gap-4 p-5 md:flex-row md:items-start md:justify-between;
-  }
-
-  .rt-topbar-title {
-    font-family: "Bahnschrift", "Segoe UI", "Noto Sans", sans-serif;
-    @apply text-[2.05rem] font-semibold leading-tight tracking-[0.01em];
-  }
-
-  .rt-toolbar {
-    @apply flex flex-wrap items-center gap-2;
-  }
-
-  .rt-session-strip {
-    @apply grid gap-3 p-4 md:grid-cols-2 2xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto];
-  }
-
-  .rt-strip-item {
-    @apply rounded-lg border bg-surface-2 p-3;
-  }
-
-  .rt-strip-item code {
-    @apply block overflow-hidden text-ellipsis whitespace-nowrap text-sm;
-  }
-
-  .rt-strip-actions {
-    @apply flex flex-wrap items-end gap-2 md:col-span-2 2xl:col-span-1;
-  }
-
-  .rt-content {
-    @apply p-6;
   }
 }
 
 @layer utilities {
   .text-balance {
     text-wrap: balance;
+  }
+
+  .text-warn {
+    color: hsl(var(--warn));
+  }
+
+  .text-danger {
+    color: hsl(var(--danger));
+  }
+
+  .bg-accent {
+    background: hsl(var(--accent));
+  }
+
+  .bg-muted {
+    background: hsl(var(--muted));
   }
 }
