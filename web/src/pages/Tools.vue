@@ -6,20 +6,30 @@ import type {
   ContinuityScope,
   ContinuityToolsStatusResponse,
   EffectivePolicyResponse,
-  ToolRenderPreviewResponse,
+  ScraperConfigUpdateResponse,
+  SourcesConfigResponse,
+  SourcesResponse,
   ToolContinuityStatus,
+  ToolRenderPreviewResponse,
 } from "../types";
 
+// ── Tab ───────────────────────────────────────────────────
+type ActiveTab = "tools" | "sources" | "config";
+const tab = ref<ActiveTab>("tools");
+
+// ── Shared state ──────────────────────────────────────────
+const loading = ref(true);
+const error = ref("");
+const flash = ref("");
+
+// ── Tools tab ─────────────────────────────────────────────
 interface ToolEditorState {
   enabled: boolean;
   scope: ContinuityScope;
   categories: Record<ContinuityCategory, boolean>;
 }
 
-const loading = ref(true);
 const syncingAll = ref(false);
-const error = ref("");
-const flash = ref("");
 const tools = ref<ToolContinuityStatus[]>([]);
 const editor = reactive<Record<string, ToolEditorState>>({});
 const pendingSave = reactive<Record<string, boolean>>({});
@@ -47,48 +57,143 @@ const categoryLabels: Record<ContinuityCategory, string> = {
 
 const orderedTools = computed(() => [...tools.value].sort((a, b) => toolOrder(a.tool) - toolOrder(b.tool)));
 
-onMounted(() => {
-  void refresh();
-});
+function toolOrder(tool: string): number {
+  const order = ["claude", "claude-code", "cursor", "codex", "copilot", "gemini"];
+  const i = order.indexOf(tool);
+  return i === -1 ? 99 : i;
+}
 
-async function refresh(): Promise<void> {
-  try {
-    loading.value = true;
-    error.value = "";
+function stateLabel(state: ToolContinuityStatus["state"]): string {
+  return state === "disabled_by_policy" ? "disabled by policy" : state.replace(/_/g, " ");
+}
 
-    const [statusPayload, policy] = await Promise.all([
-      apiGet<ContinuityToolsStatusResponse>("/api/continuity/tools-status"),
-      apiGet<EffectivePolicyResponse>("/api/continuity/effective-policy"),
-    ]);
+function stateChipClass(state: ToolContinuityStatus["state"]): string {
+  if (state === "in_sync") return "xt-chip-ok";
+  if (state === "missing_target") return "xt-chip-warn";
+  if (state === "drifted") return "xt-chip-danger";
+  return "xt-chip-neutral";
+}
 
-    tools.value = statusPayload.tools;
-    hydrateEditor(statusPayload.tools, policy);
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : String(err);
-  } finally {
-    loading.value = false;
+function ensureToolEditor(tool: string): ToolEditorState {
+  if (!editor[tool]) {
+    editor[tool] = {
+      enabled: true,
+      scope: "project",
+      categories: {
+        context_feed: true, skills: true, commands: true, agents: true,
+        mcp_servers: true, slash_commands: true, whitelist_policy: true,
+      },
+    };
+  }
+  return editor[tool];
+}
+
+function onEnabledChange(tool: string, event: Event): void {
+  const target = event.target;
+  if (target instanceof HTMLInputElement) ensureToolEditor(tool).enabled = target.checked;
+}
+
+function onScopeChange(tool: string, event: Event): void {
+  const target = event.target;
+  if (target instanceof HTMLSelectElement) {
+    const v = target.value;
+    if (v === "project" || v === "global" || v === "hybrid") ensureToolEditor(tool).scope = v;
   }
 }
 
-function hydrateEditor(statuses: ToolContinuityStatus[], policy: EffectivePolicyResponse): void {
+function onCategoryChange(tool: string, key: ContinuityCategory, event: Event): void {
+  const target = event.target;
+  if (target instanceof HTMLInputElement) ensureToolEditor(tool).categories[key] = target.checked;
+}
+
+// ── Sources tab ───────────────────────────────────────────
+interface ScraperEditorState {
+  enabled: boolean;
+  customStorePath: string;
+}
+
+const sourcesConfig = ref<SourcesConfigResponse | null>(null);
+const sourcesData = ref<SourcesResponse | null>(null);
+const scraperEditor = reactive<Record<string, ScraperEditorState>>({});
+const scraperSaving = reactive<Record<string, boolean>>({});
+
+const enabledCount = computed(() => sourcesConfig.value?.scrapers.filter((s) => s.enabled).length ?? 0);
+const detectedCount = computed(() => sourcesConfig.value?.scrapers.filter((s) => s.enabled && s.detected).length ?? 0);
+
+function scraperEditorState(tool: string): ScraperEditorState {
+  if (!scraperEditor[tool]) scraperEditor[tool] = { enabled: true, customStorePath: "" };
+  return scraperEditor[tool];
+}
+
+// ── Config tab ────────────────────────────────────────────
+const policy = ref<EffectivePolicyResponse | null>(null);
+
+// ── Data loading ──────────────────────────────────────────
+onMounted(() => { void refresh(); });
+
+async function refresh(): Promise<void> {
+  loading.value = true;
+  error.value = "";
+  flash.value = "";
+
+  const [toolsRes, policyRes, sourcesConfigRes, sourcesDataRes] = await Promise.allSettled([
+    apiGet<ContinuityToolsStatusResponse>("/api/continuity/tools-status"),
+    apiGet<EffectivePolicyResponse>("/api/continuity/effective-policy"),
+    apiGet<SourcesConfigResponse>("/api/sources/config"),
+    apiGet<SourcesResponse>("/api/sources"),
+  ]);
+
+  if (toolsRes.status === "fulfilled" && policyRes.status === "fulfilled") {
+    tools.value = toolsRes.value.tools;
+    policy.value = policyRes.value;
+    hydrateToolEditor(toolsRes.value.tools, policyRes.value);
+  } else {
+    error.value = "Failed to load tool configuration.";
+  }
+
+  if (sourcesConfigRes.status === "fulfilled") {
+    sourcesConfig.value = sourcesConfigRes.value;
+    hydrateScraperEditor(sourcesConfigRes.value);
+  }
+
+  if (sourcesDataRes.status === "fulfilled") {
+    sourcesData.value = sourcesDataRes.value;
+  }
+
+  loading.value = false;
+}
+
+function hydrateToolEditor(statuses: ToolContinuityStatus[], p: EffectivePolicyResponse): void {
   for (const status of statuses) {
-    const policyTool = policy.tools[status.tool];
+    const pt = p.tools[status.tool];
     editor[status.tool] = {
-      enabled: policyTool?.enabled ?? status.enabled,
-      scope: policyTool?.scope ?? status.scope,
+      enabled: pt?.enabled ?? status.enabled,
+      scope: pt?.scope ?? status.scope,
       categories: {
-        context_feed: policyTool?.categories.context_feed ?? status.categories.context_feed,
-        skills: policyTool?.categories.skills ?? status.categories.skills,
-        commands: policyTool?.categories.commands ?? status.categories.commands,
-        agents: policyTool?.categories.agents ?? status.categories.agents,
-        mcp_servers: policyTool?.categories.mcp_servers ?? status.categories.mcp_servers,
-        slash_commands: policyTool?.categories.slash_commands ?? status.categories.slash_commands,
-        whitelist_policy: policyTool?.categories.whitelist_policy ?? status.categories.whitelist_policy,
+        context_feed: pt?.categories.context_feed ?? status.categories.context_feed,
+        skills: pt?.categories.skills ?? status.categories.skills,
+        commands: pt?.categories.commands ?? status.categories.commands,
+        agents: pt?.categories.agents ?? status.categories.agents,
+        mcp_servers: pt?.categories.mcp_servers ?? status.categories.mcp_servers,
+        slash_commands: pt?.categories.slash_commands ?? status.categories.slash_commands,
+        whitelist_policy: pt?.categories.whitelist_policy ?? status.categories.whitelist_policy,
       },
     };
   }
 }
 
+function hydrateScraperEditor(config: SourcesConfigResponse): void {
+  for (const scraper of config.scrapers) {
+    const entry = scraperEditor[scraper.tool];
+    if (!entry) {
+      scraperEditor[scraper.tool] = { enabled: scraper.enabled, customStorePath: "" };
+    } else {
+      entry.enabled = scraper.enabled;
+    }
+  }
+}
+
+// ── Tool actions ──────────────────────────────────────────
 async function syncAllTools(): Promise<void> {
   try {
     syncingAll.value = true;
@@ -117,10 +222,7 @@ async function syncTool(tool: string): Promise<void> {
 
 async function saveTool(tool: string): Promise<void> {
   const state = editor[tool];
-  if (!state) {
-    return;
-  }
-
+  if (!state) return;
   try {
     pendingSave[tool] = true;
     await apiPut(`/api/continuity/tools/${encodeURIComponent(tool)}`, {
@@ -150,134 +252,102 @@ async function openPreview(tool: string, mode: "render" | "diff"): Promise<void>
   }
 }
 
-function stateLabel(state: ToolContinuityStatus["state"]): string {
-  if (state === "disabled_by_policy") {
-    return "disabled by policy";
-  }
-
-  return state.replace(/_/g, " ");
-}
-
-function stateChipClass(state: ToolContinuityStatus["state"]): string {
-  if (state === "in_sync") return "xt-chip-ok";
-  if (state === "missing_target") return "xt-chip-warn";
-  if (state === "drifted") return "xt-chip-danger";
-  return "xt-chip-neutral";
-}
-
-function toolOrder(tool: string): number {
-  const order = ["claude", "claude-code", "cursor", "codex", "copilot", "gemini"];
-  const index = order.indexOf(tool);
-  return index === -1 ? 99 : index;
-}
-
-function setToolEnabled(tool: string, value: boolean): void {
-  ensureToolEditor(tool).enabled = value;
-}
-
-function setToolScope(tool: string, value: ContinuityScope): void {
-  ensureToolEditor(tool).scope = value;
-}
-
-function setToolCategory(tool: string, category: ContinuityCategory, value: boolean): void {
-  ensureToolEditor(tool).categories[category] = value;
-}
-
-function updateScope(tool: string, value: string): void {
-  if (value === "project" || value === "global" || value === "hybrid") {
-    setToolScope(tool, value);
+// ── Source actions ────────────────────────────────────────
+async function saveScraper(tool: string): Promise<void> {
+  const state = scraperEditor[tool];
+  if (!state) return;
+  scraperSaving[tool] = true;
+  error.value = "";
+  flash.value = "";
+  try {
+    const payload: { enabled: boolean; customStorePath?: string | null } = { enabled: state.enabled };
+    const custom = state.customStorePath.trim();
+    if (custom.length > 0) payload.customStorePath = custom;
+    const res = await apiPut<ScraperConfigUpdateResponse>(`/api/sources/scrapers/${encodeURIComponent(tool)}`, payload);
+    if (sourcesConfig.value) sourcesConfig.value.scrapers = res.scrapers;
+    flash.value = `${tool} source configuration saved.`;
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    scraperSaving[tool] = false;
   }
 }
 
-function readCategory(tool: string, key: ContinuityCategory): boolean {
-  return ensureToolEditor(tool).categories[key];
-}
-
-function updateCategory(tool: string, key: ContinuityCategory, value: boolean): void {
-  setToolCategory(tool, key, value);
-}
-
-function onEnabledChange(tool: string, event: Event): void {
-  const target = event.target;
-  if (!(target instanceof HTMLInputElement)) {
-    return;
+async function resetCustomPath(tool: string): Promise<void> {
+  scraperSaving[tool] = true;
+  error.value = "";
+  flash.value = "";
+  try {
+    const res = await apiPut<ScraperConfigUpdateResponse>(
+      `/api/sources/scrapers/${encodeURIComponent(tool)}`,
+      { customStorePath: null },
+    );
+    if (scraperEditor[tool]) {
+      scraperEditor[tool].customStorePath = "";
+      scraperEditor[tool].enabled = res.scraper?.enabled ?? scraperEditor[tool].enabled;
+    }
+    if (sourcesConfig.value) sourcesConfig.value.scrapers = res.scrapers;
+    flash.value = `${tool} now uses the default source path.`;
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    scraperSaving[tool] = false;
   }
-
-  setToolEnabled(tool, target.checked);
-}
-
-function onScopeChange(tool: string, event: Event): void {
-  const target = event.target;
-  if (!(target instanceof HTMLSelectElement)) {
-    return;
-  }
-
-  updateScope(tool, target.value);
-}
-
-function onCategoryChange(tool: string, key: ContinuityCategory, event: Event): void {
-  const target = event.target;
-  if (!(target instanceof HTMLInputElement)) {
-    return;
-  }
-
-  updateCategory(tool, key, target.checked);
-}
-
-function ensureToolEditor(tool: string): ToolEditorState {
-  if (!editor[tool]) {
-    editor[tool] = {
-      enabled: true,
-      scope: "project",
-      categories: {
-        context_feed: true,
-        skills: true,
-        commands: true,
-        agents: true,
-        mcp_servers: true,
-        slash_commands: true,
-        whitelist_policy: true,
-      },
-    };
-  }
-
-  return editor[tool];
 }
 </script>
 
 <template>
-  <section class="space-y-6">
-    <header class="space-y-3">
-      <p class="xt-eyebrow">Orchestration</p>
-      <h2 class="xt-title">Tools</h2>
-      <p class="max-w-3xl text-base leading-relaxed text-muted">
-        Configure continuity by tool: scope, category propagation, managed targets, and drift reconciliation.
-      </p>
-    </header>
-
-    <div v-if="error" class="xt-alert-danger">{{ error }}</div>
-    <div v-if="flash" class="xt-alert-warn">{{ flash }}</div>
-
-    <section class="xt-card flex flex-wrap items-center justify-between gap-4">
-      <p class="text-sm text-muted">Defaults are sync-on with category-level opt-out per tool.</p>
-      <button class="xt-btn" type="button" :disabled="syncingAll" @click="syncAllTools">
-        {{ syncingAll ? "Syncing..." : "Sync all tools" }}
-      </button>
-    </section>
-
-    <div v-if="loading" class="grid gap-4 lg:grid-cols-2">
-      <article v-for="idx in 4" :key="idx" class="xt-card h-64 animate-pulse" />
+  <section>
+    <!-- Page header -->
+    <div class="mb-6 flex flex-wrap items-start justify-between gap-4">
+      <div>
+        <h1 class="xt-title">Tools</h1>
+        <p class="mt-1 text-sm text-muted">
+          Sync policy, source configuration, and effective policy for all supported assistants.
+        </p>
+      </div>
+      <div class="flex gap-2">
+        <button class="xt-btn" type="button" :disabled="syncingAll" @click="syncAllTools">
+          {{ syncingAll ? "Syncing…" : "Sync all tools" }}
+        </button>
+        <button class="xt-btn-ghost" type="button" @click="refresh">Refresh</button>
+      </div>
     </div>
 
-    <div v-else class="grid gap-4 lg:grid-cols-2">
-      <article v-for="toolStatus in orderedTools" :key="toolStatus.tool" class="xt-card space-y-5">
-        <header class="flex flex-wrap items-center justify-between gap-3">
-          <h3 class="xt-section-title text-xl">{{ toolStatus.tool }}</h3>
-          <span :class="stateChipClass(toolStatus.state)">{{ stateLabel(toolStatus.state) }}</span>
-        </header>
+    <div v-if="error" class="xt-alert-danger mb-5">{{ error }}</div>
+    <div v-if="flash" class="xt-alert-ok mb-5">{{ flash }}</div>
 
-        <div class="grid gap-4">
-          <label class="flex items-center gap-3 text-sm">
+    <!-- Tab strip -->
+    <div class="xt-tabs mb-6">
+      <button class="xt-tab" :class="{ 'xt-tab-active': tab === 'tools' }" type="button" @click="tab = 'tools'">
+        Tools
+      </button>
+      <button class="xt-tab" :class="{ 'xt-tab-active': tab === 'sources' }" type="button" @click="tab = 'sources'">
+        Sources
+      </button>
+      <button class="xt-tab" :class="{ 'xt-tab-active': tab === 'config' }" type="button" @click="tab = 'config'">
+        Config
+      </button>
+    </div>
+
+    <!-- ── Tools tab ──────────────────────────────────── -->
+    <div v-if="tab === 'tools'">
+      <div v-if="loading" class="grid gap-4 md:grid-cols-2">
+        <div v-for="idx in 4" :key="idx" class="h-64 rounded-lg border bg-surface-2 animate-pulse" />
+      </div>
+
+      <div v-else class="grid gap-4 md:grid-cols-2">
+        <div
+          v-for="toolStatus in orderedTools"
+          :key="toolStatus.tool"
+          class="rounded-lg border bg-surface-2 p-5 space-y-4"
+        >
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <h3 class="font-semibold">{{ toolStatus.tool }}</h3>
+            <span :class="stateChipClass(toolStatus.state)">{{ stateLabel(toolStatus.state) }}</span>
+          </div>
+
+          <label class="flex items-center gap-2.5 text-sm">
             <input
               class="h-4 w-4"
               type="checkbox"
@@ -287,8 +357,8 @@ function ensureToolEditor(tool: string): ToolEditorState {
             Enable tool sync
           </label>
 
-          <div class="space-y-2">
-            <p class="xt-eyebrow">Scope</p>
+          <div>
+            <p class="xt-eyebrow mb-1.5">Scope</p>
             <select
               class="xt-select"
               :value="editor[toolStatus.tool]?.scope ?? 'project'"
@@ -298,14 +368,18 @@ function ensureToolEditor(tool: string): ToolEditorState {
             </select>
           </div>
 
-          <div class="space-y-2">
-            <p class="xt-eyebrow">Core categories</p>
-            <div class="grid gap-2 sm:grid-cols-2">
-              <label v-for="(label, key) in categoryLabels" :key="key" class="flex items-center gap-2 rounded-lg border bg-surface px-3 py-2 text-sm">
+          <div>
+            <p class="xt-eyebrow mb-1.5">Categories</p>
+            <div class="grid gap-1.5 sm:grid-cols-2">
+              <label
+                v-for="(label, key) in categoryLabels"
+                :key="key"
+                class="flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm"
+              >
                 <input
                   class="h-4 w-4"
                   type="checkbox"
-                  :checked="readCategory(toolStatus.tool, key)"
+                  :checked="editor[toolStatus.tool]?.categories[key] ?? true"
                   @change="onCategoryChange(toolStatus.tool, key, $event)"
                 />
                 {{ label }}
@@ -313,68 +387,208 @@ function ensureToolEditor(tool: string): ToolEditorState {
             </div>
           </div>
 
-          <div class="space-y-2">
-            <p class="xt-eyebrow">Managed targets</p>
-            <ul class="list-disc space-y-1 pl-5 text-sm">
-              <li v-for="target in toolStatus.targets" :key="target.path"><code>{{ target.path }}</code></li>
+          <div v-if="toolStatus.targets.length">
+            <p class="xt-eyebrow mb-1.5">Managed targets</p>
+            <ul class="space-y-0.5">
+              <li v-for="target in toolStatus.targets" :key="target.path">
+                <code class="text-xs text-muted">{{ target.path }}</code>
+              </li>
             </ul>
           </div>
 
-          <div v-if="toolStatus.warnings.length > 0" class="space-y-2">
-            <p class="xt-eyebrow">Warnings</p>
-            <ul class="list-disc space-y-1 pl-5 text-sm text-muted">
-              <li v-for="warning in toolStatus.warnings" :key="warning">{{ warning }}</li>
+          <div v-if="toolStatus.warnings.length" class="xt-alert-warn text-xs">
+            <ul class="space-y-0.5">
+              <li v-for="w in toolStatus.warnings" :key="w">{{ w }}</li>
             </ul>
           </div>
 
-          <div class="flex flex-wrap gap-2">
-            <button class="xt-btn-ghost" type="button" @click="openPreview(toolStatus.tool, 'render')">View rendered output</button>
-            <button class="xt-btn-ghost" type="button" @click="openPreview(toolStatus.tool, 'diff')">View managed block diff</button>
-            <button class="xt-btn" type="button" :disabled="pendingSave[toolStatus.tool]" @click="saveTool(toolStatus.tool)">
-              {{ pendingSave[toolStatus.tool] ? "Saving..." : "Save policy" }}
+          <div class="flex flex-wrap gap-2 pt-1">
+            <button class="xt-btn-ghost text-xs" type="button" @click="openPreview(toolStatus.tool, 'render')">
+              Preview output
             </button>
-            <button class="xt-btn" type="button" :disabled="pendingSync[toolStatus.tool]" @click="syncTool(toolStatus.tool)">
-              {{ pendingSync[toolStatus.tool] ? "Syncing..." : "Sync this tool" }}
+            <button class="xt-btn-ghost text-xs" type="button" @click="openPreview(toolStatus.tool, 'diff')">
+              View diff
+            </button>
+            <button
+              class="xt-btn text-xs"
+              type="button"
+              :disabled="pendingSave[toolStatus.tool]"
+              @click="saveTool(toolStatus.tool)"
+            >
+              {{ pendingSave[toolStatus.tool] ? "Saving…" : "Save policy" }}
+            </button>
+            <button
+              class="xt-btn text-xs"
+              type="button"
+              :disabled="pendingSync[toolStatus.tool]"
+              @click="syncTool(toolStatus.tool)"
+            >
+              {{ pendingSync[toolStatus.tool] ? "Syncing…" : "Sync" }}
             </button>
           </div>
         </div>
-      </article>
+      </div>
     </div>
 
+    <!-- ── Sources tab ────────────────────────────────── -->
+    <div v-if="tab === 'sources'">
+      <!-- Coverage summary — plain KPIs -->
+      <div class="mb-8 grid grid-cols-3 gap-6 border-b pb-8">
+        <div>
+          <p class="xt-kpi-value">{{ detectedCount }}<span class="text-xl text-muted">/{{ enabledCount }}</span></p>
+          <p class="xt-kpi-label">Sources detected</p>
+        </div>
+        <div>
+          <p class="xt-kpi-value">{{ sourcesData?.sessions.length ?? 0 }}</p>
+          <p class="xt-kpi-label">Recent sessions</p>
+        </div>
+        <div>
+          <p class="xt-kpi-value font-mono text-base leading-normal text-muted">
+            {{ sourcesConfig?.pollIntervalMs ?? "—" }}<span class="text-sm"> ms</span>
+          </p>
+          <p class="xt-kpi-label">Poll interval</p>
+        </div>
+      </div>
+
+      <!-- Per-tool source config -->
+      <h2 class="xt-section-title mb-4">Source configuration</h2>
+
+      <div v-if="loading" class="grid gap-4 md:grid-cols-2">
+        <div v-for="idx in 4" :key="idx" class="h-40 rounded-lg border bg-surface-2 animate-pulse" />
+      </div>
+
+      <div v-else class="grid gap-4 md:grid-cols-2">
+        <div
+          v-for="scraper in sourcesConfig?.scrapers ?? []"
+          :key="scraper.tool"
+          class="rounded-lg border bg-surface-2 p-4 space-y-3"
+        >
+          <div class="flex items-center justify-between gap-3">
+            <h3 class="font-semibold">{{ scraper.tool }}</h3>
+            <span :class="scraper.detected ? 'xt-chip-ok' : 'xt-chip-warn'">
+              {{ scraper.detected ? "detected" : "not detected" }}
+            </span>
+          </div>
+
+          <label class="flex items-center gap-2 text-sm">
+            <input v-model="scraperEditorState(scraper.tool).enabled" type="checkbox" class="h-4 w-4" />
+            Enable ingestion
+          </label>
+
+          <div>
+            <p class="xt-eyebrow mb-1">Store path</p>
+            <code class="block text-xs text-muted">{{ scraper.path }}</code>
+          </div>
+
+          <div>
+            <p class="xt-eyebrow mb-1">Custom path override</p>
+            <input
+              v-model="scraperEditorState(scraper.tool).customStorePath"
+              class="xt-input"
+              placeholder="Leave empty to use default"
+            />
+          </div>
+
+          <div class="flex flex-wrap gap-2 pt-1">
+            <button
+              class="xt-btn text-xs"
+              type="button"
+              :disabled="scraperSaving[scraper.tool]"
+              @click="saveScraper(scraper.tool)"
+            >
+              {{ scraperSaving[scraper.tool] ? "Saving…" : "Save" }}
+            </button>
+            <button
+              class="xt-btn-ghost text-xs"
+              type="button"
+              :disabled="scraperSaving[scraper.tool]"
+              @click="resetCustomPath(scraper.tool)"
+            >
+              Use default
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Ingested sessions table -->
+      <h2 class="xt-section-title mb-4 mt-8">Ingested sessions</h2>
+      <div class="overflow-x-auto">
+        <table class="xt-table min-w-[560px]">
+          <thead>
+            <tr>
+              <th>Session</th>
+              <th>Tool</th>
+              <th>Started</th>
+              <th>Messages</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="session in sourcesData?.sessions ?? []" :key="session.session_ref">
+              <td><code class="text-xs">{{ session.session_ref }}</code></td>
+              <td class="text-sm">{{ session.tool }}</td>
+              <td class="text-sm text-muted">{{ new Date(session.started_at).toLocaleString() }}</td>
+              <td class="text-sm text-muted">{{ session.message_count ?? 0 }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <p v-if="!loading && (sourcesData?.sessions.length ?? 0) === 0" class="mt-3 text-sm text-muted">
+          No sessions ingested yet.
+        </p>
+      </div>
+    </div>
+
+    <!-- ── Config tab ─────────────────────────────────── -->
+    <div v-if="tab === 'config'">
+      <p class="mb-5 text-sm text-muted">
+        Effective policy is the merged result of global baseline + repo policy. Read-only.
+      </p>
+      <pre
+        v-if="policy"
+        class="overflow-x-auto rounded-lg border bg-surface-2 p-5 text-xs leading-relaxed"
+      >{{ JSON.stringify(policy, null, 2) }}</pre>
+      <p v-else-if="loading" class="text-sm text-muted">Loading policy…</p>
+      <p v-else class="text-sm text-muted">Policy unavailable.</p>
+    </div>
+
+    <!-- ── Preview modal ──────────────────────────────── -->
     <div v-if="previewVisible" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div class="max-h-[90vh] w-[min(1080px,96vw)] overflow-y-auto rounded-xl border bg-surface p-6 shadow-soft">
+      <div class="max-h-[90vh] w-[min(1080px,96vw)] overflow-y-auto rounded-xl border bg-surface p-6">
         <div class="mb-4 flex items-center justify-between gap-3">
-          <h3 class="xt-section-title text-xl">{{ preview ? `${preview.tool} preview` : "Preview" }}</h3>
-          <button class="xt-btn-ghost" type="button" @click="previewVisible = false">Close</button>
+          <h3 class="font-semibold">{{ preview ? `${preview.tool} output preview` : "Preview" }}</h3>
+          <button class="xt-btn-ghost text-xs" type="button" @click="previewVisible = false">Close</button>
         </div>
 
-        <p v-if="previewLoading" class="text-sm text-muted">Loading preview...</p>
+        <p v-if="previewLoading" class="text-sm text-muted">Loading preview…</p>
 
         <div v-else-if="preview" class="space-y-4">
-          <section class="xt-card space-y-2">
-            <p class="xt-eyebrow">Rendered output</p>
-            <pre class="overflow-x-auto rounded-lg border bg-surface p-4 text-xs leading-relaxed">{{ preview.rendered_content }}</pre>
-          </section>
+          <div>
+            <p class="xt-eyebrow mb-2">Rendered output</p>
+            <pre class="overflow-x-auto rounded-md border bg-surface-2 p-4 text-xs leading-relaxed">{{ preview.rendered_content }}</pre>
+          </div>
 
-          <section v-if="previewMode === 'diff'" class="xt-card space-y-4">
-            <p class="xt-eyebrow">Managed block diff</p>
-            <article v-for="target in preview.targets" :key="target.path" class="space-y-3 rounded-lg border bg-surface p-4">
+          <div v-if="previewMode === 'diff'" class="space-y-4">
+            <p class="xt-eyebrow mb-2">Managed block diff</p>
+            <div
+              v-for="target in preview.targets"
+              :key="target.path"
+              class="rounded-md border bg-surface-2 p-4 space-y-3"
+            >
               <div class="flex flex-wrap items-center justify-between gap-2">
                 <code class="text-xs">{{ target.path }}</code>
                 <span :class="target.drifted ? 'xt-chip-warn' : 'xt-chip-ok'">
                   {{ target.drifted ? "drifted" : "aligned" }}
                 </span>
               </div>
-              <div class="space-y-1">
-                <p class="xt-eyebrow">Current managed block</p>
-                <pre class="overflow-x-auto rounded-lg border bg-surface-2 p-3 text-xs leading-relaxed">{{ target.current_managed_block ?? "(none)" }}</pre>
+              <div>
+                <p class="xt-eyebrow mb-1">Current block</p>
+                <pre class="overflow-x-auto rounded-md border bg-surface p-3 text-xs leading-relaxed">{{ target.current_managed_block ?? "(none)" }}</pre>
               </div>
-              <div class="space-y-1">
-                <p class="xt-eyebrow">Expected managed block</p>
-                <pre class="overflow-x-auto rounded-lg border bg-surface-2 p-3 text-xs leading-relaxed">{{ target.expected_managed_block }}</pre>
+              <div>
+                <p class="xt-eyebrow mb-1">Expected block</p>
+                <pre class="overflow-x-auto rounded-md border bg-surface p-3 text-xs leading-relaxed">{{ target.expected_managed_block }}</pre>
               </div>
-            </article>
-          </section>
+            </div>
+          </div>
         </div>
       </div>
     </div>

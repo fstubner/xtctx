@@ -1,0 +1,63 @@
+:root {
+  --xt-font-heading: "Outfit", "Segoe UI", sans-serif;
+  --xt-font-body: "Public Sans", "Segoe UI", sans-serif;
+  --xt-font-mono: "IBM Plex Mono", "Consolas", monospace;
+
+  --xt-radius-xs: 10px;
+  --xt-radius-sm: 14px;
+  --xt-radius-md: 18px;
+  --xt-radius-lg: 24px;
+
+  --xt-space-1: 0.25rem;
+  --xt-space-2: 0.5rem;
+  --xt-space-3: 0.75rem;
+  --xt-space-4: 1rem;
+  --xt-space-5: 1.5rem;
+  --xt-space-6: 2rem;
+  --xt-space-7: 2.75rem;
+
+  --xt-shadow-sm: 0 8px 20px rgba(2, 9, 20, 0.28);
+  --xt-shadow-md: 0 18px 40px rgba(2, 9, 20, 0.38);
+  --xt-shadow-lg: 0 28px 60px rgba(2, 9, 20, 0.48);
+
+  --xt-bg: #040a16;
+  --xt-bg-soft: #091325;
+  --xt-panel: rgba(11, 22, 39, 0.84);
+  --xt-panel-strong: rgba(13, 26, 46, 0.95);
+  --xt-card: rgba(15, 30, 52, 0.86);
+  --xt-card-strong: rgba(18, 36, 62, 0.96);
+  --xt-line: rgba(72, 107, 170, 0.4);
+  --xt-line-soft: rgba(72, 107, 170, 0.25);
+  --xt-text: #e8f1ff;
+  --xt-text-muted: #91a8cf;
+  --xt-text-soft: #b8c7df;
+  --xt-accent: #31d4ab;
+  --xt-accent-strong: #2ca58e;
+  --xt-accent-alt: #4da9ff;
+  --xt-warning: #f0b06f;
+  --xt-danger: #f78091;
+  --xt-focus: rgba(49, 212, 171, 0.5);
+}
+
+:root.light-mode {
+  --xt-bg: #f3f7ff;
+  --xt-bg-soft: #e6efff;
+  --xt-panel: rgba(255, 255, 255, 0.87);
+  --xt-panel-strong: rgba(255, 255, 255, 0.98);
+  --xt-card: rgba(246, 250, 255, 0.92);
+  --xt-card-strong: rgba(255, 255, 255, 0.99);
+  --xt-line: rgba(68, 95, 141, 0.26);
+  --xt-line-soft: rgba(68, 95, 141, 0.18);
+  --xt-text: #142640;
+  --xt-text-muted: #4e6386;
+  --xt-text-soft: #3b5278;
+  --xt-accent: #148a70;
+  --xt-accent-strong: #106754;
+  --xt-accent-alt: #1f78d9;
+  --xt-warning: #a9642d;
+  --xt-danger: #af4054;
+  --xt-focus: rgba(20, 138, 112, 0.38);
+  --xt-shadow-sm: 0 8px 20px rgba(16, 27, 51, 0.12);
+  --xt-shadow-md: 0 16px 36px rgba(16, 27, 51, 0.16);
+  --xt-shadow-lg: 0 24px 52px rgba(16, 27, 51, 0.2);
+}

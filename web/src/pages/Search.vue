@@ -11,10 +11,10 @@ const results = ref<SearchResponse["results"]>([]);
 const hasSearched = ref(false);
 
 const starterPrompts = [
-  "release workflow failed after merge",
-  "where is trusted publishing oidc configured",
-  "recent context for FAQ implementation",
-  "github pages custom domain dns settings",
+  "authentication error after dependency update",
+  "why did we choose this architecture",
+  "database migration strategy",
+  "environment variable configuration",
 ];
 
 async function runSearch(): Promise<void> {
