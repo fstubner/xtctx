@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { ScraperRegistry } from "@xtctx/scrapers/registry";
-import type { ConversationScraper, ConversationChunk } from "@xtctx/types/scraper";
+import type { ConversationScraper } from "@xtctx/types/scraper";
 
 class MockScraper implements ConversationScraper {
   readonly tool = "mock-tool";
@@ -19,10 +19,6 @@ class MockScraper implements ConversationScraper {
 
   async *fullSync() {
     // empty
-  }
-
-  parseRaw(raw: unknown) {
-    return raw as ConversationChunk;
   }
 
   async getLastScrapedPosition() {

@@ -1,5 +1,6 @@
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { dirname, extname, join, resolve } from "node:path";
+import { errorMessage } from "../utils/errors.js";
 import {
   CONTINUITY_CATEGORIES,
   DEFAULT_REGISTERED_TOOLS,
@@ -733,10 +734,3 @@ function dedupeStrings(values: readonly string[]): string[] {
   return [...new Set(values.filter((value) => value.length > 0))];
 }
 
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return String(error);
-}

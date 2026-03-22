@@ -6,6 +6,12 @@
   "bin": {
     "xtctx": "dist/src/cli/index.js"
   },
+  "exports": {
+    "./scrapers": {
+      "types": "./dist/src/scrapers/index.d.ts",
+      "import": "./dist/src/scrapers/index.js"
+    }
+  },
   "scripts": {
     "build": "tsc",
     "build:bundle-web": "npm run web:build && npm run web:copy-dist",
@@ -20,10 +26,14 @@
     "api": "tsx src/api/server.ts",
     "web:dev": "npm --prefix web run dev",
     "web:build": "npm --prefix web run build",
+    "web:preview": "npm --prefix web run preview",
     "web:copy-dist": "node scripts/copy-web-dist.mjs",
+    "landing:dev": "npm --prefix landing run dev",
+    "landing:build": "npm --prefix landing run build",
+    "landing:preview": "npm --prefix landing run preview",
     "prepack": "npm run build && npm run build:bundle-web",
     "smoke:cli": "node dist/src/cli/index.js --help",
-    "verify:release": "npm test && npm run test:security && npm run security:checklist && npm run build && npm run build:bundle-web && npm run smoke:cli"
+    "verify:release": "npm test && npm run test:security && npm run security:checklist && npm run build && npm run build:bundle-web && npm run landing:build && npm run smoke:cli"
   },
   "dependencies": {
     "@lancedb/lancedb": "^0.13.0",
@@ -33,8 +43,8 @@
     "better-sqlite3": "^11.0.0",
     "chokidar": "^4.0.0",
     "commander": "^13.0.0",
-    "express-rate-limit": "^7.5.0",
     "express": "^5.0.0",
+    "express-rate-limit": "^7.5.0",
     "glob": "^11.0.0",
     "helmet": "^8.1.0",
     "yaml": "^2.7.0"
@@ -43,8 +53,10 @@
     "@types/better-sqlite3": "^7.6.0",
     "@types/express": "^5.0.0",
     "@types/node": "^22.0.0",
+    "eslint": "^10.0.3",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
+    "typescript-eslint": "^8.56.1",
     "vitest": "^3.0.0"
   },
   "engines": {

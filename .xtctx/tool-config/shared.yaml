@@ -1,0 +1,17 @@
+defaults:
+  sync_enabled: true
+  categories_enabled:
+    - context_feed
+    - skills
+    - commands
+    - agents
+    - mcp_servers
+    - slash_commands
+    - whitelist_policy
+  scope: project
+tools: {}
+policy:
+  whitelist:
+    allowed_patterns: []
+    denied_patterns: []
+    advisory_level: warn

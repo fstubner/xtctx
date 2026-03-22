@@ -1,4 +1,5 @@
 import { relative, resolve } from "node:path";
+import { syncToolHooks } from "../config/hooks.js";
 import { syncToolConfigs } from "../config/sync.js";
 
 export interface SyncOptions {
@@ -32,6 +33,24 @@ export async function runSync(options: SyncOptions = {}): Promise<void> {
     console.log("\nSync warnings:");
     for (const warning of result.warnings) {
       console.log(`- ${warning}`);
+    }
+  }
+
+  // Phase 2: Generate executable hook files (e.g. .claude/hooks.json, .cursor/rules/)
+  const hookResults = await syncToolHooks(projectRoot);
+  const hookChanges = hookResults.filter((h) => h.updated || h.created);
+  if (hookChanges.length > 0) {
+    console.log("\nHook files:");
+    for (const hook of hookChanges) {
+      const changeType = hook.created ? "created" : "updated";
+      const displayPath = relative(projectRoot, hook.path) || ".";
+      console.log(`  ${hook.tool}: ${changeType} ${displayPath}`);
+    }
+  }
+
+  for (const hook of hookResults) {
+    if (hook.warning) {
+      console.log(`  hook warning (${hook.tool}): ${hook.warning}`);
     }
   }
 }

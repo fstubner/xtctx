@@ -2,6 +2,17 @@ export interface ChunkMetadata {
   messageIndex: number;
   tokenEstimate?: number;
   referencedFiles?: string[];
+  /**
+   * Chunking layer indicating the abstraction level of the content.
+   *
+   * - 0  Direct conversation turn (user ↔ assistant message). Default.
+   * - 1  Compacted / summarized content (e.g. Codex compaction summaries,
+   *      rule-based compaction output). Higher abstraction, fewer tokens.
+   *
+   * Consumers can prefer layer-0 for verbatim recall or layer-1 for
+   * condensed context that spans more conversational history.
+   */
+  layer?: number;
 }
 
 export interface ConversationChunk {
@@ -28,7 +39,6 @@ export interface ConversationScraper<
   getStorePaths(): string[];
   scrape(since?: Date): AsyncIterable<T>;
   fullSync(): AsyncIterable<T>;
-  parseRaw(raw: unknown): T;
   getLastScrapedPosition(): Promise<ScraperState>;
   saveScrapedPosition(state: ScraperState): Promise<void>;
 }
@@ -58,6 +68,8 @@ export interface CodexChunk extends ConversationChunk {
   metadata: ChunkMetadata & {
     approvalMode: "suggest" | "auto-edit" | "full-auto";
     sandboxed: boolean;
+    /** 0 = direct conversation turn; 1 = compacted/summary layer. */
+    layer: number;
   };
 }
 

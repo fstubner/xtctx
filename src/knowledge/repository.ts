@@ -9,6 +9,7 @@ const TYPE_DIRS: Record<ContextType, string> = {
   insight: "insights",
   convention: "conventions",
   gotcha: "gotchas",
+  faq: "faqs",
 };
 
 export class KnowledgeRepository {

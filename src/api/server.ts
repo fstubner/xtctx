@@ -12,12 +12,14 @@ import { createKnowledgeRouter } from "./routes/knowledge.js";
 import { createSearchRouter } from "./routes/search.js";
 import { createSourcesRouter } from "./routes/sources.js";
 import { createProjectServices } from "../runtime/services.js";
+import { errorMessage } from "../utils/errors.js";
 
 export interface ApiServerOptions {
   projectPath?: string;
   port?: number;
   webStaticDir?: string;
   security?: Partial<ApiSecurityOptions>;
+  onScraperConfigChanged?: (tool: string, enabled: boolean) => void;
 }
 
 export interface ApiSecurityOptions {
@@ -36,7 +38,7 @@ export interface ApiServerHandle {
 
 export async function createApiApp(
   projectPath?: string,
-  options: Pick<ApiServerOptions, "webStaticDir" | "security"> = {},
+  options: Pick<ApiServerOptions, "webStaticDir" | "security" | "onScraperConfigChanged"> = {},
 ): Promise<{
   app: express.Express;
   port: number;
@@ -107,6 +109,7 @@ export async function createApiApp(
       ingestion: services.ingestion,
       sessions: services.sessions,
       knowledgeRecords,
+      onScraperConfigChanged: options.onScraperConfigChanged,
     }),
   );
   app.use("/api/continuity", createContinuityRouter({ projectRoot: services.projectRoot }));
@@ -155,6 +158,7 @@ export async function startApiServer(options: ApiServerOptions = {}): Promise<Ap
   const { app, port: defaultPort } = await createApiApp(options.projectPath, {
     webStaticDir: options.webStaticDir,
     security: options.security,
+    onScraperConfigChanged: options.onScraperConfigChanged,
   });
   const port = options.port ?? defaultPort;
   const server = createServer(app);
@@ -241,7 +245,7 @@ function createCorsMiddleware(security: ApiSecurityOptions): express.RequestHand
     res.setHeader("Vary", "Origin");
     res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Xtctx-Api-Token");
-    res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+    res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,OPTIONS");
 
     if (req.method === "OPTIONS") {
       res.status(204).end();
@@ -408,10 +412,3 @@ function asHttpStatus(error: unknown): number {
   return 500;
 }
 
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return String(error);
-}

@@ -12,7 +12,8 @@ interface ProjectKnowledgeParams {
 }
 
 export function createProjectKnowledgeHandler(store: KnowledgeStore) {
-  return async (params: ProjectKnowledgeParams = {}) => {
+  return async (raw: Record<string, unknown> = {}) => {
+    const params = raw as unknown as ProjectKnowledgeParams;
     const type = params.type ?? "all";
     const format = params.format ?? "markdown";
 

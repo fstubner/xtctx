@@ -83,4 +83,22 @@ describe("KnowledgeRepository", () => {
     const old = await repo.getById("old");
     expect(old?.superseded_by).toBe("new");
   });
+
+  it("stores faq records in faq type bucket", async () => {
+    await repo.save({
+      id: "faq1",
+      type: "faq" as const,
+      created_at: new Date().toISOString(),
+      source_tool: "codex",
+      referenced_files: [],
+      domain_tags: ["onboarding"],
+      environment: {},
+      title: "How do we start a session?",
+      body: "Use search and project knowledge before making edits.",
+    });
+
+    const faqs = await repo.listByType("faq");
+    expect(faqs.length).toBe(1);
+    expect(faqs[0].id).toBe("faq1");
+  });
 });

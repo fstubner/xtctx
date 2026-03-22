@@ -215,4 +215,82 @@ describe("CodexCliScraper", () => {
     const realMsg = chunks.find((c) => c.content === "real message");
     expect(realMsg).toBeDefined();
   });
+
+  it("assigns layer 0 to normal conversation turns", async () => {
+    const chunks: CodexChunk[] = [];
+    for await (const chunk of scraper.fullSync()) {
+      chunks.push(chunk);
+    }
+
+    for (const chunk of chunks) {
+      expect(chunk.metadata.layer).toBe(0);
+    }
+  });
+
+  it("emits compacted events as layer-1 chunks", async () => {
+    const compactedSession = join(tempDir, "session-compacted.jsonl");
+    await writeFile(
+      compactedSession,
+      [
+        sessionMeta("compact-session", "2026-02-26T08:00:00Z"),
+        turnContext("suggest", "workspace-write"),
+        // compacted event with summary payload
+        JSON.stringify({
+          timestamp: "2026-02-26T08:05:00Z",
+          type: "compacted",
+          payload: {
+            summary: "The session discussed refactoring the auth module and adding tests.",
+            turns_compacted: 8,
+          },
+        }),
+        // Regular user message after compaction
+        userMessage("continue from here", "2026-02-26T08:06:00Z"),
+      ].join("\n") + "\n",
+      "utf-8",
+    );
+
+    const chunks: CodexChunk[] = [];
+    for await (const chunk of scraper.fullSync()) {
+      chunks.push(chunk);
+    }
+
+    const compacted = chunks.find((c) => c.content.includes("auth module"));
+    expect(compacted).toBeDefined();
+    expect(compacted?.metadata.layer).toBe(1);
+    expect(compacted?.role).toBe("assistant");
+    expect(compacted?.sessionId).toBe("compact-session");
+
+    // Regular message should still be layer 0
+    const regular = chunks.find((c) => c.content === "continue from here");
+    expect(regular).toBeDefined();
+    expect(regular?.metadata.layer).toBe(0);
+  });
+
+  it("uses content field as fallback when compacted summary is absent", async () => {
+    const fallbackSession = join(tempDir, "session-compact-fallback.jsonl");
+    await writeFile(
+      fallbackSession,
+      [
+        sessionMeta("fallback-session", "2026-02-27T09:00:00Z"),
+        turnContext("full-auto", "none"),
+        JSON.stringify({
+          timestamp: "2026-02-27T09:05:00Z",
+          type: "compacted",
+          payload: {
+            content: "Previous work involved database migration scripts.",
+          },
+        }),
+      ].join("\n") + "\n",
+      "utf-8",
+    );
+
+    const chunks: CodexChunk[] = [];
+    for await (const chunk of scraper.fullSync()) {
+      chunks.push(chunk);
+    }
+
+    const compacted = chunks.find((c) => c.content.includes("database migration"));
+    expect(compacted).toBeDefined();
+    expect(compacted?.metadata.layer).toBe(1);
+  });
 });

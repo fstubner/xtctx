@@ -1,4 +1,5 @@
 import { checkDuplicate } from "../../knowledge/dedup.js";
+import type { AutoTagger } from "../../knowledge/tagger.js";
 import {
   createContextRecordId,
   type ContextRecord,
@@ -11,7 +12,7 @@ export interface KnowledgeWriter {
   supersede?(oldId: string, newId: string): Promise<void>;
 }
 
-export interface SimilarityMatch {
+interface SimilarityMatch {
   id: string;
   similarity: number;
 }
@@ -39,9 +40,30 @@ interface SaveInsightParams {
   context?: string;
 }
 
+interface SaveFaqParams {
+  question: string;
+  answer: string;
+  context?: string;
+}
+
+export interface WriteHandlerDependencies {
+  writer: KnowledgeWriter;
+  findSimilar?: SimilarityLookup;
+  autoTagger?: AutoTagger;
+}
+
+/** Validate that a required string field is present and non-empty. */
+function requireString(value: unknown, field: string): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error(`Missing required field: ${field}`);
+  }
+  return value.trim();
+}
+
 export function createWriteHandlers(
   writer: KnowledgeWriter,
   findSimilar?: SimilarityLookup,
+  autoTagger?: AutoTagger,
 ) {
   const write = async (
     type: ContextType,
@@ -62,6 +84,15 @@ export function createWriteHandlers(
       };
     }
 
+    // Auto-enrich with file references, domain tags, and environment versions.
+    const [referencedFiles, environment] = autoTagger
+      ? await Promise.all([
+          autoTagger.getFileReferences(candidateText),
+          autoTagger.getEnvironment(),
+        ])
+      : [[], {}];
+    const domainTags = autoTagger ? autoTagger.getDomainTags(candidateText) : [];
+
     const id = createContextRecordId(title, body, "mcp");
     const record: ContextRecord = {
       id,
@@ -69,9 +100,9 @@ export function createWriteHandlers(
       created_at: new Date().toISOString(),
       supersedes: duplicate.action === "superseded" ? duplicate.existingId ?? undefined : undefined,
       source_tool: "mcp",
-      referenced_files: [],
-      domain_tags: [],
-      environment: {},
+      referenced_files: referencedFiles,
+      domain_tags: domainTags,
+      environment,
       title,
       body,
       metadata,
@@ -90,8 +121,11 @@ export function createWriteHandlers(
     };
   };
 
-  const saveDecision = async (params: SaveDecisionParams): Promise<WriteResult> => {
-    const bodyParts = [params.rationale.trim()];
+  const saveDecision = async (raw: Record<string, unknown>): Promise<WriteResult> => {
+    const params = raw as unknown as SaveDecisionParams;
+    const title = requireString(params.title, "title");
+    const rationale = requireString(params.rationale, "rationale");
+    const bodyParts = [rationale];
     if (params.context?.trim()) {
       bodyParts.push(`Context: ${params.context.trim()}`);
     }
@@ -99,18 +133,18 @@ export function createWriteHandlers(
       bodyParts.push(`Alternatives: ${params.alternatives_considered.join("; ")}`);
     }
 
-    return write("decision", params.title.trim(), bodyParts.join("\n\n"), {
+    return write("decision", title, bodyParts.join("\n\n"), {
       rationale: params.rationale,
       context: params.context,
       alternatives_considered: params.alternatives_considered ?? [],
     });
   };
 
-  const saveErrorSolution = async (
-    params: SaveErrorSolutionParams,
-  ): Promise<WriteResult> => {
-    const title = params.error.trim();
-    const bodyParts = [`Solution: ${params.solution.trim()}`];
+  const saveErrorSolution = async (raw: Record<string, unknown>): Promise<WriteResult> => {
+    const params = raw as unknown as SaveErrorSolutionParams;
+    const title = requireString(params.error, "error");
+    const solution = requireString(params.solution, "solution");
+    const bodyParts = [`Solution: ${solution}`];
     if (params.context?.trim()) {
       bodyParts.push(`Context: ${params.context.trim()}`);
     }
@@ -122,14 +156,34 @@ export function createWriteHandlers(
     });
   };
 
-  const saveInsight = async (params: SaveInsightParams): Promise<WriteResult> => {
-    const title = params.insight.trim().slice(0, 80) || "Project insight";
+  const saveInsight = async (raw: Record<string, unknown>): Promise<WriteResult> => {
+    const params = raw as unknown as SaveInsightParams;
+    const insight = requireString(params.insight, "insight");
+    const title = insight.slice(0, 80) || "Project insight";
     const body = params.context?.trim()
-      ? `${params.insight.trim()}\n\nContext: ${params.context.trim()}`
-      : params.insight.trim();
+      ? `${insight}\n\nContext: ${params.context.trim()}`
+      : insight;
 
     return write("insight", title, body, {
       insight: params.insight,
+      context: params.context,
+    });
+  };
+
+  const saveFaq = async (raw: Record<string, unknown>): Promise<WriteResult> => {
+    const params = raw as unknown as SaveFaqParams;
+    const question = requireString(params.question, "question");
+    const answer = requireString(params.answer, "answer");
+    const title = question.slice(0, 100) || "Project FAQ";
+    const bodyParts = [`Q: ${question}`, `A: ${answer}`];
+
+    if (params.context?.trim()) {
+      bodyParts.push(`Context: ${params.context.trim()}`);
+    }
+
+    return write("faq", title, bodyParts.join("\n\n"), {
+      question: params.question,
+      answer: params.answer,
       context: params.context,
     });
   };
@@ -138,5 +192,6 @@ export function createWriteHandlers(
     saveDecision,
     saveErrorSolution,
     saveInsight,
+    saveFaq,
   };
 }

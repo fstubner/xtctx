@@ -1,9 +1,9 @@
 import { stat } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import Database from "better-sqlite3";
 import { glob } from "glob";
-import type { ConversationScraper, CursorChunk, ScraperState } from "../types/scraper.js";
-import { estimateTokens, ScraperStateManager } from "./base.js";
+import type { CursorChunk } from "../types/scraper.js";
+import { AbstractScraper, estimateTokens, toDate } from "./base.js";
 
 // Bubble type constants from Cursor's internal format.
 const BUBBLE_TYPE_USER = 1;
@@ -32,15 +32,14 @@ interface CursorBubbleData {
   modelInfo?: { modelName?: string };
 }
 
-export class CursorScraper implements ConversationScraper<CursorChunk> {
+export class CursorScraper extends AbstractScraper<CursorChunk> {
   readonly tool = "cursor";
-  private readonly stateManager: ScraperStateManager;
 
   constructor(
     private readonly cursorStorePath: string,
     stateDir: string,
   ) {
-    this.stateManager = new ScraperStateManager(stateDir);
+    super(stateDir);
   }
 
   async detect(): Promise<boolean> {
@@ -60,39 +59,6 @@ export class CursorScraper implements ConversationScraper<CursorChunk> {
 
   async *fullSync(): AsyncIterable<CursorChunk> {
     yield* this.readAllMessages(new Date(0));
-  }
-
-  parseRaw(raw: unknown): CursorChunk {
-    const value = raw as Record<string, unknown>;
-    const timestamp = coerceDate(value.timestamp);
-    const sessionId = toNonEmptyString(value.sessionId) ?? "unknown";
-    const content = toNonEmptyString(value.content) ?? "";
-    const role = normalizeRole(value.role as number | string | undefined);
-    const model = toNonEmptyString(value.model) ?? "unknown";
-    const composerMode = normalizeComposerMode(toNonEmptyString(value.composerMode));
-
-    return {
-      tool: "cursor",
-      sessionId,
-      timestamp,
-      role,
-      content,
-      metadata: {
-        messageIndex: toMessageIndex(value.messageIndex),
-        tokenEstimate: estimateTokens(content),
-        referencedFiles: [],
-        model,
-        composerMode,
-      },
-    };
-  }
-
-  async getLastScrapedPosition(): Promise<ScraperState> {
-    return this.stateManager.load(this.tool);
-  }
-
-  async saveScrapedPosition(state: ScraperState): Promise<void> {
-    await this.stateManager.save(this.tool, state);
   }
 
   private async *readAllMessages(since: Date): AsyncIterable<CursorChunk> {
@@ -194,7 +160,7 @@ export class CursorScraper implements ConversationScraper<CursorChunk> {
           continue;
         }
 
-        const timestamp = coerceDate(bubble.createdAt);
+        const timestamp = toDate(bubble.createdAt);
         if (timestamp <= since) {
           messageIndex++;
           continue;
@@ -306,37 +272,3 @@ function toNonEmptyString(value: unknown): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
-function toMessageIndex(value: unknown): number {
-  const index = Number(value);
-  if (Number.isFinite(index) && index >= 0) {
-    return Math.floor(index);
-  }
-
-  return 0;
-}
-
-function coerceDate(value: unknown): Date {
-  if (value instanceof Date) {
-    return value;
-  }
-
-  if (typeof value === "number" && Number.isFinite(value)) {
-    const millis = value > 10_000_000_000 ? value : value * 1000;
-    return new Date(millis);
-  }
-
-  if (typeof value === "string" && value.length > 0) {
-    const numeric = Number(value);
-    if (Number.isFinite(numeric) && value.trim() !== "") {
-      const millis = numeric > 10_000_000_000 ? numeric : numeric * 1000;
-      return new Date(millis);
-    }
-
-    const parsed = new Date(value);
-    if (!Number.isNaN(parsed.getTime())) {
-      return parsed;
-    }
-  }
-
-  return new Date(0);
-}

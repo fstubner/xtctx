@@ -21,7 +21,8 @@ interface SearchParams {
 }
 
 export function createSearchHandler(search: SearchRunner) {
-  return async (params: SearchParams) => {
+  return async (raw: Record<string, unknown>) => {
+    const params = raw as unknown as SearchParams;
     const mode = params.mode ?? "hybrid";
     const format = params.format ?? "markdown";
     const limit = params.limit ?? 10;
@@ -36,7 +37,7 @@ export function createSearchHandler(search: SearchRunner) {
   };
 }
 
-function formatAsMarkdown(results: any[], query: string): string {
+function formatAsMarkdown(results: HybridSearchResult[], query: string): string {
   if (results.length === 0) {
     return `No results found for "${query}".`;
   }

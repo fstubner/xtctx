@@ -149,6 +149,7 @@ export class IngestionCoordinator {
         timestamp: chunk.timestamp.toISOString(),
         messageIndex: chunk.metadata.messageIndex,
         referenced_files: chunk.metadata.referencedFiles ?? [],
+        layer: chunk.metadata.layer ?? 0,
       }),
     }));
   }

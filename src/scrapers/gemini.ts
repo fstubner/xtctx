@@ -1,8 +1,8 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { glob } from "glob";
-import type { ConversationScraper, GeminiChunk, ScraperState } from "../types/scraper.js";
-import { estimateTokens, ScraperStateManager } from "./base.js";
+import type { GeminiChunk } from "../types/scraper.js";
+import { AbstractScraper, estimateTokens, toDate } from "./base.js";
 
 const ROLE_MAP: Record<string, GeminiChunk["role"]> = {
   user: "user",
@@ -24,15 +24,14 @@ interface ParsedGeminiMessage {
   responseTokens?: number;
 }
 
-export class GeminiCliScraper implements ConversationScraper<GeminiChunk> {
+export class GeminiCliScraper extends AbstractScraper<GeminiChunk> {
   readonly tool = "gemini";
-  private readonly stateManager: ScraperStateManager;
 
   constructor(
     private readonly geminiHistoryPath: string,
     stateDir: string,
   ) {
-    this.stateManager = new ScraperStateManager(stateDir);
+    super(stateDir);
   }
 
   async detect(): Promise<boolean> {
@@ -77,14 +76,6 @@ export class GeminiCliScraper implements ConversationScraper<GeminiChunk> {
         responseTokens: toNumberOrUndefined(value.responseTokens),
       },
     };
-  }
-
-  async getLastScrapedPosition(): Promise<ScraperState> {
-    return this.stateManager.load(this.tool);
-  }
-
-  async saveScrapedPosition(state: ScraperState): Promise<void> {
-    await this.stateManager.save(this.tool, state);
   }
 
   private async *readAllMessages(since: Date): AsyncIterable<GeminiChunk> {
@@ -360,31 +351,6 @@ function toMessageIndex(value: unknown): number {
   }
 
   return 0;
-}
-
-function toDate(value: unknown): Date {
-  if (value instanceof Date) {
-    return value;
-  }
-
-  if (typeof value === "number" && Number.isFinite(value)) {
-    const millis = value > 10_000_000_000 ? value : value * 1000;
-    return new Date(millis);
-  }
-
-  if (typeof value === "string") {
-    const numeric = Number(value);
-    if (Number.isFinite(numeric) && value.trim() !== "") {
-      const millis = numeric > 10_000_000_000 ? numeric : numeric * 1000;
-      return new Date(millis);
-    }
-    const parsed = new Date(value);
-    if (!Number.isNaN(parsed.getTime())) {
-      return parsed;
-    }
-  }
-
-  return new Date(0);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -1,57 +1,57 @@
-import { readFile, readdir, stat } from "node:fs/promises";
-import { basename, join } from "node:path";
-import type { ConversationScraper, CopilotChunk, ScraperState } from "../types/scraper.js";
-import { estimateTokens, ScraperStateManager } from "./base.js";
+import { stat } from "node:fs/promises";
+import { glob } from "glob";
+import type { CopilotChunk } from "../types/scraper.js";
+import { AbstractScraper, estimateTokens, toDate } from "./base.js";
 
-const ROLE_MAP: Record<string, CopilotChunk["role"]> = {
-  user: "user",
-  human: "user",
-  assistant: "assistant",
-  system: "system",
-  tool: "tool",
-};
+/** VS Code stores Copilot Chat history in workspaceStorage SQLite files. */
+const SESSIONS_KEY = "interactive.sessions";
 
-interface ParsedMessage {
-  sessionId: string;
-  role?: string;
-  content?: string;
-  timestamp?: string | number;
+/** Shape of a single Copilot request/response pair inside ItemTable. */
+interface CopilotRequest {
+  message?: { parts?: Array<{ text?: string }> };
+  response?: Array<{ value?: string }>;
+  isCanceled?: boolean;
   model?: string;
-  completionType?: string;
+  agentId?: string;
 }
 
-export class CopilotScraper implements ConversationScraper<CopilotChunk> {
+/** Shape of a Copilot session object stored under SESSIONS_KEY. */
+interface CopilotSession {
+  sessionId?: string;
+  creationDate?: number;
+  requests?: CopilotRequest[];
+}
+
+export class CopilotScraper extends AbstractScraper<CopilotChunk> {
   readonly tool = "copilot";
-  private readonly stateManager: ScraperStateManager;
 
   constructor(
-    private readonly copilotHistoryPath: string,
+    /** Path to %APPDATA%/Code/User/workspaceStorage (or a test stand-in). */
+    private readonly workspaceStoragePath: string,
     stateDir: string,
   ) {
-    this.stateManager = new ScraperStateManager(stateDir);
+    super(stateDir);
   }
 
   async detect(): Promise<boolean> {
     try {
-      const target = await stat(this.copilotHistoryPath);
-      return target.isFile() || target.isDirectory();
+      const target = await stat(this.workspaceStoragePath);
+      return target.isDirectory();
     } catch {
       return false;
     }
   }
 
   getStorePaths(): string[] {
-    return [this.copilotHistoryPath];
+    return [this.workspaceStoragePath];
   }
 
-  async *scrape(since?: Date): AsyncIterable<CopilotChunk> {
-    const state = await this.getLastScrapedPosition();
-    const cutoff = since ?? state.lastTimestamp;
-    yield* this.readAllMessages(cutoff);
+  async *scrape(_since?: Date): AsyncIterable<CopilotChunk> {
+    yield* this.readAllMessages();
   }
 
   async *fullSync(): AsyncIterable<CopilotChunk> {
-    yield* this.readAllMessages(new Date(0));
+    yield* this.readAllMessages();
   }
 
   parseRaw(raw: unknown): CopilotChunk {
@@ -74,132 +74,174 @@ export class CopilotScraper implements ConversationScraper<CopilotChunk> {
     };
   }
 
-  async getLastScrapedPosition(): Promise<ScraperState> {
-    return this.stateManager.load(this.tool);
-  }
+  private async *readAllMessages(): AsyncIterable<CopilotChunk> {
+    const dbPaths = await this.resolveDbPaths();
+    // Import is deferred so the module loads even if better-sqlite3 is absent.
+    type DatabaseConstructor = new (path: string, options?: import("better-sqlite3").Options) => import("better-sqlite3").Database;
+    let Database: DatabaseConstructor | undefined;
+    try {
+      // Dynamic import so the module remains optional at startup.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      Database = ((await import("better-sqlite3")) as any).default as DatabaseConstructor;
+    } catch {
+      return;
+    }
+    if (!Database) return;
 
-  async saveScrapedPosition(state: ScraperState): Promise<void> {
-    await this.stateManager.save(this.tool, state);
-  }
-
-  private async *readAllMessages(since: Date): AsyncIterable<CopilotChunk> {
-    const files = await this.resolveJsonFiles();
-    const messageIndexBySession = new Map<string, number>();
-
-    for (const filePath of files) {
-      const fileSessionId = inferSessionId(filePath);
-      let parsed: unknown;
-
+    for (const dbPath of dbPaths) {
+      let db!: import("better-sqlite3").Database;
       try {
-        parsed = JSON.parse(await readFile(filePath, "utf-8")) as unknown;
+        db = new Database(dbPath, { readonly: true, fileMustExist: true });
       } catch {
         continue;
       }
 
-      const messages = extractMessages(parsed, fileSessionId);
-      for (const message of messages) {
-        const timestamp = toDate(message.timestamp);
-        if (timestamp <= since) {
-          continue;
-        }
-
-        const sessionId = message.sessionId || fileSessionId;
-        const nextIndex = messageIndexBySession.get(sessionId) ?? 0;
-        messageIndexBySession.set(sessionId, nextIndex + 1);
-
-        yield this.parseRaw({
-          ...message,
-          timestamp,
-          sessionId,
-          messageIndex: nextIndex,
-        });
+      try {
+        yield* this.readFromDb(db);
+      } finally {
+        db.close();
       }
     }
   }
 
-  private async resolveJsonFiles(): Promise<string[]> {
+  private *readFromDb(db: import("better-sqlite3").Database): Iterable<CopilotChunk> {
+    let rawValue: string | null;
     try {
-      const target = await stat(this.copilotHistoryPath);
-      if (target.isFile()) {
-        return this.copilotHistoryPath.endsWith(".json") ? [this.copilotHistoryPath] : [];
+      const row = db
+        .prepare<[string], { value: string }>("SELECT value FROM ItemTable WHERE key = ?")
+        .get(SESSIONS_KEY);
+      rawValue = row?.value ?? null;
+    } catch {
+      return;
+    }
+
+    if (!rawValue) {
+      return;
+    }
+
+    let sessionsMap: Record<string, unknown>;
+    try {
+      sessionsMap = JSON.parse(rawValue) as Record<string, unknown>;
+    } catch {
+      return;
+    }
+
+    for (const rawSession of Object.values(sessionsMap)) {
+      if (!isRecord(rawSession)) {
+        continue;
       }
 
-      const files = await readdir(this.copilotHistoryPath);
-      return files
-        .filter((file) => file.endsWith(".json"))
-        .map((file) => join(this.copilotHistoryPath, file));
+      const session = rawSession as CopilotSession;
+      const sessionId = session.sessionId ?? "unknown";
+      const creationDate = toDate(session.creationDate);
+
+      // Always scan all sessions: Copilot only exposes a session-level creation
+      // date, not per-message timestamps. Relying on creationDate to skip whole
+      // sessions would miss new messages appended to older sessions. The vector
+      // store's content-hash upsert handles deduplication of re-processed messages.
+      const requests = Array.isArray(session.requests) ? session.requests : [];
+      let messageIndex = 0;
+
+      for (const req of requests) {
+        if (req.isCanceled) {
+          continue;
+        }
+
+        const userText = extractUserText(req);
+        if (userText) {
+          yield this.parseRaw({
+            sessionId,
+            role: "user",
+            content: userText,
+            timestamp: creationDate,
+            model: req.model,
+            completionType: req.agentId ? "agent" : "chat",
+            messageIndex: messageIndex++,
+          });
+        }
+
+        const assistantText = extractAssistantText(req);
+        if (assistantText) {
+          yield this.parseRaw({
+            sessionId,
+            role: "assistant",
+            content: assistantText,
+            timestamp: creationDate,
+            model: req.model,
+            completionType: req.agentId ? "agent" : "chat",
+            messageIndex: messageIndex++,
+          });
+        }
+      }
+    }
+  }
+
+  /**
+   * Discovers VS Code workspaceStorage SQLite databases.
+   * Pattern: &lt;workspaceStoragePath&gt;/[hash]/state.vscdb
+   */
+  private async resolveDbPaths(): Promise<string[]> {
+    try {
+      const target = await stat(this.workspaceStoragePath);
+      if (!target.isDirectory()) {
+        return [];
+      }
+
+      return glob("*/state.vscdb", {
+        cwd: this.workspaceStoragePath,
+        absolute: true,
+        nodir: true,
+      });
     } catch {
       return [];
     }
   }
 }
 
-function extractMessages(input: unknown, fallbackSessionId: string): ParsedMessage[] {
-  if (Array.isArray(input)) {
-    return input
-      .filter((entry): entry is Record<string, unknown> => isRecord(entry))
-      .map((entry) => mapMessage(entry, fallbackSessionId));
+/** Concatenates all text parts from a user message. */
+function extractUserText(req: CopilotRequest): string | undefined {
+  const parts = req.message?.parts;
+  if (!Array.isArray(parts)) {
+    return undefined;
   }
 
-  if (!isRecord(input)) {
-    return [];
-  }
+  const text = parts
+    .map((p) => p.text ?? "")
+    .join("\n")
+    .trim();
 
-  if (Array.isArray(input.messages)) {
-    const sessionId = toStringValue(input.sessionId ?? input.session_id) ?? fallbackSessionId;
-    return input.messages
-      .filter((entry): entry is Record<string, unknown> => isRecord(entry))
-      .map((entry) => mapMessage(entry, sessionId));
-  }
-
-  if (Array.isArray(input.conversations)) {
-    const rows: ParsedMessage[] = [];
-    for (const conversation of input.conversations) {
-      if (!isRecord(conversation) || !Array.isArray(conversation.messages)) {
-        continue;
-      }
-
-      const sessionId =
-        toStringValue(conversation.sessionId ?? conversation.session_id ?? conversation.id) ??
-        fallbackSessionId;
-
-      for (const message of conversation.messages) {
-        if (isRecord(message)) {
-          rows.push(mapMessage(message, sessionId));
-        }
-      }
-    }
-
-    return rows;
-  }
-
-  return [];
+  return text.length > 0 ? text : undefined;
 }
 
-function mapMessage(message: Record<string, unknown>, sessionId: string): ParsedMessage {
-  return {
-    sessionId,
-    role: toStringValue(message.role) ?? toStringValue(message.author),
-    content: toStringValue(message.content) ?? toStringValue(message.text),
-    timestamp: (message.timestamp ?? message.created_at ?? message.createdAt) as
-      | string
-      | number
-      | undefined,
-    model: toStringValue(message.model),
-    completionType: toStringValue(message.completionType ?? message.completion_type),
-  };
+/** Concatenates all value segments from an assistant response. */
+function extractAssistantText(req: CopilotRequest): string | undefined {
+  const response = req.response;
+  if (!Array.isArray(response)) {
+    return undefined;
+  }
+
+  const text = response
+    .map((r) => r.value ?? "")
+    .join("")
+    .trim();
+
+  return text.length > 0 ? text : undefined;
 }
 
 function normalizeRole(value?: string): CopilotChunk["role"] {
+  const ROLE_MAP: Record<string, CopilotChunk["role"]> = {
+    user: "user",
+    human: "user",
+    assistant: "assistant",
+    system: "system",
+    tool: "tool",
+  };
+
   if (!value) {
     return "system";
   }
 
   return ROLE_MAP[value.toLowerCase()] ?? "system";
-}
-
-function inferSessionId(filePath: string): string {
-  return basename(filePath).replace(".json", "") || "unknown";
 }
 
 function toMessageIndex(value: unknown): number {
@@ -217,31 +259,6 @@ function toStringValue(value: unknown): string | undefined {
   }
 
   return value;
-}
-
-function toDate(value: unknown): Date {
-  if (value instanceof Date) {
-    return value;
-  }
-
-  if (typeof value === "number" && Number.isFinite(value)) {
-    const millis = value > 10_000_000_000 ? value : value * 1000;
-    return new Date(millis);
-  }
-
-  if (typeof value === "string") {
-    const numeric = Number(value);
-    if (Number.isFinite(numeric) && value.trim() !== "") {
-      const millis = numeric > 10_000_000_000 ? numeric : numeric * 1000;
-      return new Date(millis);
-    }
-    const parsed = new Date(value);
-    if (!Number.isNaN(parsed.getTime())) {
-      return parsed;
-    }
-  }
-
-  return new Date(0);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

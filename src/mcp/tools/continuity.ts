@@ -16,7 +16,8 @@ interface EffectivePolicyParams {
 }
 
 export function createContinuityStatusHandler(reader: ContinuityReader) {
-  return async (params: ContinuityStatusParams = {}) => {
+  return async (raw: Record<string, unknown> = {}) => {
+    const params = raw as unknown as ContinuityStatusParams;
     const format = params.format ?? "markdown";
     const filter = new Set(
       (params.tool_filter ?? []).filter((value): value is string => typeof value === "string"),
@@ -57,7 +58,8 @@ export function createContinuityStatusHandler(reader: ContinuityReader) {
 }
 
 export function createEffectivePolicyHandler(reader: ContinuityReader) {
-  return async (params: EffectivePolicyParams = {}) => {
+  return async (raw: Record<string, unknown> = {}) => {
+    const params = raw as unknown as EffectivePolicyParams;
     const format = params.format ?? "markdown";
     const policy = await reader.effectivePolicy();
 

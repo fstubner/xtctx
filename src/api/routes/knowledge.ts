@@ -47,6 +47,7 @@ function normalizeType(value?: string): ContextType | "all" {
     value === "insight" ||
     value === "convention" ||
     value === "gotcha" ||
+    value === "faq" ||
     value === "all"
   ) {
     return value;

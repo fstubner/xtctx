@@ -6,6 +6,7 @@ export const CONTEXT_TYPES = [
   "insight",
   "convention",
   "gotcha",
+  "faq",
 ] as const;
 
 export type ContextType = (typeof CONTEXT_TYPES)[number];

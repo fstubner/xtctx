@@ -7,6 +7,10 @@ export class ScraperRegistry {
     this.scrapers.set(scraper.tool, scraper as ConversationScraper);
   }
 
+  deregister(tool: string): void {
+    this.scrapers.delete(tool);
+  }
+
   get(tool: string): ConversationScraper | undefined {
     return this.scrapers.get(tool);
   }

@@ -3,8 +3,8 @@ import { stat } from "node:fs/promises";
 import { basename } from "node:path";
 import { createInterface } from "node:readline";
 import { glob } from "glob";
-import type { CodexChunk, ConversationScraper, ScraperState } from "../types/scraper.js";
-import { estimateTokens, ScraperStateManager } from "./base.js";
+import type { CodexChunk } from "../types/scraper.js";
+import { AbstractScraper, estimateTokens, toDate } from "./base.js";
 
 const ROLE_MAP: Record<string, CodexChunk["role"]> = {
   user: "user",
@@ -16,15 +16,14 @@ const ROLE_MAP: Record<string, CodexChunk["role"]> = {
 
 type ApprovalMode = CodexChunk["metadata"]["approvalMode"];
 
-export class CodexCliScraper implements ConversationScraper<CodexChunk> {
+export class CodexCliScraper extends AbstractScraper<CodexChunk> {
   readonly tool = "codex";
-  private readonly stateManager: ScraperStateManager;
 
   constructor(
     private readonly codexSessionsPath: string,
     stateDir: string,
   ) {
-    this.stateManager = new ScraperStateManager(stateDir);
+    super(stateDir);
   }
 
   async detect(): Promise<boolean> {
@@ -67,16 +66,9 @@ export class CodexCliScraper implements ConversationScraper<CodexChunk> {
         referencedFiles: [],
         approvalMode: normalizeApprovalMode(toStringValue(value.approvalMode)),
         sandboxed: toBoolean(value.sandboxed),
+        layer: toMessageIndex(value.layer),
       },
     };
-  }
-
-  async getLastScrapedPosition(): Promise<ScraperState> {
-    return this.stateManager.load(this.tool);
-  }
-
-  async saveScrapedPosition(state: ScraperState): Promise<void> {
-    await this.stateManager.save(this.tool, state);
   }
 
   /**
@@ -170,6 +162,36 @@ export class CodexCliScraper implements ConversationScraper<CodexChunk> {
             sandboxed,
           });
           messageIndex++;
+          continue;
+        }
+
+        // compacted events hold AI-generated summaries of prior turns that were
+        // removed from the active context window to save space. They represent
+        // a higher-abstraction view of the conversation (layer 1).
+        if (eventType === "compacted") {
+          const payload = parsed.payload;
+          const content = isRecord(payload)
+            ? (toStringValue(payload.summary) ??
+              toStringValue(payload.content) ??
+              toStringValue(payload.text))
+            : undefined;
+
+          if (content) {
+            const timestamp = toDate(parsed.timestamp ?? parsed.created_at ?? parsed.createdAt);
+            if (timestamp > since) {
+              yield this.parseRaw({
+                sessionId,
+                messageIndex,
+                timestamp,
+                role: "assistant",
+                content,
+                approvalMode,
+                sandboxed,
+                layer: 1,
+              });
+              messageIndex++;
+            }
+          }
           continue;
         }
 
@@ -310,31 +332,6 @@ function toBoolean(value: unknown): boolean {
   }
 
   return false;
-}
-
-function toDate(value: unknown): Date {
-  if (value instanceof Date) {
-    return value;
-  }
-
-  if (typeof value === "number" && Number.isFinite(value)) {
-    const millis = value > 10_000_000_000 ? value : value * 1000;
-    return new Date(millis);
-  }
-
-  if (typeof value === "string") {
-    const numeric = Number(value);
-    if (Number.isFinite(numeric) && value.trim() !== "") {
-      const millis = numeric > 10_000_000_000 ? numeric : numeric * 1000;
-      return new Date(millis);
-    }
-    const parsed = new Date(value);
-    if (!Number.isNaN(parsed.getTime())) {
-      return parsed;
-    }
-  }
-
-  return new Date(0);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

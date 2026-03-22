@@ -17,6 +17,7 @@ export interface SourcesRouteDependencies {
   };
   sessions: SessionService;
   knowledgeRecords: () => Promise<ContextRecord[]>;
+  onScraperConfigChanged?: (tool: string, enabled: boolean) => void;
 }
 
 interface ScraperStatus {
@@ -115,6 +116,10 @@ export function createSourcesRouter(deps: SourcesRouteDependencies): Router {
 
       upsertRuntimeScraper(deps.ingestion.scrapers, tool, patch.enabled, runtimePath);
       await upsertPersistedScraperConfig(deps.projectRoot, tool, patch.enabled, patch.customStorePath);
+
+      if (deps.onScraperConfigChanged && typeof patch.enabled === "boolean") {
+        deps.onScraperConfigChanged(tool, patch.enabled);
+      }
 
       const scraperStatuses = await buildScraperStatuses(deps.ingestion.scrapers);
       const scraper = scraperStatuses.find((item) => normalizeTool(item.tool) === tool);
@@ -281,13 +286,18 @@ function resolveCodexSessionsPath(): string {
 }
 
 function resolveCopilotHistoryPath(): string {
+  const appData = process.env.APPDATA;
+  if (appData) {
+    return join(appData, "Code", "User", "workspaceStorage");
+  }
+
   const home = process.env.USERPROFILE ?? process.env.HOME ?? "";
-  return join(home, ".copilot", "history");
+  return join(home, "Library", "Application Support", "Code", "User", "workspaceStorage");
 }
 
 function resolveGeminiHistoryPath(): string {
   const home = process.env.USERPROFILE ?? process.env.HOME ?? "";
-  return join(home, ".gemini", "history");
+  return join(home, ".gemini", "tmp");
 }
 
 async function buildScraperStatuses(

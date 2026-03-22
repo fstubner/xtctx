@@ -4,6 +4,7 @@ import { parse as parseYaml } from "yaml";
 import { KnowledgeRepository } from "../knowledge/repository.js";
 import type { ConfigStore, ConfigType, NamedConfig } from "../mcp/tools/config.js";
 import type { SessionService } from "../mcp/tools/sessions.js";
+import { errorMessage } from "../utils/errors.js";
 import { createIndexedSessionService } from "./sessions.js";
 
 export class FileConfigStore implements ConfigStore {
@@ -115,6 +116,7 @@ export interface ProjectServices {
     pollIntervalMs: number;
     excludePatterns: string[];
   };
+  domainTags: Record<string, string[]>;
   knowledge: KnowledgeRepository;
   sessions: SessionService;
   configs: FileConfigStore;
@@ -131,6 +133,7 @@ export async function createProjectServices(projectPath?: string): Promise<Proje
   const webPort = parseWebPort(config);
   const apiSecurity = parseApiSecurityConfig(config);
   const ingestion = parseIngestionConfig(config, projectRoot);
+  const domainTags = parseDomainTags(config);
 
   const knowledge = new KnowledgeRepository(knowledgeDir);
   await knowledge.initialize();
@@ -146,6 +149,7 @@ export async function createProjectServices(projectPath?: string): Promise<Proje
     webPort,
     apiSecurity,
     ingestion,
+    domainTags,
     knowledge,
     sessions,
     configs: new FileConfigStore(configRoot),
@@ -155,7 +159,8 @@ export async function createProjectServices(projectPath?: string): Promise<Proje
 async function createSessionService(storeDir: string): Promise<SessionService> {
   try {
     return await createIndexedSessionService(storeDir);
-  } catch {
+  } catch (error) {
+    console.warn(`[xtctx] Session index unavailable, sessions disabled: ${errorMessage(error)}`);
     return new EmptySessionService();
   }
 }
@@ -335,4 +340,19 @@ function parseIngestionConfig(
         : defaults.pollIntervalMs,
     excludePatterns,
   };
+}
+
+function parseDomainTags(config: Record<string, unknown>): Record<string, string[]> {
+  const raw = config.domainTags;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return {};
+  }
+
+  const result: Record<string, string[]> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (Array.isArray(value)) {
+      result[key] = value.filter((item): item is string => typeof item === "string");
+    }
+  }
+  return result;
 }

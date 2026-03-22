@@ -14,6 +14,13 @@ export interface SearchResult {
   score: number;
 }
 
+export interface VectorSearchOptions {
+  /** SQL-style prefilter applied before ANN search (e.g. `"source_type = 'decision'"`). */
+  where?: string;
+  /** Distance metric. "cosine" returns `1 − distance` as score; "l2" returns `1/(1+distance)`. Default: "l2". */
+  metric?: "l2" | "cosine";
+}
+
 export interface QueryRowsOptions {
   where?: string;
   limit?: number;
@@ -22,6 +29,8 @@ export interface QueryRowsOptions {
 
 export class LanceStore {
   private db: lancedb.Connection | null = null;
+  /** Tables known to already have an FTS index on the "text" column. */
+  private readonly ftsIndexed = new Set<string>();
 
   constructor(private readonly dbPath: string) {}
 
@@ -35,11 +44,14 @@ export class LanceStore {
     }
 
     const db = this.requireDb();
-    const tableNames = await db.tableNames();
 
-    if (tableNames.includes(tableName)) {
+    if (await this.tableExists(tableName)) {
       const table = await db.openTable(tableName);
-      await table.add(records);
+      // True upsert: update existing rows matched by id, insert new ones.
+      await table.mergeInsert("id")
+        .whenMatchedUpdateAll()
+        .whenNotMatchedInsertAll()
+        .execute(records);
       return;
     }
 
@@ -50,19 +62,30 @@ export class LanceStore {
     tableName: string,
     queryVector: number[],
     limit: number,
+    options: VectorSearchOptions = {},
   ): Promise<SearchResult[]> {
     const db = this.requireDb();
     if (!(await this.tableExists(tableName))) {
       return [];
     }
     const table = await db.openTable(tableName);
-    const results = await table.vectorSearch(queryVector).limit(limit).toArray();
+    const metric = options.metric ?? "l2";
+
+    let query = table.vectorSearch(queryVector).distanceType(metric).limit(limit);
+    if (options.where) {
+      query = query.filter(options.where);
+    }
+
+    const results = await query.toArray();
+    const toScore = metric === "cosine"
+      ? (d: number) => 1 - d               // cosine distance → cosine similarity
+      : (d: number) => 1 / (1 + d);        // L2 distance → bounded similarity
 
     return results.map((row) => ({
       id: row.id as string,
       text: row.text as string,
       metadata: row.metadata as string,
-      score: row._distance != null ? 1 / (1 + Number(row._distance)) : 0,
+      score: row._distance != null ? toScore(Number(row._distance)) : 0,
     }));
   }
 
@@ -77,10 +100,13 @@ export class LanceStore {
     }
     const table = await db.openTable(tableName);
 
-    try {
-      await table.createIndex("text", { config: lancedb.Index.fts() });
-    } catch {
-      // FTS index may already exist.
+    if (!this.ftsIndexed.has(tableName)) {
+      try {
+        await table.createIndex("text", { config: lancedb.Index.fts() });
+      } catch {
+        // FTS index may already exist from a previous process.
+      }
+      this.ftsIndexed.add(tableName);
     }
 
     const results = await table.search(query, "fts", "text").limit(limit).toArray();
