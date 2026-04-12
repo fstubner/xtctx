@@ -14,6 +14,7 @@ import { LanceStore } from "../store/lance.js";
 import { HybridSearch } from "../store/search.js";
 import type { ConversationScraper } from "../types/scraper.js";
 import type { ProjectServices } from "./services.js";
+import type { IndexedSessionService } from "./sessions.js";
 
 /** Minimum shape required for a value to be treated as a scraper. */
 function isValidScraper(value: unknown): value is ConversationScraper {
@@ -77,6 +78,11 @@ export interface IngestionRuntime {
   daemon: IngestionDaemon;
   /** Re-imports .xtctx/scrapers.mjs and swaps external scrapers in the registry. */
   reloadExternalScrapers: () => Promise<void>;
+  /**
+   * Re-registers a built-in scraper that was previously deregistered (e.g.
+   * when a user re-enables it through the Web UI).  No-op for unknown tools.
+   */
+  reregisterBuiltinScraper: (tool: string, customStorePath?: string) => void;
 }
 
 class LazyEmbeddingService extends EmbeddingService {
@@ -184,10 +190,18 @@ export async function createIngestionRuntime(
 
   const scrapersFilePath = join(services.projectRoot, ".xtctx", "scrapers.mjs");
 
+  // Wire in the session cache invalidator so the cache is flushed after each
+  // ingestion write (C2 fix).
+  const sessionCache =
+    services.sessions && "invalidate" in services.sessions
+      ? (services.sessions as IndexedSessionService)
+      : undefined;
+
   const coordinator = new IngestionCoordinator({
     registry,
     embeddings,
     store,
+    sessionCache,
   });
 
   const daemon = new IngestionDaemon(coordinator, {
@@ -202,6 +216,44 @@ export async function createIngestionRuntime(
     ],
   });
 
+  /**
+   * Re-registers a single built-in scraper by name. Called when the user
+   * re-enables a scraper through the Web UI (fixes M5 — the enable branch).
+   */
+  const reregisterBuiltinScraper = (tool: string, customStorePath?: string): void => {
+    const builtins: Record<string, { defaultPath: string; factory: (path: string) => ConversationScraper }> = {
+      "claude-code": {
+        defaultPath: defaultClaudeProjectsDir(),
+        factory: (p) => new ClaudeCodeScraper(p, services.stateDir),
+      },
+      cursor: {
+        defaultPath: defaultCursorStorePath(),
+        factory: (p) => new CursorScraper(p, services.stateDir),
+      },
+      codex: {
+        defaultPath: defaultCodexSessionsPath(),
+        factory: (p) => new CodexCliScraper(p, services.stateDir),
+      },
+      copilot: {
+        defaultPath: defaultCopilotHistoryPath(),
+        factory: (p) => new CopilotScraper(p, services.stateDir),
+      },
+      gemini: {
+        defaultPath: defaultGeminiHistoryPath(),
+        factory: (p) => new GeminiCliScraper(p, services.stateDir),
+      },
+    };
+
+    const entry = builtins[tool];
+    if (!entry) {
+      return; // Unknown / external tool — handled separately.
+    }
+
+    // Deregister first so we always get a fresh instance.
+    registry.deregister(tool);
+    registry.register(entry.factory(customStorePath ?? entry.defaultPath));
+  };
+
   return {
     store,
     embeddings,
@@ -210,6 +262,7 @@ export async function createIngestionRuntime(
     coordinator,
     daemon,
     reloadExternalScrapers,
+    reregisterBuiltinScraper,
   };
 }
 

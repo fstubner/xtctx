@@ -22,30 +22,6 @@ export type SimilarityLookup = (
   candidateText: string,
 ) => Promise<SimilarityMatch | null>;
 
-interface SaveDecisionParams {
-  title: string;
-  rationale: string;
-  context?: string;
-  alternatives_considered?: string[];
-}
-
-interface SaveErrorSolutionParams {
-  error: string;
-  solution: string;
-  context?: string;
-}
-
-interface SaveInsightParams {
-  insight: string;
-  context?: string;
-}
-
-interface SaveFaqParams {
-  question: string;
-  answer: string;
-  context?: string;
-}
-
 export interface WriteHandlerDependencies {
   writer: KnowledgeWriter;
   findSimilar?: SimilarityLookup;
@@ -58,6 +34,18 @@ function requireString(value: unknown, field: string): string {
     throw new Error(`Missing required field: ${field}`);
   }
   return value.trim();
+}
+
+/** Safely coerce an optional field to a string, returning undefined for absent values. */
+function optionalString(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  return typeof value === "string" ? value : String(value);
+}
+
+/** Safely coerce an optional field to a string array, returning undefined for absent values. */
+function optionalStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.map((v) => (typeof v === "string" ? v : String(v)));
 }
 
 export function createWriteHandlers(
@@ -122,69 +110,70 @@ export function createWriteHandlers(
   };
 
   const saveDecision = async (raw: Record<string, unknown>): Promise<WriteResult> => {
-    const params = raw as unknown as SaveDecisionParams;
-    const title = requireString(params.title, "title");
-    const rationale = requireString(params.rationale, "rationale");
+    const title = requireString(raw.title, "title");
+    const rationale = requireString(raw.rationale, "rationale");
+    const context = optionalString(raw.context);
+    const alternatives = optionalStringArray(raw.alternatives_considered);
     const bodyParts = [rationale];
-    if (params.context?.trim()) {
-      bodyParts.push(`Context: ${params.context.trim()}`);
+    if (context?.trim()) {
+      bodyParts.push(`Context: ${context.trim()}`);
     }
-    if (params.alternatives_considered?.length) {
-      bodyParts.push(`Alternatives: ${params.alternatives_considered.join("; ")}`);
+    if (alternatives?.length) {
+      bodyParts.push(`Alternatives: ${alternatives.join("; ")}`);
     }
 
     return write("decision", title, bodyParts.join("\n\n"), {
-      rationale: params.rationale,
-      context: params.context,
-      alternatives_considered: params.alternatives_considered ?? [],
+      rationale,
+      context,
+      alternatives_considered: alternatives ?? [],
     });
   };
 
   const saveErrorSolution = async (raw: Record<string, unknown>): Promise<WriteResult> => {
-    const params = raw as unknown as SaveErrorSolutionParams;
-    const title = requireString(params.error, "error");
-    const solution = requireString(params.solution, "solution");
+    const title = requireString(raw.error, "error");
+    const solution = requireString(raw.solution, "solution");
+    const context = optionalString(raw.context);
     const bodyParts = [`Solution: ${solution}`];
-    if (params.context?.trim()) {
-      bodyParts.push(`Context: ${params.context.trim()}`);
+    if (context?.trim()) {
+      bodyParts.push(`Context: ${context.trim()}`);
     }
 
     return write("error_solution", title, bodyParts.join("\n\n"), {
-      error: params.error,
-      solution: params.solution,
-      context: params.context,
+      error: title,
+      solution,
+      context,
     });
   };
 
   const saveInsight = async (raw: Record<string, unknown>): Promise<WriteResult> => {
-    const params = raw as unknown as SaveInsightParams;
-    const insight = requireString(params.insight, "insight");
+    const insight = requireString(raw.insight, "insight");
+    const context = optionalString(raw.context);
     const title = insight.slice(0, 80) || "Project insight";
-    const body = params.context?.trim()
-      ? `${insight}\n\nContext: ${params.context.trim()}`
+    const body = context?.trim()
+      ? `${insight}\n\nContext: ${context.trim()}`
       : insight;
 
     return write("insight", title, body, {
-      insight: params.insight,
-      context: params.context,
+      insight,
+      context,
     });
   };
 
   const saveFaq = async (raw: Record<string, unknown>): Promise<WriteResult> => {
-    const params = raw as unknown as SaveFaqParams;
-    const question = requireString(params.question, "question");
-    const answer = requireString(params.answer, "answer");
+    const question = requireString(raw.question, "question");
+    const answer = requireString(raw.answer, "answer");
+    const context = optionalString(raw.context);
     const title = question.slice(0, 100) || "Project FAQ";
     const bodyParts = [`Q: ${question}`, `A: ${answer}`];
 
-    if (params.context?.trim()) {
-      bodyParts.push(`Context: ${params.context.trim()}`);
+    if (context?.trim()) {
+      bodyParts.push(`Context: ${context.trim()}`);
     }
 
     return write("faq", title, bodyParts.join("\n\n"), {
-      question: params.question,
-      answer: params.answer,
-      context: params.context,
+      question,
+      answer,
+      context,
     });
   };
 

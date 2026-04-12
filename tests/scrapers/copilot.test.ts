@@ -229,21 +229,33 @@ describe("CopilotScraper", () => {
     expect(fromSecond?.sessionId).toBe("other-workspace-session");
   });
 
-  it("returns all sessions on incremental scrape (dedup handled by vector store)", async () => {
-    // Copilot sessions only have a session-level creationDate, not per-message
-    // timestamps. Filtering by session creation date would silently miss new
-    // messages appended to older sessions. All sessions are always returned;
-    // content-hash upserts in the vector store handle deduplication.
+  it("returns sessions at or after the since cursor on incremental scrape", async () => {
+    // Base session has creationDate = 2026-02-24T10:00:00Z.
+    // Passing since = 2026-02-24T10:00:00Z uses >= comparison, so the base session
+    // is still returned (boundary-inclusive).
     const chunks: CopilotChunk[] = [];
     for await (const chunk of scraper.scrape(new Date("2026-02-24T10:00:00Z"))) {
       chunks.push(chunk);
     }
 
-    // All messages from all sessions are included regardless of cutoff
     expect(chunks.length).toBeGreaterThan(0);
+    expect(chunks.some((c) => c.sessionId === SESSION_UUID)).toBe(true);
   });
 
-  it("returns all sessions including older ones alongside newer ones", async () => {
+  it("filters out sessions older than the since cursor", async () => {
+    // Passing a since value strictly after the base session's creationDate
+    // should exclude it.
+    const chunks: CopilotChunk[] = [];
+    for await (const chunk of scraper.scrape(new Date("2026-02-25T00:00:00Z"))) {
+      chunks.push(chunk);
+    }
+
+    // Base session (2026-02-24) is older than the cursor, so it is excluded.
+    const baseChunk = chunks.find((c) => c.sessionId === SESSION_UUID);
+    expect(baseChunk).toBeUndefined();
+  });
+
+  it("returns only newer session when since cursor is after base session", async () => {
     const newerSessions = {
       "0": {
         sessionId: "newer-session",
@@ -260,12 +272,15 @@ describe("CopilotScraper", () => {
     await createWorkspaceDb(workspaceStorageDir, "newer-ws-hash", newerSessions);
 
     const chunks: CopilotChunk[] = [];
-    for await (const chunk of scraper.scrape(new Date("2026-02-24T10:00:00Z"))) {
+    // Cursor is between the base session (2026-02-24) and the newer session (2026-02-25).
+    for await (const chunk of scraper.scrape(new Date("2026-02-25T00:00:00Z"))) {
       chunks.push(chunk);
     }
 
-    // Both the base session and the newer session are included
-    expect(chunks.length).toBeGreaterThanOrEqual(4);
+    // Base session is filtered out; only the newer session is returned.
+    const baseChunk = chunks.find((c) => c.sessionId === SESSION_UUID);
+    expect(baseChunk).toBeUndefined();
+
     const newerChunk = chunks.find((c) => c.sessionId === "newer-session");
     expect(newerChunk).toBeDefined();
   });

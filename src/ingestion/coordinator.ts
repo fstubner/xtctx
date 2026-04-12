@@ -14,10 +14,17 @@ export interface VectorStoreLike {
   upsert(tableName: string, records: VectorRecord[]): Promise<void>;
 }
 
+/** Optional hook called after each ingestion cycle completes a write. */
+export interface SessionCacheInvalidator {
+  invalidate(): void;
+}
+
 export interface IngestionCoordinatorDependencies {
   registry: ScraperRegistryLike;
   embeddings: EmbeddingProvider;
   store: VectorStoreLike;
+  /** If provided, its cache is invalidated after each write so reads stay fresh. */
+  sessionCache?: SessionCacheInvalidator;
 }
 
 export interface IngestionCoordinatorOptions {
@@ -57,6 +64,8 @@ export class IngestionCoordinator {
       const records = await this.toVectorRecords(chunks);
       if (records.length > 0) {
         await this.deps.store.upsert(this.tableName, records);
+        // Invalidate the session cache so subsequent reads reflect the new data.
+        this.deps.sessionCache?.invalidate();
       }
 
       await scraper.saveScrapedPosition({
@@ -85,6 +94,8 @@ export class IngestionCoordinator {
       const records = await this.toVectorRecords(chunks);
       if (records.length > 0) {
         await this.deps.store.upsert(this.tableName, records);
+        // Invalidate the session cache so subsequent reads reflect the new data.
+        this.deps.sessionCache?.invalidate();
       }
 
       const state = await scraper.getLastScrapedPosition();

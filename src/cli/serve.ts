@@ -169,8 +169,16 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
           startApiServer({
             projectPath: services.projectRoot,
             port: services.webPort,
+            // Pass the ingestion runtime's search so the Web UI and MCP tools
+            // both use the same LanceDB hybrid-search pipeline (fixes C1).
+            searchRunner: runtime.search,
             onScraperConfigChanged: (tool, enabled) => {
-              if (!enabled) {
+              if (enabled) {
+                // Re-register the scraper when re-enabled via the Web UI
+                // (fixes M5 — previously only the disabled branch was handled).
+                const config = services.ingestion.scrapers.find((s) => s.tool === tool);
+                runtime.reregisterBuiltinScraper(tool, config?.customStorePath);
+              } else {
                 runtime.registry.deregister(tool);
               }
             },

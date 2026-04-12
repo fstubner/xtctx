@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { ConversationChunk, ConversationScraper, ScraperState } from "../types/scraper.js";
 
@@ -22,8 +22,12 @@ export class ScraperStateManager {
 
   async save(tool: string, state: ScraperState): Promise<void> {
     const path = this.statePath(tool);
+    const tmpPath = `${path}.tmp`;
     await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, JSON.stringify(state, null, 2), "utf-8");
+    // Write to a temp file first, then atomically rename it over the target
+    // so a mid-write crash never leaves a corrupt state file (M3).
+    await writeFile(tmpPath, JSON.stringify(state, null, 2), "utf-8");
+    await rename(tmpPath, path);
   }
 
   private statePath(tool: string): string {

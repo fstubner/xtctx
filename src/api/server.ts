@@ -1,5 +1,5 @@
 import express from "express";
-import { timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { stat } from "node:fs/promises";
 import { createServer } from "node:http";
 import { dirname, extname, join, resolve } from "node:path";
@@ -11,13 +11,24 @@ import { createConfigRouter } from "./routes/config.js";
 import { createKnowledgeRouter } from "./routes/knowledge.js";
 import { createSearchRouter } from "./routes/search.js";
 import { createSourcesRouter } from "./routes/sources.js";
+import type { SearchRunner } from "../mcp/tools/search.js";
 import { createProjectServices } from "../runtime/services.js";
+import { EmbeddingService } from "../store/embeddings.js";
+import { LanceStore } from "../store/lance.js";
+import { HybridSearch } from "../store/search.js";
 import { errorMessage } from "../utils/errors.js";
 
 export interface ApiServerOptions {
   projectPath?: string;
   port?: number;
   webStaticDir?: string;
+  /**
+   * Optional pre-built search runner (e.g. from the ingestion runtime in
+   * `serve` mode). When omitted, `createApiApp` constructs its own
+   * `HybridSearch` backed by the project's LanceDB store so the API can also
+   * run standalone via `npm run api`.
+   */
+  searchRunner?: SearchRunner;
   security?: Partial<ApiSecurityOptions>;
   onScraperConfigChanged?: (tool: string, enabled: boolean) => void;
 }
@@ -36,9 +47,38 @@ export interface ApiServerHandle {
   port: number;
 }
 
+/**
+ * Lazily initialises the embedding model on first use so the standalone API
+ * server doesn't pay the model-load cost at startup if search is never called.
+ */
+class LazyEmbeddingService extends EmbeddingService {
+  private initPromise: Promise<void> | null = null;
+
+  override async initialize(): Promise<void> {
+    await this.ensureInitialized();
+  }
+
+  override async embed(text: string): Promise<number[]> {
+    await this.ensureInitialized();
+    return super.embed(text);
+  }
+
+  override async embedBatch(texts: string[]): Promise<number[][]> {
+    await this.ensureInitialized();
+    return super.embedBatch(texts);
+  }
+
+  private async ensureInitialized(): Promise<void> {
+    if (!this.initPromise) {
+      this.initPromise = super.initialize();
+    }
+    await this.initPromise;
+  }
+}
+
 export async function createApiApp(
   projectPath?: string,
-  options: Pick<ApiServerOptions, "webStaticDir" | "security" | "onScraperConfigChanged"> = {},
+  options: Pick<ApiServerOptions, "webStaticDir" | "security" | "onScraperConfigChanged" | "searchRunner"> = {},
 ): Promise<{
   app: express.Express;
   port: number;
@@ -49,6 +89,18 @@ export async function createApiApp(
     ...services.apiSecurity,
     ...(options.security ?? {}),
   });
+
+  // Use the caller-supplied search runner (from ingestion runtime in serve mode)
+  // or build a standalone HybridSearch from the project's own LanceDB store.
+  let searchRunner: SearchRunner;
+  if (options.searchRunner) {
+    searchRunner = options.searchRunner;
+  } else {
+    const store = new LanceStore(join(services.storeDir, "lancedb"));
+    await store.initialize();
+    const embeddings = new LazyEmbeddingService();
+    searchRunner = new HybridSearch(store, embeddings);
+  }
   const app = express();
 
   app.disable("x-powered-by");
@@ -98,7 +150,7 @@ export async function createApiApp(
 
   const knowledgeRecords = async () => services.knowledge.listAll();
 
-  app.use("/api/search", createSearchRouter({ knowledgeRecords }));
+  app.use("/api/search", createSearchRouter({ search: searchRunner }));
   app.use("/api/knowledge", createKnowledgeRouter(services.knowledge));
   app.use(
     "/api/sources",
@@ -159,6 +211,7 @@ export async function startApiServer(options: ApiServerOptions = {}): Promise<Ap
     webStaticDir: options.webStaticDir,
     security: options.security,
     onScraperConfigChanged: options.onScraperConfigChanged,
+    searchRunner: options.searchRunner,
   });
   const port = options.port ?? defaultPort;
   const server = createServer(app);
@@ -292,13 +345,11 @@ function extractToken(req: express.Request): string | null {
 }
 
 function safeTokenEqual(candidate: string, expected: string): boolean {
-  const candidateBuffer = Buffer.from(candidate);
-  const expectedBuffer = Buffer.from(expected);
-  if (candidateBuffer.length !== expectedBuffer.length) {
-    return false;
-  }
-
-  return timingSafeEqual(candidateBuffer, expectedBuffer);
+  // Hash both tokens to a fixed-length digest so the comparison always
+  // runs in constant time regardless of input length, preventing timing
+  // side-channels that could leak token length information.
+  const hash = (s: string) => createHash("sha256").update(s).digest();
+  return timingSafeEqual(hash(candidate), hash(expected));
 }
 
 function isAllowedOrigin(origin: string, security: ApiSecurityOptions): boolean {

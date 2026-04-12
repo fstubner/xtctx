@@ -13,18 +13,37 @@ interface SessionIndexRecord {
 
 const SESSION_SCAN_LIMIT = 10_000;
 
+/** Default TTL for the in-memory session index cache (60 seconds). */
+export const DEFAULT_SESSION_CACHE_TTL_MS = 60_000;
+
 export class IndexedSessionService implements SessionService {
   private cache: SessionIndexRecord[] | null = null;
+  /** Epoch ms at which the current cache entry expires. */
+  private cacheExpiresAt = 0;
+  private readonly cacheTtlMs: number;
 
   constructor(
     private readonly store: LanceStore,
     private readonly tableName = "context",
-  ) {}
+    cacheTtlMs: number = DEFAULT_SESSION_CACHE_TTL_MS,
+  ) {
+    this.cacheTtlMs = cacheTtlMs;
+  }
+
+  /**
+   * Immediately invalidates the cache so the next read reloads from the store.
+   * Call this after any write to the underlying context table (e.g. after an
+   * ingestion cycle completes).
+   */
+  invalidate(): void {
+    this.cache = null;
+    this.cacheExpiresAt = 0;
+  }
 
   async listRecentSessions(limit: number, toolFilter?: string[]): Promise<SessionSummary[]> {
     const records = await this.getRecords();
     const toolSet = normalizeToolFilter(toolFilter);
-    const sessions = new Map<string, SessionSummary & { earliest: string }>();
+    const sessions = new Map<string, SessionSummary & { earliest: string; lastActivity: string }>();
 
     for (const record of records) {
       if (toolSet.size > 0 && !toolSet.has(record.tool)) {
@@ -38,6 +57,7 @@ export class IndexedSessionService implements SessionService {
           tool: record.tool,
           started_at: record.timestamp,
           earliest: record.timestamp,
+          lastActivity: record.timestamp,
           summary: summarizeContent(record.content),
           message_count: 1,
         });
@@ -49,12 +69,18 @@ export class IndexedSessionService implements SessionService {
         existing.earliest = record.timestamp;
         existing.started_at = record.timestamp;
       }
+      // Track the most recent message timestamp for sorting (m3).
+      if (record.timestamp > existing.lastActivity) {
+        existing.lastActivity = record.timestamp;
+      }
     }
 
     return [...sessions.values()]
-      .sort((a, b) => b.started_at.localeCompare(a.started_at))
+      // Sort by last activity (most-recent message) descending, not by start
+      // time, so active sessions always appear first (m3).
+      .sort((a, b) => b.lastActivity.localeCompare(a.lastActivity))
       .slice(0, clamp(limit, 1, 50))
-      .map(({ earliest: _ignored, ...summary }) => summary);
+      .map(({ earliest: _ignored, lastActivity: _la, ...summary }) => summary);
   }
 
   async getSessionDetail(
@@ -87,13 +113,17 @@ export class IndexedSessionService implements SessionService {
   }
 
   async refresh(): Promise<void> {
+    this.invalidate();
     this.cache = await this.loadRecords();
+    this.cacheExpiresAt = Date.now() + this.cacheTtlMs;
   }
 
   private async getRecords(): Promise<SessionIndexRecord[]> {
-    if (!this.cache) {
-      this.cache = await this.loadRecords();
+    if (this.cache && Date.now() < this.cacheExpiresAt) {
+      return this.cache;
     }
+    this.cache = await this.loadRecords();
+    this.cacheExpiresAt = Date.now() + this.cacheTtlMs;
     return this.cache;
   }
 

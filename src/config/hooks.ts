@@ -136,7 +136,10 @@ async function syncCursorHooks(projectRoot: string): Promise<HookSyncResult> {
 }
 
 function buildContextCommand(projectRoot: string, tool: string): string {
-  return `npx xtctx context --project ${resolve(projectRoot)} --tool ${tool}`;
+  // Quote the resolved path so spaces (and other shell-special characters)
+  // in the project root do not break the generated hook command (C4).
+  const quotedPath = `"${resolve(projectRoot).replace(/"/g, '\\"')}"`;
+  return `npx xtctx context --project ${quotedPath} --tool ${tool}`;
 }
 
 async function readJsonIfExists(filePath: string): Promise<unknown | null> {

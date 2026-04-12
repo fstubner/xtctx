@@ -46,8 +46,8 @@ export class CopilotScraper extends AbstractScraper<CopilotChunk> {
     return [this.workspaceStoragePath];
   }
 
-  async *scrape(_since?: Date): AsyncIterable<CopilotChunk> {
-    yield* this.readAllMessages();
+  async *scrape(since?: Date): AsyncIterable<CopilotChunk> {
+    yield* this.readAllMessages(since);
   }
 
   async *fullSync(): AsyncIterable<CopilotChunk> {
@@ -74,7 +74,7 @@ export class CopilotScraper extends AbstractScraper<CopilotChunk> {
     };
   }
 
-  private async *readAllMessages(): AsyncIterable<CopilotChunk> {
+  private async *readAllMessages(since?: Date): AsyncIterable<CopilotChunk> {
     const dbPaths = await this.resolveDbPaths();
     // Import is deferred so the module loads even if better-sqlite3 is absent.
     type DatabaseConstructor = new (path: string, options?: import("better-sqlite3").Options) => import("better-sqlite3").Database;
@@ -97,14 +97,14 @@ export class CopilotScraper extends AbstractScraper<CopilotChunk> {
       }
 
       try {
-        yield* this.readFromDb(db);
+        yield* this.readFromDb(db, since);
       } finally {
         db.close();
       }
     }
   }
 
-  private *readFromDb(db: import("better-sqlite3").Database): Iterable<CopilotChunk> {
+  private *readFromDb(db: import("better-sqlite3").Database, since?: Date): Iterable<CopilotChunk> {
     let rawValue: string | null;
     try {
       const row = db
@@ -126,6 +126,8 @@ export class CopilotScraper extends AbstractScraper<CopilotChunk> {
       return;
     }
 
+    const sinceMs = since ? since.getTime() : 0;
+
     for (const rawSession of Object.values(sessionsMap)) {
       if (!isRecord(rawSession)) {
         continue;
@@ -135,10 +137,14 @@ export class CopilotScraper extends AbstractScraper<CopilotChunk> {
       const sessionId = session.sessionId ?? "unknown";
       const creationDate = toDate(session.creationDate);
 
-      // Always scan all sessions: Copilot only exposes a session-level creation
-      // date, not per-message timestamps. Relying on creationDate to skip whole
-      // sessions would miss new messages appended to older sessions. The vector
-      // store's content-hash upsert handles deduplication of re-processed messages.
+      // Incremental mode: skip sessions whose creation date predates the cursor.
+      // Copilot only exposes a session-level creation date; messages within a
+      // session share that date. Using `>=` so a session created at exactly the
+      // cursor boundary is always included and not missed.
+      if (sinceMs > 0 && creationDate.getTime() < sinceMs) {
+        continue;
+      }
+
       const requests = Array.isArray(session.requests) ? session.requests : [];
       let messageIndex = 0;
 

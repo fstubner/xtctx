@@ -155,6 +155,28 @@ Security overrides:
 - `XTCTX_RATE_LIMIT_WINDOW_MS`
 - `XTCTX_RATE_LIMIT_MAX`
 
+## Search
+
+`xtctx_search` and the Web UI search bar both use the same **LanceDB hybrid
+search pipeline** (vector + full-text, Reciprocal Rank Fusion):
+
+- `hybrid` (default) — fuses semantic and keyword rankings
+- `semantic` — embedding vector similarity only
+- `keyword` — full-text search (FTS) only
+
+The first search in a new server process may be slower as the embedding model
+is loaded lazily on first use.
+
+### Session cache
+
+The runtime holds a short-lived in-memory index of conversation sessions for
+`xtctx_recent_sessions`. The cache is refreshed:
+
+1. **Automatically** — entries expire after 60 seconds (configurable).
+2. **On write** — any ingestion cycle that produces new data immediately
+   invalidates the cache, so the next read reflects the new messages without
+   waiting for the TTL.
+
 ## Project Layout
 
 - `src/`: CLI, API, MCP, ingestion, storage, sync engine

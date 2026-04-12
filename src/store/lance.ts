@@ -31,6 +31,12 @@ export class LanceStore {
   private db: lancedb.Connection | null = null;
   /** Tables known to already have an FTS index on the "text" column. */
   private readonly ftsIndexed = new Set<string>();
+  /**
+   * In-flight index-creation promises keyed by table name (M4).
+   * Concurrent calls to `ftsSearch` wait on the same promise rather than
+   * racing to create the index twice.
+   */
+  private readonly ftsIndexPending = new Map<string, Promise<void>>();
 
   constructor(private readonly dbPath: string) {}
 
@@ -100,14 +106,7 @@ export class LanceStore {
     }
     const table = await db.openTable(tableName);
 
-    if (!this.ftsIndexed.has(tableName)) {
-      try {
-        await table.createIndex("text", { config: lancedb.Index.fts() });
-      } catch {
-        // FTS index may already exist from a previous process.
-      }
-      this.ftsIndexed.add(tableName);
-    }
+    await this.ensureFtsIndex(tableName, table);
 
     const results = await table.search(query, "fts", "text").limit(limit).toArray();
 
@@ -160,6 +159,38 @@ export class LanceStore {
   async deleteTable(tableName: string): Promise<void> {
     const db = this.requireDb();
     await db.dropTable(tableName);
+  }
+
+  /**
+   * Guarantees that the FTS index on `tableName.text` exists before any FTS
+   * search runs.  Uses a per-table promise to prevent concurrent callers from
+   * racing to create the index simultaneously (M4).
+   */
+  private async ensureFtsIndex(
+    tableName: string,
+    table: lancedb.Table,
+  ): Promise<void> {
+    if (this.ftsIndexed.has(tableName)) {
+      return;
+    }
+
+    // If another concurrent call is already building the index, await the same
+    // promise instead of launching a second CREATE INDEX.
+    let pending = this.ftsIndexPending.get(tableName);
+    if (!pending) {
+      pending = (async () => {
+        try {
+          await table.createIndex("text", { config: lancedb.Index.fts() });
+        } catch {
+          // FTS index may already exist from a previous process — that's fine.
+        }
+        this.ftsIndexed.add(tableName);
+        this.ftsIndexPending.delete(tableName);
+      })();
+      this.ftsIndexPending.set(tableName, pending);
+    }
+
+    await pending;
   }
 
   private requireDb(): lancedb.Connection {

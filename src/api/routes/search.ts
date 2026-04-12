@@ -1,63 +1,14 @@
 import { Router } from "express";
 import { createSearchHandler, type SearchRunner } from "../../mcp/tools/search.js";
-import type { ContextRecord } from "../../types/context.js";
 
 export interface SearchRouteDependencies {
-  knowledgeRecords: () => Promise<ContextRecord[]>;
-}
-
-interface SearchRecord {
-  id: string;
-  text: string;
-  metadata: string;
-  score: number;
-  fusedScore: number;
-}
-
-class KnowledgeSearchRunner implements SearchRunner {
-  constructor(private readonly knowledgeRecords: () => Promise<ContextRecord[]>) {}
-
-  async search(
-    _tableName: string,
-    query: string,
-    _mode: "hybrid" | "semantic" | "keyword",
-    limit: number,
-  ): Promise<SearchRecord[]> {
-    const records = await this.knowledgeRecords();
-    const needle = query.trim().toLowerCase();
-    if (!needle) {
-      return [];
-    }
-
-    const ranked = records
-      .map((record) => {
-        const haystack = `${record.title} ${record.body} ${record.domain_tags.join(" ")}`.toLowerCase();
-        const score = relevanceScore(needle, haystack);
-        return { record, score };
-      })
-      .filter((item) => item.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, limit);
-
-    return ranked.map(({ record, score }) => ({
-      id: record.id,
-      text: record.body,
-      metadata: JSON.stringify({
-        title: record.title,
-        type: record.type,
-        source_tool: record.source_tool,
-        created_at: record.created_at,
-      }),
-      score,
-      fusedScore: score,
-    }));
-  }
+  /** LanceDB-backed hybrid search runner (same pipeline used by MCP tools). */
+  search: SearchRunner;
 }
 
 export function createSearchRouter(deps: SearchRouteDependencies): Router {
   const router = Router();
-  const runner = new KnowledgeSearchRunner(deps.knowledgeRecords);
-  const handler = createSearchHandler(runner);
+  const handler = createSearchHandler(deps.search);
 
   router.get("/", async (req, res, next) => {
     try {
@@ -88,28 +39,6 @@ export function createSearchRouter(deps: SearchRouteDependencies): Router {
   });
 
   return router;
-}
-
-function relevanceScore(needle: string, haystack: string): number {
-  const words = needle.split(/\s+/).filter(Boolean);
-  if (words.length === 0) {
-    return 0;
-  }
-
-  let hits = 0;
-  for (const word of words) {
-    if (haystack.includes(word)) {
-      hits += 1;
-    }
-  }
-
-  if (hits === 0) {
-    return 0;
-  }
-
-  const coverage = hits / words.length;
-  const exactBonus = haystack.includes(needle) ? 0.25 : 0;
-  return Math.min(1, coverage + exactBonus);
 }
 
 function normalizeMode(value: unknown): "hybrid" | "semantic" | "keyword" {
