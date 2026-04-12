@@ -45,25 +45,30 @@ export class KnowledgeRepository {
     const dir = TYPE_DIRS[type];
     const dirPath = join(this.knowledgeDir, dir);
 
+    let files: string[];
     try {
-      const files = await readdir(dirPath);
-      const records: ContextRecord[] = [];
-
-      for (const file of files) {
-        if (!file.endsWith(".yaml")) {
-          continue;
-        }
-
-        const content = await readFile(join(dirPath, file), "utf-8");
-        records.push(parseYaml(content) as ContextRecord);
-      }
-
-      return records.sort(
-        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-      );
+      files = await readdir(dirPath);
     } catch {
       return [];
     }
+
+    const records: ContextRecord[] = [];
+    for (const file of files) {
+      if (!file.endsWith(".yaml")) {
+        continue;
+      }
+
+      const content = await readFile(join(dirPath, file), "utf-8");
+      const parsed = parseYaml(content);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error(`Invalid knowledge record in ${file}: expected object, got ${typeof parsed}`);
+      }
+      records.push(parsed as ContextRecord);
+    }
+
+    return records.sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+    );
   }
 
   async listAll(): Promise<ContextRecord[]> {

@@ -1,4 +1,4 @@
-import { cp, mkdtemp, rm } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApiApp } from "@xtctx/api/server";
 import { buildToolDefinitions, createToolHandlers } from "@xtctx/mcp/server";
 import { createProjectServices } from "@xtctx/runtime/services";
+import { LanceStore } from "@xtctx/store/lance";
 
 const FIXTURE_PROJECT = fileURLToPath(
   new URL("./fixtures/sample-project", import.meta.url),
@@ -23,6 +24,21 @@ describe("Integration: MCP + API + Web data paths", () => {
     workspaceDir = await mkdtemp(join(tmpdir(), "xtctx-integration-"));
     projectDir = join(workspaceDir, "sample-project");
     await cp(FIXTURE_PROJECT, projectDir, { recursive: true });
+
+    // Seed the LanceDB context table so keyword search has data to find.
+    // (Ingestion doesn't run during tests; fixture data lives only in YAML files.)
+    const lanceDir = join(projectDir, ".xtctx", ".store", "lancedb");
+    await mkdir(lanceDir, { recursive: true });
+    const store = new LanceStore(lanceDir);
+    await store.initialize();
+    await store.upsert("context", [
+      {
+        id: "seed-decision-sample",
+        text: "Standardize retry handling for service startup. Use exponential retry/backoff for API and ingestion startup to reduce transient failures.",
+        vector: new Array(384).fill(0.1),
+        metadata: JSON.stringify({ source_tool: "claude-code", type: "decision" }),
+      },
+    ]);
 
     const { app } = await createApiApp(projectDir);
     apiServer = createServer(app);

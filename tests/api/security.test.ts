@@ -214,7 +214,7 @@ api:
       },
     );
 
-    const response = await fetch(`${baseUrl}/api/search?query=anything`);
+    const response = await fetch(`${baseUrl}/api/sources/status`);
     const payload = (await response.json()) as { error: string };
 
     expect(response.status).toBe(500);
