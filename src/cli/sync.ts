@@ -1,5 +1,7 @@
-import { relative, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { syncToolHooks } from "../config/hooks.js";
+import { loadMcpServerDefinitions, syncToolMcpConfigs } from "../config/mcp-config.js";
+import { loadSkillDefinitions, syncToolSkills } from "../config/skills.js";
 import { syncToolConfigs } from "../config/sync.js";
 
 export interface SyncOptions {
@@ -51,6 +53,51 @@ export async function runSync(options: SyncOptions = {}): Promise<void> {
   for (const hook of hookResults) {
     if (hook.warning) {
       console.log(`  hook warning (${hook.tool}): ${hook.warning}`);
+    }
+  }
+
+  // Phase 3: Translate skill content into tool-native formats
+  const configRoot = join(projectRoot, ".xtctx", "tool-config");
+  const enabledTools = result.tools
+    .filter((t) => t.enabled)
+    .map((t) => t.tool);
+
+  const skills = await loadSkillDefinitions(configRoot);
+  if (skills.length > 0) {
+    const skillResults = await syncToolSkills(projectRoot, skills, enabledTools);
+    const skillChanges = skillResults.results.filter((s) => s.updated || s.created);
+    if (skillChanges.length > 0) {
+      console.log("\nSkill files:");
+      for (const skill of skillChanges) {
+        const changeType = skill.created ? "created" : "updated";
+        const displayPath = relative(projectRoot, skill.path) || ".";
+        console.log(`  ${skill.tool}: ${changeType} ${displayPath}`);
+      }
+    }
+    for (const skill of skillResults.results) {
+      if (skill.warning) {
+        console.log(`  skill warning (${skill.tool}): ${skill.warning}`);
+      }
+    }
+  }
+
+  // Phase 4: Write MCP server configs into tool-native formats
+  const mcpServers = await loadMcpServerDefinitions(configRoot);
+  if (mcpServers.length > 0) {
+    const mcpResults = await syncToolMcpConfigs(projectRoot, mcpServers, enabledTools);
+    const mcpChanges = mcpResults.results.filter((m) => m.updated || m.created);
+    if (mcpChanges.length > 0) {
+      console.log("\nMCP config files:");
+      for (const mcp of mcpChanges) {
+        const changeType = mcp.created ? "created" : "updated";
+        const displayPath = relative(projectRoot, mcp.path) || ".";
+        console.log(`  ${mcp.tool}: ${changeType} ${displayPath}`);
+      }
+    }
+    for (const mcp of mcpResults.results) {
+      if (mcp.warning) {
+        console.log(`  mcp warning (${mcp.tool}): ${mcp.warning}`);
+      }
     }
   }
 }

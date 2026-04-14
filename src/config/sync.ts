@@ -1,6 +1,7 @@
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { dirname, extname, join, resolve } from "node:path";
 import { errorMessage } from "../utils/errors.js";
+import { hasNativeMcpSupport, renderMcpServersMarkdown, type McpServerDefinition } from "./mcp-config.js";
 import {
   CONTINUITY_CATEGORIES,
   DEFAULT_REGISTERED_TOOLS,
@@ -11,6 +12,7 @@ import {
   type EffectiveContinuityPolicy,
   type ToolContinuityPolicy,
 } from "./policy.js";
+import { hasNativeSkillSupport, type SkillDefinition } from "./skills.js";
 
 const MARKERS = {
   markdown: {
@@ -48,12 +50,14 @@ interface SyncContext {
   inventory: ContinuityInventory;
 }
 
-interface ContinuityInventory {
+export interface ContinuityInventory {
   skills: string[];
   commands: string[];
   agents: string[];
   mcp_servers: string[];
   slash_commands: string[];
+  skill_definitions: SkillDefinition[];
+  mcp_server_definitions: McpServerDefinition[];
 }
 
 export interface SyncedFileResult {
@@ -538,6 +542,15 @@ function renderToolContent(
 
   if (toolPolicy.categories.skills) {
     lines.push("", "## Skills", ...formatMarkdownList(inventory.skills));
+
+    // For tools without native skill files, embed full skill content
+    if (!hasNativeSkillSupport(tool) && inventory.skill_definitions.length > 0) {
+      for (const skill of inventory.skill_definitions) {
+        if (skill.content.trim()) {
+          lines.push("", `### Skill: ${skill.name}`, "", skill.content.trim());
+        }
+      }
+    }
   }
 
   if (toolPolicy.categories.commands) {
@@ -551,6 +564,11 @@ function renderToolContent(
   if (toolPolicy.categories.mcp_servers) {
     lines.push("", "## MCP servers", ...formatMarkdownList(inventory.mcp_servers));
     lines.push("- xtctx (required for recall/writeback continuity)");
+
+    // For tools without native MCP config, embed connection details
+    if (!hasNativeMcpSupport(tool) && inventory.mcp_server_definitions.length > 0) {
+      lines.push(...renderMcpServersMarkdown(inventory.mcp_server_definitions));
+    }
   }
 
   if (toolPolicy.categories.slash_commands) {
@@ -584,18 +602,25 @@ function renderToolContent(
 }
 
 async function loadContinuityInventory(configRoot: string): Promise<ContinuityInventory> {
+  const { loadSkillDefinitions } = await import("./skills.js");
+  const { loadMcpServerDefinitions } = await import("./mcp-config.js");
+
   const [
     skills,
     commands,
     agents,
     mcpServers,
     slashCommands,
+    skillDefinitions,
+    mcpServerDefinitions,
   ] = await Promise.all([
     listDirectoryNames(join(configRoot, "skills")),
     listDirectoryNames(join(configRoot, "commands")),
     listDirectoryNames(join(configRoot, "agents")),
     listDirectoryNames(join(configRoot, "mcp-servers")),
     listDirectoryNames(join(configRoot, "slash-commands")),
+    loadSkillDefinitions(configRoot),
+    loadMcpServerDefinitions(configRoot),
   ]);
 
   return {
@@ -604,6 +629,8 @@ async function loadContinuityInventory(configRoot: string): Promise<ContinuityIn
     agents,
     mcp_servers: mcpServers,
     slash_commands: slashCommands,
+    skill_definitions: skillDefinitions,
+    mcp_server_definitions: mcpServerDefinitions,
   };
 }
 
