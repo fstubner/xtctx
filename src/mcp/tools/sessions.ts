@@ -31,7 +31,8 @@ interface SessionDetailParams {
 }
 
 export function createRecentSessionsHandler(service: SessionService) {
-  return async (params: RecentSessionsParams = {}) => {
+  return async (raw: Record<string, unknown> = {}) => {
+    const params = raw as unknown as RecentSessionsParams;
     const limit = params.limit ?? 3;
     const format = params.format ?? "markdown";
     const sessions = await service.listRecentSessions(limit, params.tool_filter);
@@ -45,7 +46,8 @@ export function createRecentSessionsHandler(service: SessionService) {
 }
 
 export function createSessionDetailHandler(service: SessionService) {
-  return async (params: SessionDetailParams) => {
+  return async (raw: Record<string, unknown>) => {
+    const params = raw as unknown as SessionDetailParams;
     const offset = params.offset ?? 0;
     const limit = params.limit ?? 50;
     const format = params.format ?? "markdown";

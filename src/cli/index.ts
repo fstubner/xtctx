@@ -1,11 +1,23 @@
 #!/usr/bin/env node
+import { createRequire } from "node:module";
 import { Command } from "commander";
+import { runCompact } from "./compact.js";
+import { runContext } from "./context.js";
 import { runIngest } from "./ingest.js";
 import { runInit } from "./init.js";
 import { runServe } from "./serve.js";
 import { runSync } from "./sync.js";
 
-const CLI_VERSION = "0.1.0";
+const require = createRequire(import.meta.url);
+// Resolve repo-root package.json from both source (src/cli/, ../../) and compiled (dist/src/cli/, ../../../) locations.
+const loadPackageJson = (): { version: string } => {
+  try {
+    return require("../../package.json") as { version: string };
+  } catch {
+    return require("../../../package.json") as { version: string };
+  }
+};
+const { version: CLI_VERSION } = loadPackageJson();
 
 export async function main(argv = process.argv): Promise<void> {
   const program = new Command();
@@ -42,6 +54,34 @@ export async function main(argv = process.argv): Promise<void> {
     .description("Generate tool-native config files from shared config")
     .action(async (options: { project?: string }) => {
       await runSync({ projectPath: options.project });
+    });
+
+  program
+    .command("context")
+    .option("-p, --project <path>", "Project root (defaults to cwd)")
+    .option("-t, --tool <name>", "Filter context for a specific tool")
+    .option("-s, --sections <list>", "Comma-separated sections: sessions,knowledge,nudge", (v) =>
+      v.split(",").map((s) => s.trim()),
+    )
+    .description("Output session context for hook injection (stdout)")
+    .action(async (options: { project?: string; tool?: string; sections?: string[] }) => {
+      await runContext({
+        projectPath: options.project,
+        tool: options.tool,
+        sections: options.sections,
+      });
+    });
+
+  program
+    .command("compact")
+    .option("-p, --project <path>", "Project root (defaults to cwd)")
+    .option("--full", "Run full compaction instead of incremental (last 24h)", false)
+    .description("Run conversation compaction (rule-based or LLM-assisted)")
+    .action(async (options: { project?: string; full: boolean }) => {
+      await runCompact({
+        projectPath: options.project,
+        full: options.full,
+      });
     });
 
   program

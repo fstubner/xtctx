@@ -1,5 +1,7 @@
 node_modules/
 dist/
+web/dist/
+landing/dist/
 .xtctx/.store/
 .xtctx/state/
 .claude/
@@ -7,3 +9,6 @@ dist/
 coverage/
 .env
 .env.local
+.artifacts/
+firebase-debug.log
+.playwright-mcp/

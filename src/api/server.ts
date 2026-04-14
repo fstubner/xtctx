@@ -1,22 +1,36 @@
 import express from "express";
-import { timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { stat } from "node:fs/promises";
 import { createServer } from "node:http";
 import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import rateLimit from "express-rate-limit";
 import helmet from "helmet";
+import { createContinuityRouter } from "./routes/continuity.js";
 import { createConfigRouter } from "./routes/config.js";
 import { createKnowledgeRouter } from "./routes/knowledge.js";
 import { createSearchRouter } from "./routes/search.js";
 import { createSourcesRouter } from "./routes/sources.js";
+import type { SearchRunner } from "../mcp/tools/search.js";
 import { createProjectServices } from "../runtime/services.js";
+import { EmbeddingService } from "../store/embeddings.js";
+import { LanceStore } from "../store/lance.js";
+import { HybridSearch } from "../store/search.js";
+import { errorMessage } from "../utils/errors.js";
 
 export interface ApiServerOptions {
   projectPath?: string;
   port?: number;
   webStaticDir?: string;
+  /**
+   * Optional pre-built search runner (e.g. from the ingestion runtime in
+   * `serve` mode). When omitted, `createApiApp` constructs its own
+   * `HybridSearch` backed by the project's LanceDB store so the API can also
+   * run standalone via `npm run api`.
+   */
+  searchRunner?: SearchRunner;
   security?: Partial<ApiSecurityOptions>;
+  onScraperConfigChanged?: (tool: string, enabled: boolean) => void;
 }
 
 export interface ApiSecurityOptions {
@@ -33,9 +47,38 @@ export interface ApiServerHandle {
   port: number;
 }
 
+/**
+ * Lazily initialises the embedding model on first use so the standalone API
+ * server doesn't pay the model-load cost at startup if search is never called.
+ */
+class LazyEmbeddingService extends EmbeddingService {
+  private initPromise: Promise<void> | null = null;
+
+  override async initialize(): Promise<void> {
+    await this.ensureInitialized();
+  }
+
+  override async embed(text: string): Promise<number[]> {
+    await this.ensureInitialized();
+    return super.embed(text);
+  }
+
+  override async embedBatch(texts: string[]): Promise<number[][]> {
+    await this.ensureInitialized();
+    return super.embedBatch(texts);
+  }
+
+  private async ensureInitialized(): Promise<void> {
+    if (!this.initPromise) {
+      this.initPromise = super.initialize();
+    }
+    await this.initPromise;
+  }
+}
+
 export async function createApiApp(
   projectPath?: string,
-  options: Pick<ApiServerOptions, "webStaticDir" | "security"> = {},
+  options: Pick<ApiServerOptions, "webStaticDir" | "security" | "onScraperConfigChanged" | "searchRunner"> = {},
 ): Promise<{
   app: express.Express;
   port: number;
@@ -46,13 +89,38 @@ export async function createApiApp(
     ...services.apiSecurity,
     ...(options.security ?? {}),
   });
+
+  // Use the caller-supplied search runner (from ingestion runtime in serve mode)
+  // or build a standalone HybridSearch from the project's own LanceDB store.
+  let searchRunner: SearchRunner;
+  if (options.searchRunner) {
+    searchRunner = options.searchRunner;
+  } else {
+    const store = new LanceStore(join(services.storeDir, "lancedb"));
+    await store.initialize();
+    const embeddings = new LazyEmbeddingService();
+    searchRunner = new HybridSearch(store, embeddings);
+  }
   const app = express();
 
   app.disable("x-powered-by");
   app.use(
     helmet({
-      // The bundled SPA currently relies on defaults that may evolve; keep CSP external for now.
-      contentSecurityPolicy: false,
+      contentSecurityPolicy: {
+        useDefaults: true,
+        directives: {
+          "default-src": ["'self'"],
+          "script-src": ["'self'"],
+          "style-src": ["'self'", "'unsafe-inline'"],
+          "img-src": ["'self'", "data:"],
+          "font-src": ["'self'", "data:"],
+          "connect-src": ["'self'"],
+          "base-uri": ["'none'"],
+          "frame-ancestors": ["'none'"],
+          "object-src": ["'none'"],
+          "upgrade-insecure-requests": null,
+        },
+      },
       crossOriginEmbedderPolicy: false,
     }),
   );
@@ -69,6 +137,7 @@ export async function createApiApp(
     },
   });
   app.use("/api", apiLimiter);
+  app.use("/api", noStoreCacheMiddleware);
   app.use("/api", createApiAuthMiddleware(security));
 
   app.get("/health", (_req, res) => {
@@ -81,7 +150,7 @@ export async function createApiApp(
 
   const knowledgeRecords = async () => services.knowledge.listAll();
 
-  app.use("/api/search", createSearchRouter({ knowledgeRecords }));
+  app.use("/api/search", createSearchRouter({ search: searchRunner }));
   app.use("/api/knowledge", createKnowledgeRouter(services.knowledge));
   app.use(
     "/api/sources",
@@ -89,10 +158,13 @@ export async function createApiApp(
       projectRoot: services.projectRoot,
       knowledgeDir: services.knowledgeDir,
       stateDir: services.stateDir,
+      ingestion: services.ingestion,
       sessions: services.sessions,
       knowledgeRecords,
+      onScraperConfigChanged: options.onScraperConfigChanged,
     }),
   );
+  app.use("/api/continuity", createContinuityRouter({ projectRoot: services.projectRoot }));
   app.use("/api/config", createConfigRouter(services.configs));
   if (webAssets) {
     app.use(express.static(webAssets.root, { index: false }));
@@ -117,8 +189,18 @@ export async function createApiApp(
   }
 
   app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-    const message = error instanceof Error ? error.message : String(error);
-    res.status(500).json({ error: message });
+    const status = asHttpStatus(error);
+    const message = status >= 500
+      ? "Internal server error."
+      : error instanceof Error
+        ? error.message
+        : String(error);
+
+    if (status >= 500) {
+      console.error(`xtctx api error: ${errorMessage(error)}`);
+    }
+
+    res.status(status).json({ error: message });
   });
 
   return { app, port: services.webPort };
@@ -128,6 +210,8 @@ export async function startApiServer(options: ApiServerOptions = {}): Promise<Ap
   const { app, port: defaultPort } = await createApiApp(options.projectPath, {
     webStaticDir: options.webStaticDir,
     security: options.security,
+    onScraperConfigChanged: options.onScraperConfigChanged,
+    searchRunner: options.searchRunner,
   });
   const port = options.port ?? defaultPort;
   const server = createServer(app);
@@ -169,9 +253,9 @@ async function resolveWebAssets(webStaticDir?: string): Promise<WebAssets | null
   const moduleDir = dirname(fileURLToPath(import.meta.url));
   const candidates = dedupePaths([
     webStaticDir,
-    resolve(moduleDir, "..", "..", "web"),
-    resolve(moduleDir, "..", "..", "..", "dist", "web"),
     resolve(moduleDir, "..", "..", "..", "web", "dist"),
+    resolve(moduleDir, "..", "..", "..", "dist", "web"),
+    resolve(moduleDir, "..", "..", "web"),
   ]);
 
   for (const candidate of candidates) {
@@ -214,7 +298,7 @@ function createCorsMiddleware(security: ApiSecurityOptions): express.RequestHand
     res.setHeader("Vary", "Origin");
     res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Xtctx-Api-Token");
-    res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+    res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,OPTIONS");
 
     if (req.method === "OPTIONS") {
       res.status(204).end();
@@ -261,13 +345,11 @@ function extractToken(req: express.Request): string | null {
 }
 
 function safeTokenEqual(candidate: string, expected: string): boolean {
-  const candidateBuffer = Buffer.from(candidate);
-  const expectedBuffer = Buffer.from(expected);
-  if (candidateBuffer.length !== expectedBuffer.length) {
-    return false;
-  }
-
-  return timingSafeEqual(candidateBuffer, expectedBuffer);
+  // Hash both tokens to a fixed-length digest so the comparison always
+  // runs in constant time regardless of input length, preventing timing
+  // side-channels that could leak token length information.
+  const hash = (s: string) => createHash("sha256").update(s).digest();
+  return timingSafeEqual(hash(candidate), hash(expected));
 }
 
 function isAllowedOrigin(origin: string, security: ApiSecurityOptions): boolean {
@@ -282,6 +364,11 @@ function isAllowedOrigin(origin: string, security: ApiSecurityOptions): boolean 
   return false;
 }
 
+const noStoreCacheMiddleware: express.RequestHandler = (_req, res, next) => {
+  res.setHeader("Cache-Control", "no-store");
+  next();
+};
+
 function resolveSecurityOptions(
   port: number,
   overrides: Partial<ApiSecurityOptions> | undefined,
@@ -293,7 +380,7 @@ function resolveSecurityOptions(
     ...envOrigins,
     ...defaultOrigins,
   ]);
-  const localhostOriginDefault = overrides?.allowLocalhostOrigins ?? true;
+  const localhostOriginDefault = overrides?.allowLocalhostOrigins ?? false;
   const allowLocalhostOrigins = process.env.XTCTX_ALLOW_LOCALHOST_ORIGINS == null
     ? localhostOriginDefault
     : parseBoolean(process.env.XTCTX_ALLOW_LOCALHOST_ORIGINS, localhostOriginDefault);
@@ -359,3 +446,20 @@ function sanitizePositiveInt(value: unknown, fallback: number): number {
 
   return fallback;
 }
+
+function asHttpStatus(error: unknown): number {
+  if (error && typeof error === "object") {
+    const status = Number((error as { status?: unknown }).status);
+    if (Number.isInteger(status) && status >= 400 && status <= 599) {
+      return status;
+    }
+
+    const statusCode = Number((error as { statusCode?: unknown }).statusCode);
+    if (Number.isInteger(statusCode) && statusCode >= 400 && statusCode <= 599) {
+      return statusCode;
+    }
+  }
+
+  return 500;
+}
+

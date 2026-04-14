@@ -31,10 +31,6 @@ class MockScraper implements ConversationScraper {
     }
   }
 
-  parseRaw(raw: unknown): ConversationChunk {
-    return raw as ConversationChunk;
-  }
-
   async getLastScrapedPosition(): Promise<ScraperState> {
     return this.state;
   }

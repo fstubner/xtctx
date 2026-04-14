@@ -1,0 +1,19 @@
+{
+  "name": "xtctx",
+  "short_name": "xtctx",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    }
+  ],
+  "theme_color": "#0b1020",
+  "background_color": "#0b1020",
+  "display": "standalone"
+}

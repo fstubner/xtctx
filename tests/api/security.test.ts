@@ -42,13 +42,19 @@ describe("API security controls", () => {
     const authorized = await fetch(`${baseUrl}/api/sources/status`, {
       headers: { Authorization: "Bearer secret-token" },
     });
+    const continuityUnauthorized = await fetch(`${baseUrl}/api/continuity/tools-status`);
+    const continuityAuthorized = await fetch(`${baseUrl}/api/continuity/tools-status`, {
+      headers: { Authorization: "Bearer secret-token" },
+    });
 
     expect(health.status).toBe(200);
     expect(unauthorized.status).toBe(401);
     expect(authorized.status).toBe(200);
+    expect(continuityUnauthorized.status).toBe(401);
+    expect(continuityAuthorized.status).toBe(200);
   });
 
-  it("restricts CORS to localhost/same-origin allowlist", async () => {
+  it("restricts CORS to same-origin and explicit allowlist by default", async () => {
     const { baseUrl } = await startFixtureServer(tempDirs, servers);
 
     const denied = await fetch(`${baseUrl}/api/sources/status`, {
@@ -59,7 +65,15 @@ describe("API security controls", () => {
       },
     });
 
-    const allowed = await fetch(`${baseUrl}/api/sources/status`, {
+    const allowedConfiguredOrigin = await fetch(`${baseUrl}/api/sources/status`, {
+      method: "OPTIONS",
+      headers: {
+        Origin: "http://127.0.0.1:3232",
+        "Access-Control-Request-Method": "GET",
+      },
+    });
+
+    const deniedLocalhostPort = await fetch(`${baseUrl}/api/sources/status`, {
       method: "OPTIONS",
       headers: {
         Origin: "http://localhost:5173",
@@ -68,6 +82,26 @@ describe("API security controls", () => {
     });
 
     expect(denied.status).toBe(403);
+    expect(allowedConfiguredOrigin.status).toBe(204);
+    expect(allowedConfiguredOrigin.headers.get("access-control-allow-origin")).toBe(
+      "http://127.0.0.1:3232",
+    );
+    expect(deniedLocalhostPort.status).toBe(403);
+  });
+
+  it("allows arbitrary localhost origins only when explicitly enabled", async () => {
+    const { baseUrl } = await startFixtureServer(tempDirs, servers, {
+      allowLocalhostOrigins: true,
+    });
+
+    const allowed = await fetch(`${baseUrl}/api/sources/status`, {
+      method: "OPTIONS",
+      headers: {
+        Origin: "http://localhost:5173",
+        "Access-Control-Request-Method": "GET",
+      },
+    });
+
     expect(allowed.status).toBe(204);
     expect(allowed.headers.get("access-control-allow-origin")).toBe(
       "http://localhost:5173",
@@ -151,6 +185,41 @@ api:
     expect(first.status).toBe(200);
     expect(second.status).toBe(429);
   });
+
+  it("sets security headers and no-store caching on API responses", async () => {
+    const { baseUrl } = await startFixtureServer(tempDirs, servers);
+    const indexResponse = await fetch(`${baseUrl}/`);
+    const apiResponse = await fetch(`${baseUrl}/api/sources/status`);
+    const continuityResponse = await fetch(`${baseUrl}/api/continuity/effective-policy`);
+
+    const csp = indexResponse.headers.get("content-security-policy") ?? "";
+    expect(csp).toContain("default-src 'self'");
+    expect(csp).toContain("frame-ancestors 'none'");
+    expect(apiResponse.headers.get("cache-control")).toBe("no-store");
+    expect(continuityResponse.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("does not leak internal error details in 500 responses", async () => {
+    const { baseUrl } = await startFixtureServer(
+      tempDirs,
+      servers,
+      undefined,
+      undefined,
+      async (projectDir) => {
+        await writeFile(
+          join(projectDir, ".xtctx", "knowledge", "decisions", "broken.yaml"),
+          "\"just-a-string\"",
+          "utf-8",
+        );
+      },
+    );
+
+    const response = await fetch(`${baseUrl}/api/sources/status`);
+    const payload = (await response.json()) as { error: string };
+
+    expect(response.status).toBe(500);
+    expect(payload.error).toBe("Internal server error.");
+  });
 });
 
 async function startFixtureServer(
@@ -158,6 +227,7 @@ async function startFixtureServer(
   servers: Server[],
   security?: Partial<ApiSecurityOptions>,
   configPatch?: string,
+  beforeStart?: (projectDir: string) => Promise<void>,
 ): Promise<{ baseUrl: string }> {
   const workspaceDir = await mkdtemp(join(tmpdir(), "xtctx-api-security-"));
   const projectDir = join(workspaceDir, "sample-project");
@@ -173,6 +243,9 @@ async function startFixtureServer(
       `${withoutApi}\n${configPatch.trim()}\n`,
       "utf-8",
     );
+  }
+  if (beforeStart) {
+    await beforeStart(projectDir);
   }
 
   const { app } = await createApiApp(projectDir, { security });

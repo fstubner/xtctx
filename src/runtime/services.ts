@@ -3,21 +3,9 @@ import { extname, join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { KnowledgeRepository } from "../knowledge/repository.js";
 import type { ConfigStore, ConfigType, NamedConfig } from "../mcp/tools/config.js";
-import type { SessionMessage, SessionService, SessionSummary } from "../mcp/tools/sessions.js";
-
-export class EmptySessionService implements SessionService {
-  async listRecentSessions(_limit: number, _toolFilter?: string[]): Promise<SessionSummary[]> {
-    return [];
-  }
-
-  async getSessionDetail(
-    _sessionRef: string,
-    _offset: number,
-    _limit: number,
-  ): Promise<SessionMessage[]> {
-    return [];
-  }
-}
+import type { SessionService } from "../mcp/tools/sessions.js";
+import { errorMessage } from "../utils/errors.js";
+import { createIndexedSessionService } from "./sessions.js";
 
 export class FileConfigStore implements ConfigStore {
   constructor(private readonly configRoot: string) {}
@@ -58,12 +46,15 @@ export class FileConfigStore implements ConfigStore {
     try {
       const raw = await readFile(filePath, "utf-8");
       const parsed = parseYaml(raw) as Record<string, unknown>;
-      const prefs = parsed.toolPreferences;
+      const tools = parsed.tools;
 
-      if (prefs && typeof prefs === "object" && !Array.isArray(prefs)) {
-        const toolPrefs = (prefs as Record<string, unknown>)[tool];
-        if (toolPrefs && typeof toolPrefs === "object" && !Array.isArray(toolPrefs)) {
-          return toolPrefs as Record<string, unknown>;
+      if (tools && typeof tools === "object" && !Array.isArray(tools)) {
+        const toolConfig = (tools as Record<string, unknown>)[tool];
+        if (toolConfig && typeof toolConfig === "object" && !Array.isArray(toolConfig)) {
+          const preferences = (toolConfig as Record<string, unknown>).preferences;
+          if (preferences && typeof preferences === "object" && !Array.isArray(preferences)) {
+            return preferences as Record<string, unknown>;
+          }
         }
       }
     } catch {
@@ -125,8 +116,9 @@ export interface ProjectServices {
     pollIntervalMs: number;
     excludePatterns: string[];
   };
+  domainTags: Record<string, string[]>;
   knowledge: KnowledgeRepository;
-  sessions: EmptySessionService;
+  sessions: SessionService;
   configs: FileConfigStore;
 }
 
@@ -141,9 +133,11 @@ export async function createProjectServices(projectPath?: string): Promise<Proje
   const webPort = parseWebPort(config);
   const apiSecurity = parseApiSecurityConfig(config);
   const ingestion = parseIngestionConfig(config, projectRoot);
+  const domainTags = parseDomainTags(config);
 
   const knowledge = new KnowledgeRepository(knowledgeDir);
   await knowledge.initialize();
+  const sessions = await createSessionService(storeDir);
 
   return {
     projectRoot,
@@ -155,10 +149,37 @@ export async function createProjectServices(projectPath?: string): Promise<Proje
     webPort,
     apiSecurity,
     ingestion,
+    domainTags,
     knowledge,
-    sessions: new EmptySessionService(),
+    sessions,
     configs: new FileConfigStore(configRoot),
   };
+}
+
+async function createSessionService(storeDir: string): Promise<SessionService> {
+  try {
+    return await createIndexedSessionService(storeDir);
+  } catch (error) {
+    console.warn(`[xtctx] Session index unavailable, sessions disabled: ${errorMessage(error)}`);
+    return new EmptySessionService();
+  }
+}
+
+class EmptySessionService implements SessionService {
+  async listRecentSessions(
+    _limit: number,
+    _toolFilter?: string[],
+  ): Promise<[]> {
+    return [];
+  }
+
+  async getSessionDetail(
+    _sessionRef: string,
+    _offset: number,
+    _limit: number,
+  ): Promise<[]> {
+    return [];
+  }
 }
 
 async function loadProjectConfig(xtctxDir: string): Promise<Record<string, unknown>> {
@@ -319,4 +340,19 @@ function parseIngestionConfig(
         : defaults.pollIntervalMs,
     excludePatterns,
   };
+}
+
+function parseDomainTags(config: Record<string, unknown>): Record<string, string[]> {
+  const raw = config.domainTags;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return {};
+  }
+
+  const result: Record<string, string[]> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (Array.isArray(value)) {
+      result[key] = value.filter((item): item is string => typeof item === "string");
+    }
+  }
+  return result;
 }

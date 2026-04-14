@@ -1,5 +1,6 @@
 import type { CompactedSession, CompactionConfig } from "../types/compaction.js";
 import type { ConversationChunk } from "../types/scraper.js";
+import { compactChunksLlmAssisted } from "./llm-assisted.js";
 import { compactChunksRuleBased } from "./rule-based.js";
 
 export interface CompactionChunkSource {
@@ -20,7 +21,7 @@ export class CompactionPipeline {
 
   async runFull(): Promise<CompactedSession[]> {
     const chunks = await this.source.listAllChunks();
-    const sessions = this.compact(chunks);
+    const sessions = await this.compact(chunks);
     await this.sink.saveCompactedSessions(sessions);
     return sessions;
   }
@@ -29,19 +30,16 @@ export class CompactionPipeline {
     const chunks = this.source.listChunksSince
       ? await this.source.listChunksSince(since)
       : await this.source.listAllChunks();
-    const sessions = this.compact(chunks);
+    const sessions = await this.compact(chunks);
     await this.sink.saveCompactedSessions(sessions);
     return sessions;
   }
 
-  private compact(chunks: ConversationChunk[]): CompactedSession[] {
-    if (this.config.strategy === "rule-based") {
-      return compactChunksRuleBased(chunks, {
-        sessionBoundaryMinutes: this.config.sessionBoundaryMinutes,
-      });
+  private compact(chunks: ConversationChunk[]): CompactedSession[] | Promise<CompactedSession[]> {
+    if (this.config.strategy === "llm-assisted" && this.config.llm) {
+      return compactChunksLlmAssisted(chunks, this.config);
     }
 
-    // Phase 7 currently supports rule-based fallback for all modes.
     return compactChunksRuleBased(chunks, {
       sessionBoundaryMinutes: this.config.sessionBoundaryMinutes,
     });

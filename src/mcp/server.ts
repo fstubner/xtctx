@@ -1,8 +1,10 @@
+import { createRequire } from "node:module";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
+  type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
 import {
   createGetConfigHandler,
@@ -10,6 +12,11 @@ import {
   createToolPreferencesHandler,
   type ConfigStore,
 } from "./tools/config.js";
+import {
+  createContinuityStatusHandler,
+  createEffectivePolicyHandler,
+  type ContinuityReader,
+} from "./tools/continuity.js";
 import {
   createProjectKnowledgeHandler,
   type KnowledgeStore,
@@ -20,21 +27,24 @@ import {
   createSessionDetailHandler,
   type SessionService,
 } from "./tools/sessions.js";
+import type { AutoTagger } from "../knowledge/tagger.js";
 import {
   createWriteHandlers,
   type KnowledgeWriter,
   type SimilarityLookup,
 } from "./tools/write.js";
+import { errorMessage } from "../utils/errors.js";
 
-export interface ToolDefinition {
-  name: string;
-  description: string;
-  inputSchema: {
-    type: "object";
-    properties: Record<string, unknown>;
-    required?: string[];
-  };
-}
+const require = createRequire(import.meta.url);
+// Resolve repo-root package.json from both source (src/mcp/, ../../) and compiled (dist/src/mcp/, ../../../) locations.
+const loadPackageJson = (): { version: string } => {
+  try {
+    return require("../../package.json") as { version: string };
+  } catch {
+    return require("../../../package.json") as { version: string };
+  }
+};
+const { version: SERVER_VERSION } = loadPackageJson();
 
 type ToolParams = Record<string, unknown>;
 type ToolHandler = (params: ToolParams) => Promise<unknown>;
@@ -45,10 +55,12 @@ export interface McpToolDependencies {
   knowledge?: KnowledgeStore;
   writer?: KnowledgeWriter;
   findSimilar?: SimilarityLookup;
+  autoTagger?: AutoTagger;
   configs?: ConfigStore;
+  continuity?: ContinuityReader;
 }
 
-export function buildToolDefinitions(): ToolDefinition[] {
+export function buildToolDefinitions(): Tool[] {
   return [
     {
       name: "xtctx_search",
@@ -78,7 +90,8 @@ export function buildToolDefinitions(): ToolDefinition[] {
           type_filter: {
             type: "array",
             items: { type: "string" },
-            description: "Filter by type: decision, error_solution, insight",
+            description:
+              "Filter by type: decision, error_solution, insight, convention, gotcha, faq",
           },
           time_range: {
             type: "object",
@@ -133,16 +146,51 @@ export function buildToolDefinitions(): ToolDefinition[] {
     {
       name: "xtctx_project_knowledge",
       description:
-        "Get shared project knowledge (architectural decisions, error solutions, insights).",
+        "Get shared project knowledge (decisions, error solutions, insights, conventions, gotchas, FAQs).",
       inputSchema: {
         type: "object",
         properties: {
           type: {
             type: "string",
-            enum: ["decision", "error_solution", "insight", "all"],
+            enum: ["decision", "error_solution", "insight", "convention", "gotcha", "faq", "all"],
             description: "Filter by type. Default: all",
           },
           query: { type: "string", description: "Optional semantic filter" },
+        },
+      },
+    },
+    {
+      name: "xtctx_continuity_status",
+      description:
+        "Get continuity orchestration posture per tool (state, scope, enabled categories, and warnings).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tool_filter: {
+            type: "array",
+            items: { type: "string" },
+            description: "Optional filter for tool ids (e.g. codex, claude, cursor).",
+          },
+          format: {
+            type: "string",
+            enum: ["markdown", "json"],
+            description: "Response format. Default: markdown",
+          },
+        },
+      },
+    },
+    {
+      name: "xtctx_effective_policy",
+      description:
+        "Read the merged continuity policy from global baseline + repo policy with resolved tool settings.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          format: {
+            type: "string",
+            enum: ["markdown", "json"],
+            description: "Response format. Default: markdown",
+          },
         },
       },
     },
@@ -197,6 +245,20 @@ export function buildToolDefinitions(): ToolDefinition[] {
       },
     },
     {
+      name: "xtctx_save_faq",
+      description:
+        "Record a frequently asked project question and its answer for future sessions.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          question: { type: "string", description: "Question text" },
+          answer: { type: "string", description: "Answer text" },
+          context: { type: "string", description: "Optional supporting context" },
+        },
+        required: ["question", "answer"],
+      },
+    },
+    {
       name: "xtctx_list_configs",
       description: "List available portable skills, commands, and agent definitions.",
       inputSchema: {
@@ -242,49 +304,50 @@ export function createToolHandlers(
   const handlers = new Map<string, ToolHandler>();
 
   if (dependencies.search) {
-    const search = createSearchHandler(dependencies.search);
-    handlers.set("xtctx_search", (params) => search(params as any));
+    handlers.set("xtctx_search", createSearchHandler(dependencies.search));
   } else {
     handlers.set("xtctx_search", missingDependency("search index"));
   }
 
   if (dependencies.sessions) {
-    const recentSessions = createRecentSessionsHandler(dependencies.sessions);
-    const sessionDetail = createSessionDetailHandler(dependencies.sessions);
-    handlers.set("xtctx_recent_sessions", (params) => recentSessions(params as any));
-    handlers.set("xtctx_session_detail", (params) => sessionDetail(params as any));
+    handlers.set("xtctx_recent_sessions", createRecentSessionsHandler(dependencies.sessions));
+    handlers.set("xtctx_session_detail", createSessionDetailHandler(dependencies.sessions));
   } else {
     handlers.set("xtctx_recent_sessions", missingDependency("session service"));
     handlers.set("xtctx_session_detail", missingDependency("session service"));
   }
 
   if (dependencies.knowledge) {
-    const projectKnowledge = createProjectKnowledgeHandler(dependencies.knowledge);
-    handlers.set("xtctx_project_knowledge", (params) => projectKnowledge(params as any));
+    handlers.set("xtctx_project_knowledge", createProjectKnowledgeHandler(dependencies.knowledge));
   } else {
     handlers.set("xtctx_project_knowledge", missingDependency("knowledge store"));
   }
 
+  if (dependencies.continuity) {
+    handlers.set("xtctx_continuity_status", createContinuityStatusHandler(dependencies.continuity));
+    handlers.set("xtctx_effective_policy", createEffectivePolicyHandler(dependencies.continuity));
+  } else {
+    handlers.set("xtctx_continuity_status", missingDependency("continuity service"));
+    handlers.set("xtctx_effective_policy", missingDependency("continuity service"));
+  }
+
   if (dependencies.writer) {
-    const writeHandlers = createWriteHandlers(dependencies.writer, dependencies.findSimilar);
-    handlers.set("xtctx_save_decision", (params) => writeHandlers.saveDecision(params as any));
-    handlers.set("xtctx_save_error_solution", (params) =>
-      writeHandlers.saveErrorSolution(params as any),
-    );
-    handlers.set("xtctx_save_insight", (params) => writeHandlers.saveInsight(params as any));
+    const writeHandlers = createWriteHandlers(dependencies.writer, dependencies.findSimilar, dependencies.autoTagger);
+    handlers.set("xtctx_save_decision", writeHandlers.saveDecision);
+    handlers.set("xtctx_save_error_solution", writeHandlers.saveErrorSolution);
+    handlers.set("xtctx_save_insight", writeHandlers.saveInsight);
+    handlers.set("xtctx_save_faq", writeHandlers.saveFaq);
   } else {
     handlers.set("xtctx_save_decision", missingDependency("knowledge writer"));
     handlers.set("xtctx_save_error_solution", missingDependency("knowledge writer"));
     handlers.set("xtctx_save_insight", missingDependency("knowledge writer"));
+    handlers.set("xtctx_save_faq", missingDependency("knowledge writer"));
   }
 
   if (dependencies.configs) {
-    const listConfigs = createListConfigsHandler(dependencies.configs);
-    const getConfig = createGetConfigHandler(dependencies.configs);
-    const toolPreferences = createToolPreferencesHandler(dependencies.configs);
-    handlers.set("xtctx_list_configs", (params) => listConfigs(params as any));
-    handlers.set("xtctx_get_config", (params) => getConfig(params as any));
-    handlers.set("xtctx_tool_preferences", (params) => toolPreferences(params as any));
+    handlers.set("xtctx_list_configs", createListConfigsHandler(dependencies.configs));
+    handlers.set("xtctx_get_config", createGetConfigHandler(dependencies.configs));
+    handlers.set("xtctx_tool_preferences", createToolPreferencesHandler(dependencies.configs));
   } else {
     handlers.set("xtctx_list_configs", missingDependency("config store"));
     handlers.set("xtctx_get_config", missingDependency("config store"));
@@ -298,16 +361,14 @@ export function createMcpServer(
   dependencies: McpToolDependencies = {},
 ): Server {
   const server = new Server(
-    { name: "xtctx", version: "0.1.0" },
+    { name: "xtctx", version: SERVER_VERSION },
     { capabilities: { tools: {} } },
   );
 
   const tools = buildToolDefinitions();
   const handlers = createToolHandlers(dependencies);
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: tools as any,
-  }));
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const name = request.params.name;
@@ -380,10 +441,3 @@ function formatCallToolResult(result: unknown): {
   return response;
 }
 
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return String(error);
-}

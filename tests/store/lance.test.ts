@@ -59,4 +59,25 @@ describe("LanceStore", () => {
     expect(results.length).toBe(1);
     expect(results[0].id).toBe("rec-1");
   });
+
+  it("queries raw rows with where clause", async () => {
+    await store.upsert("test-table", [
+      {
+        id: "rec-1",
+        text: "Session A",
+        vector: new Array(384).fill(0.1),
+        metadata: JSON.stringify({ source_session: "a" }),
+      },
+      {
+        id: "rec-2",
+        text: "Session B",
+        vector: new Array(384).fill(0.2),
+        metadata: JSON.stringify({ source_session: "b" }),
+      },
+    ]);
+
+    const rows = await store.queryRows("test-table", { where: "id = 'rec-2'", limit: 1 });
+    expect(rows.length).toBe(1);
+    expect(rows[0].id).toBe("rec-2");
+  });
 });

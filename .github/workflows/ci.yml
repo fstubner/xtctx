@@ -16,22 +16,26 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
           cache-dependency-path: |
             package-lock.json
             web/package-lock.json
+            landing/package-lock.json
 
       - name: Install root dependencies
         run: npm ci
 
       - name: Install web dependencies
         run: npm --prefix web ci
+
+      - name: Install landing dependencies
+        run: npm --prefix landing ci
 
       - name: Unit and integration tests
         run: |
@@ -47,6 +51,7 @@ jobs:
         run: |
           npm run build
           npm --prefix web run build
+          npm --prefix landing run build
 
       - name: CLI smoke check
         run: npm run smoke:cli

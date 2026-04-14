@@ -1,0 +1,346 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+    --bg: 221 26% 9%;
+    --surface: 223 20% 13%;
+    --surface-2: 224 18% 16%;
+    --surface-3: 224 18% 19%;
+    --border: 220 18% 24%;
+    --text: 215 28% 92%;
+    --muted: 218 12% 67%;
+    --accent: 216 75% 58%;
+    --accent-soft: 216 70% 18%;
+  }
+
+  :root.light-mode {
+    color-scheme: light;
+    --bg: 215 30% 97%;
+    --surface: 0 0% 100%;
+    --surface-2: 220 25% 98%;
+    --surface-3: 215 28% 94%;
+    --border: 216 20% 85%;
+    --text: 222 30% 17%;
+    --muted: 220 12% 45%;
+    --accent: 219 72% 48%;
+    --accent-soft: 217 82% 93%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html,
+  body,
+  #app {
+    @apply min-h-full;
+  }
+
+  body {
+    @apply m-0 bg-bg text-text antialiased;
+    font-family: "Segoe UI Variable Text", "Segoe UI", Inter, ui-sans-serif, system-ui, sans-serif;
+    background-image:
+      radial-gradient(circle at top left, color-mix(in srgb, hsl(var(--accent)), transparent 92%), transparent 28%),
+      linear-gradient(180deg, hsl(var(--bg)), color-mix(in srgb, hsl(var(--bg)), black 5%));
+  }
+
+  code,
+  pre {
+    font-family: "Cascadia Mono", "Cascadia Code", Consolas, ui-monospace, monospace;
+  }
+}
+
+@layer components {
+  .lp-shell {
+    @apply mx-auto my-8 w-[min(1180px,calc(100%-2rem))];
+  }
+
+  .lp-nav {
+    @apply flex flex-wrap items-center justify-between gap-4 rounded-2xl border bg-surface px-6 py-4;
+  }
+
+  .lp-brand {
+    @apply flex items-center gap-3 no-underline;
+    color: inherit;
+  }
+
+  .lp-brand-mark {
+    @apply flex h-9 w-9 items-center justify-center rounded-xl text-xs font-semibold;
+    background: hsl(var(--accent-soft));
+    color: hsl(var(--accent));
+  }
+
+  .lp-brand-name {
+    @apply block text-xl font-semibold tracking-tight;
+  }
+
+  .lp-brand-subtitle {
+    @apply mt-0.5 text-xs uppercase tracking-[0.16em] text-muted;
+  }
+
+  .lp-nav-links {
+    @apply flex flex-wrap items-center gap-6 text-sm;
+  }
+
+  .lp-nav-links a {
+    @apply text-muted no-underline transition-colors;
+  }
+
+  .lp-nav-links a:hover {
+    @apply text-text;
+  }
+
+  .lp-nav-actions {
+    @apply flex items-center gap-2;
+  }
+
+  .lp-btn,
+  .lp-btn-ghost {
+    @apply inline-flex min-h-10 items-center justify-center rounded-lg px-4 text-sm font-medium transition;
+  }
+
+  .lp-btn {
+    background: hsl(var(--accent));
+    color: white;
+  }
+
+  .lp-btn:hover {
+    background: color-mix(in srgb, hsl(var(--accent)), white 12%);
+  }
+
+  .lp-btn-ghost {
+    @apply border;
+    background: hsl(var(--surface));
+    color: hsl(var(--text));
+  }
+
+  .lp-btn-ghost:hover {
+    background: hsl(var(--surface-2));
+  }
+
+  .lp-hero {
+    @apply mt-8 grid gap-8 rounded-[2rem] border bg-surface px-7 py-8 lg:grid-cols-[minmax(0,1.05fr)_minmax(320px,0.95fr)] lg:px-8 lg:py-9;
+  }
+
+  .lp-hero-copy {
+    @apply flex flex-col;
+  }
+
+  .lp-eyebrow {
+    @apply text-[11px] font-medium uppercase tracking-[0.16em] text-muted;
+  }
+
+  .lp-hero-title {
+    @apply mt-4 max-w-3xl text-balance text-5xl font-semibold leading-[0.98] tracking-[-0.035em] md:text-6xl;
+  }
+
+  .lp-hero-sub {
+    @apply mt-5 max-w-2xl text-lg leading-relaxed text-muted;
+  }
+
+  .lp-proof-row {
+    @apply mt-6 flex flex-wrap gap-2;
+  }
+
+  .lp-proof-row span {
+    @apply rounded-full border px-3 py-1 text-sm text-muted;
+    background: color-mix(in srgb, hsl(var(--surface-2)), hsl(var(--accent)) 3%);
+  }
+
+  .lp-install {
+    @apply mt-7 flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-left text-sm transition;
+    background: hsl(var(--surface-2));
+    color: hsl(var(--text));
+  }
+
+  .lp-install:hover {
+    border-color: color-mix(in srgb, hsl(var(--accent)), hsl(var(--border)) 48%);
+  }
+
+  .lp-install-prompt {
+    @apply text-muted;
+  }
+
+  .lp-install-copy {
+    @apply ml-auto text-xs text-muted;
+  }
+
+  .lp-hero-actions {
+    @apply mt-6 flex flex-wrap gap-3;
+  }
+
+  .lp-works-with {
+    @apply mt-5 max-w-2xl text-sm leading-relaxed text-muted;
+  }
+
+  .lp-hero-visual {
+    @apply flex flex-col gap-5;
+  }
+
+  .lp-visual-card {
+    @apply rounded-2xl border bg-surface-2 p-5;
+  }
+
+  .lp-visual-header {
+    @apply mb-4;
+  }
+
+  .lp-visual-title {
+    @apply mt-1 text-2xl font-semibold tracking-tight;
+  }
+
+  .lp-runtime-preview {
+    @apply block w-full rounded-xl border;
+    box-shadow: 0 24px 80px color-mix(in srgb, hsl(var(--bg)), black 60%);
+  }
+
+  .lp-generated-grid {
+    @apply grid gap-4 md:grid-cols-[minmax(0,1fr)_220px];
+  }
+
+  .lp-generated-list {
+    @apply m-0 grid list-none gap-2 p-0;
+  }
+
+  .lp-generated-list li {
+    @apply rounded-lg border px-3 py-2 text-sm;
+    background: color-mix(in srgb, hsl(var(--surface-3)), hsl(var(--accent)) 4%);
+  }
+
+  .lp-section {
+    @apply mt-8 rounded-[2rem] border bg-surface px-7 py-8 lg:px-8 lg:py-9;
+  }
+
+  .lp-section-header {
+    @apply max-w-4xl;
+  }
+
+  .lp-h2 {
+    @apply mt-3 text-balance text-3xl font-semibold leading-tight tracking-[-0.02em] md:text-[2.5rem];
+  }
+
+  .lp-pillar-grid {
+    @apply mt-8 grid gap-4 lg:grid-cols-3;
+  }
+
+  .lp-pillar-card {
+    @apply rounded-2xl border bg-surface-2 p-5;
+  }
+
+  .lp-pillar-card h3 {
+    @apply text-xl font-semibold tracking-tight;
+  }
+
+  .lp-pillar-card p {
+    @apply mt-3 text-base leading-relaxed text-muted;
+  }
+
+  .lp-automation-layout {
+    @apply mt-8 grid gap-6 lg:grid-cols-[minmax(0,1.25fr)_320px];
+  }
+
+  .lp-automation-list {
+    @apply rounded-2xl border bg-surface-2;
+  }
+
+  .lp-automation-item {
+    @apply grid gap-4 px-5 py-5 md:grid-cols-[56px_minmax(0,1fr)];
+  }
+
+  .lp-automation-item + .lp-automation-item {
+    @apply border-t;
+  }
+
+  .lp-automation-num {
+    @apply text-sm font-semibold text-muted;
+  }
+
+  .lp-automation-item p {
+    @apply m-0 text-base leading-relaxed;
+  }
+
+  .lp-callout {
+    @apply rounded-2xl border bg-surface-2 p-5;
+  }
+
+  .lp-callout h3 {
+    @apply mt-1 text-2xl font-semibold tracking-tight;
+  }
+
+  .lp-callout p:last-child {
+    @apply mt-3 text-base leading-relaxed text-muted;
+  }
+
+  .lp-quickstart-grid {
+    @apply mt-8 grid gap-5 lg:grid-cols-2;
+  }
+
+  .lp-panel {
+    @apply rounded-2xl border bg-surface-2 p-5;
+  }
+
+  .lp-panel h3 {
+    @apply text-2xl font-semibold tracking-tight;
+  }
+
+  .lp-panel ol,
+  .lp-panel ul {
+    @apply mt-4 space-y-3 pl-5 text-base leading-relaxed text-muted;
+  }
+
+  .lp-terminal {
+    @apply mt-6 overflow-hidden rounded-xl border;
+    background: color-mix(in srgb, hsl(var(--surface)), black 10%);
+  }
+
+  .lp-terminal-bar {
+    @apply flex items-center gap-2 border-b px-4 py-3;
+    background: color-mix(in srgb, hsl(var(--surface-3)), black 8%);
+  }
+
+  .lp-terminal-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    flex-shrink: 0;
+    background: var(--c);
+  }
+
+  .lp-terminal-label {
+    @apply ml-1 text-xs text-muted;
+  }
+
+  .lp-terminal pre {
+    @apply m-0 overflow-x-auto px-4 py-4 text-sm leading-relaxed;
+  }
+
+  .lp-note {
+    @apply mt-6 rounded-xl border px-4 py-4;
+    background: color-mix(in srgb, hsl(var(--surface)), hsl(var(--accent)) 4%);
+  }
+
+  .lp-note p:last-child {
+    @apply mt-2 text-base leading-relaxed text-muted;
+  }
+
+  .lp-footer {
+    @apply flex flex-wrap items-center justify-between gap-3 px-1 py-8 text-sm text-muted;
+  }
+
+  .lp-footer a {
+    @apply text-muted no-underline transition-colors;
+  }
+
+  .lp-footer a:hover {
+    @apply text-text;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}

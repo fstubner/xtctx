@@ -29,7 +29,8 @@ interface ToolPreferencesParams {
 }
 
 export function createListConfigsHandler(store: ConfigStore) {
-  return async (params: ListConfigsParams = {}) => {
+  return async (raw: Record<string, unknown> = {}) => {
+    const params = raw as unknown as ListConfigsParams;
     const type = params.type ?? "all";
     const format = params.format ?? "markdown";
     const configs = type === "all" ? await store.list() : await store.list(type);
@@ -51,7 +52,8 @@ export function createListConfigsHandler(store: ConfigStore) {
 }
 
 export function createGetConfigHandler(store: ConfigStore) {
-  return async (params: GetConfigParams) => {
+  return async (raw: Record<string, unknown>) => {
+    const params = raw as unknown as GetConfigParams;
     const format = params.format ?? "markdown";
     const config = await store.get(params.type, params.name);
 
@@ -74,7 +76,8 @@ export function createGetConfigHandler(store: ConfigStore) {
 }
 
 export function createToolPreferencesHandler(store: ConfigStore) {
-  return async (params: ToolPreferencesParams) => {
+  return async (raw: Record<string, unknown>) => {
+    const params = raw as unknown as ToolPreferencesParams;
     const format = params.format ?? "markdown";
     const preferences = await store.toolPreferences(params.tool);
 

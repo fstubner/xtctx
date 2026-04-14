@@ -16,6 +16,7 @@ describe("ContextRecord", () => {
     expect(isValidContextType("insight")).toBe(true);
     expect(isValidContextType("convention")).toBe(true);
     expect(isValidContextType("gotcha")).toBe(true);
+    expect(isValidContextType("faq")).toBe(true);
     expect(isValidContextType("random")).toBe(false);
   });
 });

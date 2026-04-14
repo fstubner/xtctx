@@ -23,6 +23,6 @@ api:
   security:
     token: ""
     allowedOrigins: []
-    allowLocalhostOrigins: true
+    allowLocalhostOrigins: false
     rateLimitWindowMs: 60000
     rateLimitMax: 120

@@ -1,81 +1,49 @@
 import { stat } from "node:fs/promises";
-import { basename } from "node:path";
+import { join } from "node:path";
 import Database from "better-sqlite3";
 import { glob } from "glob";
-import type { ConversationScraper, CursorChunk, ScraperState } from "../types/scraper.js";
-import { estimateTokens, ScraperStateManager } from "./base.js";
+import type { CursorChunk } from "../types/scraper.js";
+import { AbstractScraper, estimateTokens, toDate } from "./base.js";
 
-const ROLE_MAP: Record<string, CursorChunk["role"]> = {
-  user: "user",
-  human: "user",
-  assistant: "assistant",
-  ai: "assistant",
-  system: "system",
-  tool: "tool",
-};
+// Bubble type constants from Cursor's internal format.
+const BUBBLE_TYPE_USER = 1;
+const BUBBLE_TYPE_ASSISTANT = 2;
 
-const QUERY_CANDIDATES = [
-  `
-    SELECT
-      id AS rowId,
-      session_id AS sessionId,
-      role,
-      content,
-      created_at AS timestamp,
-      model,
-      composer_mode AS composerMode
-    FROM messages
-    ORDER BY created_at ASC
-  `,
-  `
-    SELECT
-      id AS rowId,
-      conversation_id AS sessionId,
-      author AS role,
-      text AS content,
-      timestamp,
-      model,
-      mode AS composerMode
-    FROM chat_messages
-    ORDER BY timestamp ASC
-  `,
-  `
-    SELECT
-      id AS rowId,
-      sessionId,
-      role,
-      content,
-      timestamp,
-      model,
-      composerMode
-    FROM cursor_messages
-    ORDER BY timestamp ASC
-  `,
-];
-
-interface RawCursorRow {
-  rowId?: number;
-  sessionId?: string;
-  role?: string;
-  content?: string;
-  timestamp?: string | number;
-  model?: string;
-  composerMode?: string;
+interface WorkspaceComposerRef {
+  composerId: string;
+  unifiedMode?: string;
+  forceMode?: string;
 }
 
-export class CursorScraper implements ConversationScraper<CursorChunk> {
+interface CursorComposerData {
+  composerId: string;
+  fullConversationHeadersOnly?: Array<{ bubbleId: string; type: number }>;
+  createdAt?: number;
+  lastUpdatedAt?: number;
+  modelConfig?: { modelName?: string };
+  unifiedMode?: string;
+  forceMode?: string;
+}
+
+interface CursorBubbleData {
+  type: number;
+  text?: string;
+  createdAt?: string | number;
+  modelInfo?: { modelName?: string };
+}
+
+export class CursorScraper extends AbstractScraper<CursorChunk> {
   readonly tool = "cursor";
-  private readonly stateManager: ScraperStateManager;
 
   constructor(
     private readonly cursorStorePath: string,
     stateDir: string,
   ) {
-    this.stateManager = new ScraperStateManager(stateDir);
+    super(stateDir);
   }
 
   async detect(): Promise<boolean> {
-    const paths = await this.resolveDatabasePaths();
+    const paths = await this.resolveWorkspaceDatabasePaths();
     return paths.length > 0;
   }
 
@@ -93,89 +61,139 @@ export class CursorScraper implements ConversationScraper<CursorChunk> {
     yield* this.readAllMessages(new Date(0));
   }
 
-  parseRaw(raw: unknown): CursorChunk {
-    const value = raw as Record<string, unknown>;
-    const timestamp = coerceDate(value.timestamp);
-    const sessionId = toNonEmptyString(value.sessionId) ?? "unknown";
-    const content = toNonEmptyString(value.content) ?? "";
-    const role = normalizeRole(toNonEmptyString(value.role));
-    const model = toNonEmptyString(value.model) ?? "unknown";
-    const composerMode = normalizeComposerMode(toNonEmptyString(value.composerMode));
-
-    return {
-      tool: "cursor",
-      sessionId,
-      timestamp,
-      role,
-      content,
-      metadata: {
-        messageIndex: toMessageIndex(value.messageIndex),
-        tokenEstimate: estimateTokens(content),
-        referencedFiles: [],
-        model,
-        composerMode,
-      },
-    };
-  }
-
-  async getLastScrapedPosition(): Promise<ScraperState> {
-    return this.stateManager.load(this.tool);
-  }
-
-  async saveScrapedPosition(state: ScraperState): Promise<void> {
-    await this.stateManager.save(this.tool, state);
-  }
-
   private async *readAllMessages(since: Date): AsyncIterable<CursorChunk> {
-    const dbPaths = await this.resolveDatabasePaths();
+    const workspacePaths = await this.resolveWorkspaceDatabasePaths();
 
-    for (const dbPath of dbPaths) {
-      let db: Database.Database | null = null;
+    for (const wsPath of workspacePaths) {
+      const composerRefs = this.readWorkspaceComposers(wsPath);
+      if (composerRefs.length === 0) {
+        continue;
+      }
 
+      const globalPath = deriveGlobalStoragePath(wsPath);
+      if (!globalPath) {
+        continue;
+      }
+
+      let globalDb: Database.Database | null = null;
       try {
-        db = new Database(dbPath, { readonly: true, fileMustExist: true });
-        const rows = this.queryRows(db);
-        const messageIndexBySession = new Map<string, number>();
-
-        for (const row of rows) {
-          const timestamp = coerceDate(row.timestamp);
-          if (timestamp <= since) {
-            continue;
-          }
-
-          const sessionId = row.sessionId ?? inferSessionId(dbPath);
-          const nextIndex = messageIndexBySession.get(sessionId) ?? 0;
-          messageIndexBySession.set(sessionId, nextIndex + 1);
-
-          yield this.parseRaw({
-            ...row,
-            sessionId,
-            timestamp,
-            messageIndex: nextIndex,
-          });
-        }
+        globalDb = new Database(globalPath, { readonly: true, fileMustExist: true });
+        yield* this.readComposerMessages(globalDb, composerRefs, since);
       } catch {
-        // Skip malformed or unsupported databases.
+        // Skip if global storage is unavailable or malformed.
       } finally {
-        db?.close();
+        globalDb?.close();
       }
     }
   }
 
-  private queryRows(db: Database.Database): RawCursorRow[] {
-    for (const sql of QUERY_CANDIDATES) {
+  private readWorkspaceComposers(wsDbPath: string): WorkspaceComposerRef[] {
+    let db: Database.Database | null = null;
+    try {
+      db = new Database(wsDbPath, { readonly: true, fileMustExist: true });
+      const row = db
+        .prepare("SELECT value FROM ItemTable WHERE key = 'composer.composerData'")
+        .get() as { value: string } | undefined;
+
+      if (!row) return [];
+
+      const data = JSON.parse(row.value) as {
+        allComposers?: WorkspaceComposerRef[];
+      };
+
+      return data.allComposers ?? [];
+    } catch {
+      return [];
+    } finally {
+      db?.close();
+    }
+  }
+
+  private *readComposerMessages(
+    globalDb: Database.Database,
+    composerRefs: WorkspaceComposerRef[],
+    since: Date,
+  ): Iterable<CursorChunk> {
+    const getComposer = globalDb.prepare(
+      "SELECT value FROM cursorDiskKV WHERE key = ?",
+    );
+    const getBubble = globalDb.prepare(
+      "SELECT value FROM cursorDiskKV WHERE key = ?",
+    );
+
+    for (const ref of composerRefs) {
+      const composerRow = getComposer.get(
+        `composerData:${ref.composerId}`,
+      ) as { value: string } | undefined;
+
+      if (!composerRow) continue;
+
+      let composer: CursorComposerData;
       try {
-        const rows = db.prepare(sql).all() as RawCursorRow[];
-        return rows;
+        composer = JSON.parse(composerRow.value) as CursorComposerData;
       } catch {
-        // Continue to next candidate query.
+        continue;
+      }
+
+      const headers = composer.fullConversationHeadersOnly ?? [];
+      if (headers.length === 0) continue;
+
+      const model =
+        composer.modelConfig?.modelName ?? ref.composerId;
+      const composerMode = normalizeComposerMode(
+        composer.unifiedMode ?? ref.unifiedMode,
+      );
+      const sessionId = ref.composerId;
+
+      let messageIndex = 0;
+      for (const header of headers) {
+        const bubbleRow = getBubble.get(
+          `bubbleId:${ref.composerId}:${header.bubbleId}`,
+        ) as { value: string } | undefined;
+
+        if (!bubbleRow) continue;
+
+        let bubble: CursorBubbleData;
+        try {
+          bubble = JSON.parse(bubbleRow.value) as CursorBubbleData;
+        } catch {
+          continue;
+        }
+
+        const timestamp = toDate(bubble.createdAt);
+        if (timestamp <= since) {
+          messageIndex++;
+          continue;
+        }
+
+        const content = toNonEmptyString(bubble.text) ?? "";
+        if (!content) {
+          messageIndex++;
+          continue;
+        }
+
+        const role = normalizeRole(bubble.type);
+
+        yield {
+          tool: "cursor",
+          sessionId,
+          timestamp,
+          role,
+          content,
+          metadata: {
+            messageIndex,
+            tokenEstimate: estimateTokens(content),
+            referencedFiles: [],
+            model: bubble.modelInfo?.modelName ?? model,
+            composerMode,
+          },
+        };
+        messageIndex++;
       }
     }
-
-    return [];
   }
 
-  private async resolveDatabasePaths(): Promise<string[]> {
+  private async resolveWorkspaceDatabasePaths(): Promise<string[]> {
     try {
       const target = await stat(this.cursorStorePath);
       if (target.isFile()) {
@@ -204,21 +222,45 @@ export class CursorScraper implements ConversationScraper<CursorChunk> {
   }
 }
 
-function normalizeRole(value?: string): CursorChunk["role"] {
-  if (!value) {
+/**
+ * Derive the Cursor global storage path from a workspace database path.
+ *
+ * Workspace path structure:
+ *   .../Cursor/User/workspaceStorage/<hash>/state.vscdb
+ * Global storage:
+ *   .../Cursor/User/globalStorage/state.vscdb
+ */
+function deriveGlobalStoragePath(workspaceDbPath: string): string | null {
+  const normalized = workspaceDbPath.replace(/\\/g, "/");
+  const wsIdx = normalized.indexOf("/workspaceStorage/");
+  if (wsIdx === -1) return null;
+
+  const userDir = normalized.slice(0, wsIdx);
+  return join(userDir, "globalStorage", "state.vscdb");
+}
+
+function normalizeRole(value?: number | string): CursorChunk["role"] {
+  // Numeric type from bubble data: 1 = user, 2 = assistant.
+  if (typeof value === "number") {
+    if (value === BUBBLE_TYPE_USER) return "user";
+    if (value === BUBBLE_TYPE_ASSISTANT) return "assistant";
     return "system";
   }
 
-  return ROLE_MAP[value.toLowerCase()] ?? "system";
+  // String role from legacy format.
+  const map: Record<string, CursorChunk["role"]> = {
+    user: "user",
+    human: "user",
+    assistant: "assistant",
+    ai: "assistant",
+    system: "system",
+    tool: "tool",
+  };
+  return map[(value ?? "").toLowerCase()] ?? "system";
 }
 
 function normalizeComposerMode(value?: string): CursorChunk["metadata"]["composerMode"] {
   return value === "agent" ? "agent" : "normal";
-}
-
-function inferSessionId(path: string): string {
-  const file = basename(path);
-  return file.replace(/\.[^.]+$/, "") || "unknown";
 }
 
 function toNonEmptyString(value: unknown): string | undefined {
@@ -230,37 +272,3 @@ function toNonEmptyString(value: unknown): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
-function toMessageIndex(value: unknown): number {
-  const index = Number(value);
-  if (Number.isFinite(index) && index >= 0) {
-    return Math.floor(index);
-  }
-
-  return 0;
-}
-
-function coerceDate(value: unknown): Date {
-  if (value instanceof Date) {
-    return value;
-  }
-
-  if (typeof value === "number" && Number.isFinite(value)) {
-    const millis = value > 10_000_000_000 ? value : value * 1000;
-    return new Date(millis);
-  }
-
-  if (typeof value === "string" && value.length > 0) {
-    const numeric = Number(value);
-    if (Number.isFinite(numeric) && value.trim() !== "") {
-      const millis = numeric > 10_000_000_000 ? numeric : numeric * 1000;
-      return new Date(millis);
-    }
-
-    const parsed = new Date(value);
-    if (!Number.isNaN(parsed.getTime())) {
-      return parsed;
-    }
-  }
-
-  return new Date(0);
-}

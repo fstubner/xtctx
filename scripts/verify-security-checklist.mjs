@@ -20,4 +20,17 @@ for (const heading of requiredHeadings) {
   }
 }
 
-console.log(`Security checklist present and valid: ${checklistPath}`);
+const unchecked = [...content.matchAll(/^- \[ \] (.+)$/gm)].map((match) => match[1]);
+if (unchecked.length > 0) {
+  const summary = unchecked.map((item) => `- ${item}`).join("\n");
+  throw new Error(
+    `Security checklist has incomplete controls in ${checklistPath}:\n${summary}`,
+  );
+}
+
+const checked = [...content.matchAll(/^- \[[xX]\] (.+)$/gm)];
+if (checked.length === 0) {
+  throw new Error(`No completed checklist controls found in ${checklistPath}.`);
+}
+
+console.log(`Security checklist present and complete: ${checklistPath}`);

@@ -1,34 +1,10 @@
-import { stringify as stringifyYaml } from "yaml";
-import type { SharedToolConfig } from "../loader.js";
-
-export function renderCursorRules(config: SharedToolConfig): string {
-  const lines: string[] = [
-    "xtctx shared configuration",
-    "",
-    "Skills:",
-    ...formatList(config.shared.skills),
-    "",
-    "Commands:",
-    ...formatList(config.shared.commands),
-    "",
-    "Agents:",
-    ...formatList(config.shared.agents),
-  ];
-
-  const preferences = config.toolPreferences.cursor;
-  if (preferences && Object.keys(preferences).length > 0) {
-    lines.push("");
-    lines.push("Cursor Preferences:");
-    lines.push(stringifyYaml(preferences).trimEnd());
-  }
-
-  return lines.join("\n").trimEnd();
-}
-
-function formatList(values: string[]): string[] {
-  if (values.length === 0) {
-    return ["- none"];
-  }
-
-  return values.map((value) => `- ${value}`);
-}
+/**
+ * @deprecated Dead code — no call-site in this repository.
+ *
+ * This module was originally intended to render Cursor-specific config
+ * blocks from `SharedToolConfig`.  The same rendering is now handled entirely
+ * by `src/config/sync.ts` (the `renderToolContent` function), making these
+ * per-tool render helpers redundant.
+ *
+ * TODO(M1): Delete this file once confirmed safe to do so.
+ */

@@ -2,13 +2,8 @@ import { stat, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
-import type {
-  ChunkMetadata,
-  ClaudeCodeChunk,
-  ConversationScraper,
-  ScraperState,
-} from "../types/scraper.js";
-import { estimateTokens, ScraperStateManager } from "./base.js";
+import type { ChunkMetadata, ClaudeCodeChunk } from "../types/scraper.js";
+import { AbstractScraper, estimateTokens } from "./base.js";
 
 const ROLE_MAP: Record<string, ClaudeCodeChunk["role"]> = {
   human: "user",
@@ -18,15 +13,14 @@ const ROLE_MAP: Record<string, ClaudeCodeChunk["role"]> = {
   tool_result: "tool",
 };
 
-export class ClaudeCodeScraper implements ConversationScraper<ClaudeCodeChunk> {
+export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
   readonly tool = "claude-code";
-  private readonly stateManager: ScraperStateManager;
 
   constructor(
     private readonly claudeProjectsDir: string,
     stateDir: string,
   ) {
-    this.stateManager = new ScraperStateManager(stateDir);
+    super(stateDir);
   }
 
   async detect(): Promise<boolean> {
@@ -73,14 +67,6 @@ export class ClaudeCodeScraper implements ConversationScraper<ClaudeCodeChunk> {
         sessionType: "interactive",
       } as ChunkMetadata & ClaudeCodeChunk["metadata"],
     };
-  }
-
-  async getLastScrapedPosition(): Promise<ScraperState> {
-    return this.stateManager.load(this.tool);
-  }
-
-  async saveScrapedPosition(state: ScraperState): Promise<void> {
-    await this.stateManager.save(this.tool, state);
   }
 
   private async *readAllSessions(since: Date): AsyncIterable<ClaudeCodeChunk> {

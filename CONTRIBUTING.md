@@ -8,9 +8,11 @@ Thanks for contributing.
 2. Install dependencies:
    - `npm ci`
    - `npm --prefix web ci`
+   - `npm --prefix landing ci`
 3. Build:
    - `npm run build`
    - `npm --prefix web run build`
+   - `npm --prefix landing run build`
 
 ## Local Validation
 
@@ -22,6 +24,7 @@ Before opening a PR, run:
 - `npm run test:integration`
 - `npm run build`
 - `npm --prefix web run build`
+- `npm --prefix landing run build`
 - `npm run smoke:cli`
 
 Or run everything with:
@@ -33,6 +36,7 @@ Or run everything with:
 - `src/`: core runtime, CLI, MCP, scrapers, API
 - `tests/`: unit + integration tests
 - `web/`: Vue web UI
+- `landing/`: Vue public landing site (GitHub Pages)
 - `.xtctx/`: project-local configs, skills, and knowledge conventions
 - `docs/plans/`: design + implementation docs
 
@@ -55,6 +59,7 @@ Or run everything with:
 - Prefer explicit error handling for runtime services.
 - Preserve CLI backward compatibility unless a breaking change is explicitly documented.
 - Keep MCP tool responses stable and test-covered.
+- Keep UI changes accessible (focus-visible, readable contrast, clear empty/error states).
 
 ## Reporting Bugs
 

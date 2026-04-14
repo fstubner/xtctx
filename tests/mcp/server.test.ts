@@ -10,9 +10,12 @@ describe("MCP Server", () => {
     expect(toolNames).toContain("xtctx_recent_sessions");
     expect(toolNames).toContain("xtctx_session_detail");
     expect(toolNames).toContain("xtctx_project_knowledge");
+    expect(toolNames).toContain("xtctx_continuity_status");
+    expect(toolNames).toContain("xtctx_effective_policy");
     expect(toolNames).toContain("xtctx_save_decision");
     expect(toolNames).toContain("xtctx_save_error_solution");
     expect(toolNames).toContain("xtctx_save_insight");
+    expect(toolNames).toContain("xtctx_save_faq");
     expect(toolNames).toContain("xtctx_list_configs");
     expect(toolNames).toContain("xtctx_get_config");
     expect(toolNames).toContain("xtctx_tool_preferences");
