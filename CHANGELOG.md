@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.4.0](https://github.com/fstubner/xtctx/compare/xtctx-v0.3.3...xtctx-v0.4.0) (2026-04-14)
+
+
+### Features
+
+* full skill/MCP/hook handoff across all five coding tools ([#26](https://github.com/fstubner/xtctx/issues/26)) ([1026fec](https://github.com/fstubner/xtctx/commit/1026fec1c81e546ebacfe3e17c70ee32cb4977bf))
+
 ## [0.3.3](https://github.com/fstubner/xtctx/compare/xtctx-v0.3.2...xtctx-v0.3.3) (2026-02-26)
 
 
