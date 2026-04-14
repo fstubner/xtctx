@@ -101,7 +101,10 @@ async function syncCursorHooks(projectRoot: string): Promise<HookSyncResult> {
     const content = [
       "---",
       "description: xtctx session context injection",
-      "globs: *",
+      // Quote the glob so YAML parses it as a scalar string; an unquoted `*`
+      // is interpreted as an alias reference and makes the frontmatter invalid,
+      // which causes Cursor to ignore the rule file (C5).
+      'globs: "**/*"',
       "alwaysApply: true",
       "---",
       "",

@@ -293,8 +293,13 @@ function defaultCopilotHistoryPath(): string {
     return join(appData, "Code", "User", "workspaceStorage");
   }
 
-  // macOS / Linux fallback
   const home = process.env.USERPROFILE ?? process.env.HOME ?? "";
+  if (process.platform === "linux") {
+    // Linux: VS Code workspaceStorage lives under ~/.config (C5).
+    return join(home, ".config", "Code", "User", "workspaceStorage");
+  }
+
+  // macOS fallback.
   return join(home, "Library", "Application Support", "Code", "User", "workspaceStorage");
 }
 

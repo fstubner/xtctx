@@ -117,8 +117,16 @@ export function createSourcesRouter(deps: SourcesRouteDependencies): Router {
       upsertRuntimeScraper(deps.ingestion.scrapers, tool, patch.enabled, runtimePath);
       await upsertPersistedScraperConfig(deps.projectRoot, tool, patch.enabled, patch.customStorePath);
 
-      if (deps.onScraperConfigChanged && typeof patch.enabled === "boolean") {
-        deps.onScraperConfigChanged(tool, patch.enabled);
+      // Fire the runtime callback whenever any patch applied — including
+      // path-only updates (C5). The callback re-registers the scraper using
+      // the latest config, which picks up the new customStorePath; without
+      // this, the live scraper keeps reading the old path until restart.
+      if (deps.onScraperConfigChanged) {
+        const effectiveEnabled =
+          typeof patch.enabled === "boolean"
+            ? patch.enabled
+            : deps.ingestion.scrapers.find((s) => normalizeTool(s.tool) === tool)?.enabled ?? true;
+        deps.onScraperConfigChanged(tool, effectiveEnabled);
       }
 
       const scraperStatuses = await buildScraperStatuses(deps.ingestion.scrapers);
