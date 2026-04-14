@@ -36,7 +36,15 @@ import {
 import { errorMessage } from "../utils/errors.js";
 
 const require = createRequire(import.meta.url);
-const { version: SERVER_VERSION } = require("../../package.json") as { version: string };
+// Resolve repo-root package.json from both source (src/mcp/, ../../) and compiled (dist/src/mcp/, ../../../) locations.
+const loadPackageJson = (): { version: string } => {
+  try {
+    return require("../../package.json") as { version: string };
+  } catch {
+    return require("../../../package.json") as { version: string };
+  }
+};
+const { version: SERVER_VERSION } = loadPackageJson();
 
 type ToolParams = Record<string, unknown>;
 type ToolHandler = (params: ToolParams) => Promise<unknown>;

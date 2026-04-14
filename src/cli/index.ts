@@ -9,7 +9,15 @@ import { runServe } from "./serve.js";
 import { runSync } from "./sync.js";
 
 const require = createRequire(import.meta.url);
-const { version: CLI_VERSION } = require("../../package.json") as { version: string };
+// Resolve repo-root package.json from both source (src/cli/, ../../) and compiled (dist/src/cli/, ../../../) locations.
+const loadPackageJson = (): { version: string } => {
+  try {
+    return require("../../package.json") as { version: string };
+  } catch {
+    return require("../../../package.json") as { version: string };
+  }
+};
+const { version: CLI_VERSION } = loadPackageJson();
 
 export async function main(argv = process.argv): Promise<void> {
   const program = new Command();
