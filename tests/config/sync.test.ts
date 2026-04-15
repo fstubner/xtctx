@@ -125,4 +125,39 @@ describe("syncToolConfigs", () => {
     const beginMarkerCount = (claudeMd.match(/xtctx:begin/g) ?? []).length;
     expect(beginMarkerCount).toBe(1);
   });
+
+  it("does not duplicate xtctx when it is already registered in mcp-servers inventory", async () => {
+    // Regression: an xtctx.md file in the mcp-servers inventory previously
+    // produced two "- xtctx" lines in the rendered MCP servers section —
+    // once from the inventory and once from the hardcoded footnote.
+    await writeFile(
+      join(projectDir, ".xtctx", "tool-config", "mcp-servers", "xtctx.md"),
+      "",
+      "utf-8",
+    );
+
+    await syncToolConfigs(projectDir);
+
+    const claudeMd = await readFile(join(projectDir, "CLAUDE.md"), "utf-8");
+    const mcpSection = claudeMd
+      .split(/\n## /)
+      .find((section) => section.startsWith("MCP servers")) ?? "";
+
+    // Count distinct "- xtctx" (with or without annotation) occurrences
+    const xtctxLineCount = (mcpSection.match(/^- xtctx(\s|$|\b)/gm) ?? []).length;
+    expect(xtctxLineCount).toBe(1);
+
+    // The annotated footnote MUST NOT appear when xtctx is in the inventory
+    expect(mcpSection).not.toContain("- xtctx (required for recall/writeback continuity)");
+    // Plain `- xtctx` SHOULD appear from the inventory
+    expect(mcpSection).toMatch(/^- xtctx$/m);
+  });
+
+  it("appends xtctx footnote when not in mcp-servers inventory", async () => {
+    // Default case: no xtctx.md in inventory — the footnote line must be added.
+    await syncToolConfigs(projectDir);
+
+    const claudeMd = await readFile(join(projectDir, "CLAUDE.md"), "utf-8");
+    expect(claudeMd).toContain("- xtctx (required for recall/writeback continuity)");
+  });
 });

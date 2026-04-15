@@ -12,3 +12,7 @@ coverage/
 .artifacts/
 firebase-debug.log
 .playwright-mcp/
+
+# Local scratch dirs for smoke tests, reproduction harnesses, etc.
+tmp/
+.xtctx-tmp/

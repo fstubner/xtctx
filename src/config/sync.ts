@@ -562,8 +562,14 @@ function renderToolContent(
   }
 
   if (toolPolicy.categories.mcp_servers) {
-    lines.push("", "## MCP servers", ...formatMarkdownList(inventory.mcp_servers));
-    lines.push("- xtctx (required for recall/writeback continuity)");
+    // xtctx is always required for continuity. If the user has already
+    // registered it via `.xtctx/tool-config/mcp-servers/xtctx.md`, don't
+    // duplicate it with the hardcoded footnote entry.
+    const mcpItems = [...inventory.mcp_servers];
+    if (!mcpItems.includes("xtctx")) {
+      mcpItems.push("xtctx (required for recall/writeback continuity)");
+    }
+    lines.push("", "## MCP servers", ...formatMarkdownList(mcpItems));
 
     // For tools without native MCP config, embed connection details
     if (!hasNativeMcpSupport(tool) && inventory.mcp_server_definitions.length > 0) {
