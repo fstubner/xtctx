@@ -104,7 +104,32 @@ class LazyEmbeddingService extends EmbeddingService {
 
   private async ensureInitialized(): Promise<void> {
     if (!this.initPromise) {
-      this.initPromise = super.initialize();
+      // First-time load may fetch the ~28 MB transformer model from HuggingFace.
+      // Without any signal, `xtctx ingest` looks hung during that download —
+      // surface start, per-file completion, and ready events on stderr so the
+      // user sees progress.
+      const startedAt = Date.now();
+      let loggedStart = false;
+      const loggedFiles = new Set<string>();
+
+      this.initPromise = super.initialize((event) => {
+        if (!loggedStart) {
+          loggedStart = true;
+          console.error(
+            "[xtctx] Loading embedding model (first run may download ~28 MB)...",
+          );
+        }
+
+        if (event.status === "done" && event.file && !loggedFiles.has(event.file)) {
+          loggedFiles.add(event.file);
+          console.error(`[xtctx] Embedding model: fetched ${event.file}`);
+        }
+
+        if (event.status === "ready") {
+          const elapsedSec = ((Date.now() - startedAt) / 1000).toFixed(1);
+          console.error(`[xtctx] Embedding model ready (${elapsedSec}s)`);
+        }
+      });
     }
     await this.initPromise;
   }
