@@ -1,0 +1,20 @@
+[
+  {
+    "tool": "codex",
+    "sessionId": "snap-codex-uuid",
+    "role": "user",
+    "content": "snap q",
+    "timestamp": "2026-02-24T10:00:00.000Z",
+    "messageIndex": 0,
+    "tokenEstimate": 2
+  },
+  {
+    "tool": "codex",
+    "sessionId": "snap-codex-uuid",
+    "role": "assistant",
+    "content": "snap a",
+    "timestamp": "2026-02-24T10:00:05.000Z",
+    "messageIndex": 1,
+    "tokenEstimate": 2
+  }
+]

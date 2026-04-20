@@ -16,9 +16,14 @@
     "build": "tsc",
     "build:bundle-web": "npm run web:build && npm run web:copy-dist",
     "dev": "tsx watch src/cli/index.ts",
-    "test": "vitest run --exclude=tests/smoke/**",
+    "test": "vitest run --exclude=tests/smoke/** --exclude=tests/eval/** --exclude=tests/drift/** --exclude=tests/bench/**",
     "test:security": "vitest run tests/api/security.test.ts",
     "test:integration": "vitest run tests/integration",
+    "test:eval": "vitest run tests/eval --testTimeout=300000",
+    "test:drift": "vitest run tests/drift",
+    "eval:baseline": "node scripts/run-with-env.mjs XTCTX_UPDATE_EVAL_BASELINE=1 -- vitest run tests/eval --testTimeout=300000",
+    "drift:update-snapshots": "node scripts/run-with-env.mjs XTCTX_UPDATE_SNAPSHOTS=1 -- vitest run tests/drift",
+    "bench:ingest": "node scripts/run-with-env.mjs BENCH=1 -- vitest run tests/bench --testTimeout=600000",
     "test:watch": "vitest",
     "security:checklist": "node scripts/verify-security-checklist.mjs",
     "lint": "eslint src/ tests/",
@@ -34,7 +39,7 @@
     "prepack": "npm run build && npm run build:bundle-web",
     "smoke:cli": "node dist/src/cli/index.js --help",
     "test:smoke": "vitest run tests/smoke --testTimeout=180000",
-    "verify:release": "npm test && npm run test:security && npm run security:checklist && npm run build && npm run build:bundle-web && npm run landing:build && npm run smoke:cli && npm run test:smoke"
+    "verify:release": "npm test && npm run test:security && npm run security:checklist && npm run test:eval && npm run test:drift && npm run build && npm run build:bundle-web && npm run landing:build && npm run smoke:cli && npm run test:smoke"
   },
   "dependencies": {
     "@lancedb/lancedb": "^0.13.0",

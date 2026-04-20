@@ -1,0 +1,20 @@
+[
+  {
+    "tool": "cursor",
+    "sessionId": "snap-composer",
+    "role": "user",
+    "content": "cursor snap q",
+    "timestamp": "2026-02-24T10:00:00.000Z",
+    "messageIndex": 0,
+    "tokenEstimate": 4
+  },
+  {
+    "tool": "cursor",
+    "sessionId": "snap-composer",
+    "role": "assistant",
+    "content": "cursor snap a",
+    "timestamp": "2026-02-24T10:00:05.000Z",
+    "messageIndex": 1,
+    "tokenEstimate": 4
+  }
+]

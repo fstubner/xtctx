@@ -1,0 +1,38 @@
+[
+  {
+    "tool": "copilot",
+    "sessionId": "snap-copilot-session",
+    "role": "user",
+    "content": "q1",
+    "timestamp": "2026-02-24T10:00:00.000Z",
+    "messageIndex": 0,
+    "tokenEstimate": 1
+  },
+  {
+    "tool": "copilot",
+    "sessionId": "snap-copilot-session",
+    "role": "assistant",
+    "content": "a1",
+    "timestamp": "2026-02-24T10:00:00.000Z",
+    "messageIndex": 1,
+    "tokenEstimate": 1
+  },
+  {
+    "tool": "copilot",
+    "sessionId": "snap-copilot-session",
+    "role": "user",
+    "content": "q2",
+    "timestamp": "2026-02-24T10:00:00.000Z",
+    "messageIndex": 2,
+    "tokenEstimate": 1
+  },
+  {
+    "tool": "copilot",
+    "sessionId": "snap-copilot-session",
+    "role": "assistant",
+    "content": "a2",
+    "timestamp": "2026-02-24T10:00:00.000Z",
+    "messageIndex": 3,
+    "tokenEstimate": 1
+  }
+]
