@@ -16,7 +16,7 @@
     "build": "tsc",
     "build:bundle-web": "npm run web:build && npm run web:copy-dist",
     "dev": "tsx watch src/cli/index.ts",
-    "test": "vitest run",
+    "test": "vitest run --exclude=tests/smoke/**",
     "test:security": "vitest run tests/api/security.test.ts",
     "test:integration": "vitest run tests/integration",
     "test:watch": "vitest",
@@ -33,7 +33,8 @@
     "landing:preview": "npm --prefix landing run preview",
     "prepack": "npm run build && npm run build:bundle-web",
     "smoke:cli": "node dist/src/cli/index.js --help",
-    "verify:release": "npm test && npm run test:security && npm run security:checklist && npm run build && npm run build:bundle-web && npm run landing:build && npm run smoke:cli"
+    "test:smoke": "vitest run tests/smoke --testTimeout=180000",
+    "verify:release": "npm test && npm run test:security && npm run security:checklist && npm run build && npm run build:bundle-web && npm run landing:build && npm run smoke:cli && npm run test:smoke"
   },
   "dependencies": {
     "@lancedb/lancedb": "^0.13.0",
