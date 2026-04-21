@@ -129,7 +129,16 @@ export class IndexedSessionService implements SessionService {
 
   private async loadRecords(): Promise<SessionIndexRecord[]> {
     try {
-      const rows = await this.store.queryRows(this.tableName, { limit: SESSION_SCAN_LIMIT });
+      // Pre-filter compacted-summary rows out of the session scan at the
+      // store level. IndexedSessionService only returns conversational turns
+      // (user|assistant|system|tool); compacted rows (role="summary",
+      // layer=1) are a different surface and would otherwise eat into the
+      // SESSION_SCAN_LIMIT budget, potentially pushing real conversation
+      // rows out of the result set.
+      const rows = await this.store.queryRows(this.tableName, {
+        limit: SESSION_SCAN_LIMIT,
+        where: `metadata NOT LIKE '%"role":"summary"%'`,
+      });
       const records: SessionIndexRecord[] = [];
 
       for (const row of rows) {

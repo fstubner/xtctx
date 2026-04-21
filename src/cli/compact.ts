@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { CompactionIndexer } from "../compaction/indexer.js";
 import { CompactionPipeline } from "../compaction/pipeline.js";
 import { FileCompactionSink } from "../compaction/sink.js";
 import type { CompactionConfig } from "../types/compaction.js";
@@ -55,6 +56,18 @@ export async function runCompact(options: CompactOptions = {}): Promise<void> {
   console.log(
     `Compaction complete: ${sessions.length} session(s) processed (strategy: ${config.strategy})`,
   );
+
+  // M2: surface compacted summaries in hybrid search. Running `xtctx compact`
+  // now does two things — persists YAMLs (unchanged contract) AND indexes
+  // the summaries alongside raw chunks so that "why did we..." / "what did
+  // we decide..." queries hit the distilled answer, not just the verbose
+  // source messages. `metadata.layer = 1` flags them; filters can exclude.
+  if (sessions.length > 0) {
+    const indexed = await new CompactionIndexer(runtime.embeddings, runtime.store).indexSessions(
+      sessions,
+    );
+    console.log(`Indexed ${indexed} compacted session(s) into hybrid search (layer 1).`);
+  }
 
   for (const session of sessions) {
     console.log(
