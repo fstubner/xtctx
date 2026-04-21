@@ -1,0 +1,150 @@
+name: drift-canary
+
+# Runs the real AI CLI tools against a scripted prompt, then runs xtctx's
+# scrapers against the actual storage those tools wrote. Catches upstream drift
+# that synthetic fixtures cannot.
+#
+# This is intentionally NOT part of ci.yml — it has real-API dependencies,
+# burns credits, and should not gate PRs. It runs nightly + on demand.
+
+on:
+  schedule:
+    - cron: "0 3 * * *" # 03:00 UTC nightly
+  workflow_dispatch:
+    inputs:
+      tool:
+        description: "Which tool to run (or 'all')"
+        required: false
+        default: "all"
+        type: choice
+        options:
+          - all
+          - claude-code
+          - codex
+          - gemini
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        tool: [claude-code, codex, gemini]
+    steps:
+      - name: Skip tool when workflow_dispatch selects a single one
+        if: >
+          github.event_name == 'workflow_dispatch' &&
+          github.event.inputs.tool != 'all' &&
+          github.event.inputs.tool != matrix.tool
+        run: echo "Skipping ${{ matrix.tool }} (manually scoped to ${{ github.event.inputs.tool }})" && exit 0
+
+      - name: Checkout
+        if: >
+          github.event_name != 'workflow_dispatch' ||
+          github.event.inputs.tool == 'all' ||
+          github.event.inputs.tool == matrix.tool
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Setup Node
+        if: >
+          github.event_name != 'workflow_dispatch' ||
+          github.event.inputs.tool == 'all' ||
+          github.event.inputs.tool == matrix.tool
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install xtctx deps and build
+        if: >
+          github.event_name != 'workflow_dispatch' ||
+          github.event.inputs.tool == 'all' ||
+          github.event.inputs.tool == matrix.tool
+        run: |
+          npm ci
+          npm run build
+
+      - name: Install claude-code CLI
+        if: matrix.tool == 'claude-code'
+        run: npm i -g @anthropic-ai/claude-code
+
+      - name: Install codex CLI
+        if: matrix.tool == 'codex'
+        run: npm i -g @openai/codex
+
+      - name: Install gemini CLI
+        if: matrix.tool == 'gemini'
+        run: npm i -g @google/gemini-cli
+
+      - name: Run canary (${{ matrix.tool }})
+        id: canary
+        if: >
+          github.event_name != 'workflow_dispatch' ||
+          github.event.inputs.tool == 'all' ||
+          github.event.inputs.tool == matrix.tool
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          set +e
+          node scripts/drift-canary.mjs --tool ${{ matrix.tool }} 2>canary-stderr.log | tee canary-stdout.log
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Build issue body on failure
+        if: steps.canary.outputs.exit_code != '0' && github.event_name == 'schedule'
+        run: |
+          {
+            echo "The nightly drift canary for \`${{ matrix.tool }}\` failed."
+            echo ""
+            echo "This usually means the tool's on-disk storage format has changed upstream and xtctx's scraper no longer handles it. Check recent releases of the tool and compare against \`src/scrapers/${{ matrix.tool }}.ts\`."
+            echo ""
+            echo "**Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo ""
+            echo "### stdout"
+            echo '```'
+            cat canary-stdout.log || true
+            echo '```'
+            echo ""
+            echo "### stderr"
+            echo '```'
+            cat canary-stderr.log || true
+            echo '```'
+          } > issue-body.md
+
+      - name: Check for an existing open drift issue
+        id: existing
+        if: steps.canary.outputs.exit_code != '0' && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          title="drift: ${{ matrix.tool }} scraper may be broken"
+          existing=$(gh issue list --state open --search "\"$title\" in:title" --json number,title | jq -r ".[] | select(.title == \"$title\") | .number" | head -n1)
+          echo "number=${existing}" >> "$GITHUB_OUTPUT"
+
+      - name: Open drift issue (if none already open)
+        if: steps.canary.outputs.exit_code != '0' && github.event_name == 'schedule' && steps.existing.outputs.number == ''
+        uses: peter-evans/create-issue-from-file@e8ef132d6df98ed982188e460ebb3b5d4ef3a9cd # v5
+        with:
+          title: "drift: ${{ matrix.tool }} scraper may be broken"
+          content-filepath: issue-body.md
+          labels: |
+            drift
+            canary
+
+      - name: Comment on existing drift issue
+        if: steps.canary.outputs.exit_code != '0' && github.event_name == 'schedule' && steps.existing.outputs.number != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh issue comment ${{ steps.existing.outputs.number }} --body-file issue-body.md
+
+      - name: Fail job on canary failure
+        if: steps.canary.outputs.exit_code != '0'
+        run: |
+          echo "canary exited ${{ steps.canary.outputs.exit_code }}"
+          exit 1
