@@ -195,6 +195,26 @@ export function resolveToolFromPolicy(
   return resolveToolPolicy(policy.defaults, undefined, undefined);
 }
 
+// Pre-migration shared.yaml shape (from before policy.ts existed) carried
+// `shared` and `toolPreferences` at the top level. New shape uses
+// `defaults`/`tools`/`policy`. When a repo still has the legacy file,
+// strict key rejection would throw and break `xtctx sync` instead of
+// letting the user upgrade. Detect and skip legacy content with a warning
+// rather than attempt automatic migration (semantics differ enough that a
+// wrong translation would corrupt the effective policy silently).
+const LEGACY_ROOT_KEYS = new Set(["shared", "toolPreferences"]);
+
+function isLegacyShape(source: Record<string, unknown>): boolean {
+  const keys = Object.keys(source);
+  if (keys.length === 0) return false;
+  const hasAnyLegacy = keys.some((key) => LEGACY_ROOT_KEYS.has(key));
+  const hasAnyNew = keys.some((key) => ROOT_KEYS.has(key));
+  // Pure legacy, or mixed-but-no-new: treat as legacy so the warning fires.
+  // Mixed with any new-shape key: new-shape parsing handles it; legacy keys
+  // will hit the unknown-key path below and we strip them from the warning.
+  return hasAnyLegacy && !hasAnyNew;
+}
+
 export function parseContinuityPolicySource(
   source: unknown,
   sourceLabel = "policy",
@@ -207,11 +227,39 @@ export function parseContinuityPolicySource(
     throw new ContinuityPolicyValidationError([`${sourceLabel}: expected object`]);
   }
 
-  rejectUnknownKeys(source, ROOT_KEYS, sourceLabel, errors);
+  if (isLegacyShape(source)) {
+    console.warn(
+      `[policy] ${sourceLabel}: detected pre-migration shared.yaml shape ` +
+      `(top-level 'shared' / 'toolPreferences'). Treating as unconfigured. ` +
+      `Regenerate via \`xtctx init --force\` to upgrade to the current policy schema.`,
+    );
+    return createEmptyLayer();
+  }
 
-  const defaults = parseDefaults(source.defaults, `${sourceLabel}.defaults`, errors);
-  const tools = parseTools(source.tools, `${sourceLabel}.tools`, errors);
-  const policy = parsePolicy(source.policy, `${sourceLabel}.policy`, errors);
+  // Drop known-legacy keys from a mixed-shape file so they don't trip
+  // rejectUnknownKeys. isLegacyShape's negative branch guarantees at least
+  // one new-shape key is present.
+  const filtered: Record<string, unknown> = {};
+  const droppedLegacy: string[] = [];
+  for (const [key, value] of Object.entries(source)) {
+    if (LEGACY_ROOT_KEYS.has(key)) {
+      droppedLegacy.push(key);
+    } else {
+      filtered[key] = value;
+    }
+  }
+  if (droppedLegacy.length > 0) {
+    console.warn(
+      `[policy] ${sourceLabel}: ignoring legacy keys [${droppedLegacy.join(", ")}] ` +
+      `while loading current-schema keys. Regenerate via \`xtctx init --force\` to clean up.`,
+    );
+  }
+
+  rejectUnknownKeys(filtered, ROOT_KEYS, sourceLabel, errors);
+
+  const defaults = parseDefaults(filtered.defaults, `${sourceLabel}.defaults`, errors);
+  const tools = parseTools(filtered.tools, `${sourceLabel}.tools`, errors);
+  const policy = parsePolicy(filtered.policy, `${sourceLabel}.policy`, errors);
 
   if (errors.length > 0) {
     throw new ContinuityPolicyValidationError(errors);
