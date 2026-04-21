@@ -1,4 +1,3 @@
-import { createRequire } from "node:module";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -34,17 +33,9 @@ import {
   type SimilarityLookup,
 } from "./tools/write.js";
 import { errorMessage } from "../utils/errors.js";
+import { readXtctxPackage } from "../utils/package-info.js";
 
-const require = createRequire(import.meta.url);
-// Resolve repo-root package.json from both source (src/mcp/, ../../) and compiled (dist/src/mcp/, ../../../) locations.
-const loadPackageJson = (): { version: string } => {
-  try {
-    return require("../../package.json") as { version: string };
-  } catch {
-    return require("../../../package.json") as { version: string };
-  }
-};
-const { version: SERVER_VERSION } = loadPackageJson();
+const { version: SERVER_VERSION } = readXtctxPackage(import.meta.url);
 
 type ToolParams = Record<string, unknown>;
 type ToolHandler = (params: ToolParams) => Promise<unknown>;

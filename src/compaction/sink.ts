@@ -8,16 +8,15 @@ import type { CompactionSink } from "./pipeline.js";
  * Persists compacted sessions as YAML files in .xtctx/.store/compactions/.
  * Each session gets its own file keyed by sessionId.
  *
- * **Status: future feature (M2)**
+ * **Status: deferred (tracked as M2).**
  *
  * The compaction pipeline runs correctly and writes YAML output here, but
  * nothing in the current search path reads these files.  They are produced for
  * future use as a compressed conversation layer that can be injected into
- * context windows instead of raw messages.
- *
- * TODO(M2): Surface compacted sessions in the hybrid-search path once the
- *           compaction-to-embedding pipeline is complete.  The `loadSession`
- *           method below is the intended read-side API.
+ * context windows instead of raw messages.  Surfacing compacted sessions in
+ * hybrid search is a distinct feature requiring an embedding strategy for
+ * summaries (not just raw messages) and ranking policy against live context.
+ * `loadSession` below is the intended read-side API when that work lands.
  */
 export class FileCompactionSink implements CompactionSink {
   constructor(private readonly compactionDir: string) {}

@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import { createRequire } from "node:module";
 import { Command } from "commander";
 import { runCompact } from "./compact.js";
 import { runContext } from "./context.js";
@@ -7,17 +6,9 @@ import { runIngest } from "./ingest.js";
 import { runInit } from "./init.js";
 import { runServe } from "./serve.js";
 import { runSync } from "./sync.js";
+import { readXtctxPackage } from "../utils/package-info.js";
 
-const require = createRequire(import.meta.url);
-// Resolve repo-root package.json from both source (src/cli/, ../../) and compiled (dist/src/cli/, ../../../) locations.
-const loadPackageJson = (): { version: string } => {
-  try {
-    return require("../../package.json") as { version: string };
-  } catch {
-    return require("../../../package.json") as { version: string };
-  }
-};
-const { version: CLI_VERSION } = loadPackageJson();
+const { version: CLI_VERSION } = readXtctxPackage(import.meta.url);
 
 export async function main(argv = process.argv): Promise<void> {
   const program = new Command();
