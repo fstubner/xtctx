@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.4.2](https://github.com/fstubner/xtctx/compare/xtctx-v0.4.1...xtctx-v0.4.2) (2026-04-21)
+
+
+### Miscellaneous
+
+* sweeping cleanup — cross-tool smoke suite, package-info fix, dead-code removal ([be471bb](https://github.com/fstubner/xtctx/commit/be471bbafb6412241ea82f5c3053eace9007f876))
+* sweeping cleanup — cross-tool smoke suite, package-info fix, dead-code removal ([4889d9d](https://github.com/fstubner/xtctx/commit/4889d9d0581ec24c97d2cfdc2534248a09efa638))
+
 ## [0.4.1](https://github.com/fstubner/xtctx/compare/xtctx-v0.4.0...xtctx-v0.4.1) (2026-04-15)
 
 
