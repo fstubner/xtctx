@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CONTINUITY_CATEGORIES,
   ContinuityPolicyValidationError,
@@ -136,5 +136,62 @@ describe("continuity policy schema and merge", () => {
         },
       }, "repo"),
     ).toThrow(ContinuityPolicyValidationError);
+  });
+
+  describe("legacy shared.yaml compatibility", () => {
+    let warnSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    });
+    afterEach(() => {
+      warnSpy.mockRestore();
+    });
+
+    it("loads legacy-shape shared.yaml as empty layer with a migration warning", () => {
+      const layer = parseContinuityPolicySource({
+        shared: { skills: ["foo"], commands: ["bar"], agents: [] },
+        toolPreferences: { claude: { memory: "on" } },
+      }, "repo:shared.yaml");
+
+      // Legacy → empty layer (not throw)
+      expect(layer.defaults).toEqual({});
+      expect(layer.tools).toEqual({});
+      expect(layer.policy.whitelist).toEqual({});
+
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      const msg = String(warnSpy.mock.calls[0]?.[0] ?? "");
+      expect(msg).toContain("pre-migration shared.yaml shape");
+      expect(msg).toContain("xtctx init --force");
+    });
+
+    it("loads current-schema keys from a mixed legacy+current file with a cleanup warning", () => {
+      const layer = parseContinuityPolicySource({
+        // Legacy keys the new loader ignores
+        shared: { skills: ["old"], commands: [], agents: [] },
+        toolPreferences: { claude: { memory: "on" } },
+        // Current-schema key that should be honored
+        defaults: {
+          sync_enabled: true,
+          scope: "project",
+        },
+      }, "repo:shared.yaml");
+
+      expect(layer.defaults.sync_enabled).toBe(true);
+      expect(layer.defaults.scope).toBe("project");
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      const msg = String(warnSpy.mock.calls[0]?.[0] ?? "");
+      expect(msg).toContain("ignoring legacy keys [shared, toolPreferences]");
+    });
+
+    it("still throws on unknown keys that are not the known-legacy set", () => {
+      warnSpy.mockClear();
+      expect(() =>
+        parseContinuityPolicySource({
+          defaults: { sync_enabled: true },
+          somethingBogus: {},
+        }, "repo:shared.yaml"),
+      ).toThrow(ContinuityPolicyValidationError);
+    });
   });
 });
