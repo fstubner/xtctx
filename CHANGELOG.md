@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.4.4](https://github.com/fstubner/xtctx/compare/xtctx-v0.4.3...xtctx-v0.4.4) (2026-04-21)
+
+
+### Bug Fixes
+
+* **config:** gracefully degrade on legacy shared.yaml instead of throwing ([650c4b8](https://github.com/fstubner/xtctx/commit/650c4b831ee641276cbf4726888fed8d30d93ba9))
+* **config:** gracefully degrade on legacy shared.yaml instead of throwing ([eded78a](https://github.com/fstubner/xtctx/commit/eded78aeb7980c9ca2ea21dd18751f231ac9d6ab))
+
 ## [0.4.3](https://github.com/fstubner/xtctx/compare/xtctx-v0.4.2...xtctx-v0.4.3) (2026-04-21)
 
 
