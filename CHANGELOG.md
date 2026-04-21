@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.5.0](https://github.com/fstubner/xtctx/compare/xtctx-v0.4.6...xtctx-v0.5.0) (2026-04-21)
+
+
+### Features
+
+* **canary:** nightly drift check against real Claude Code / Codex / Gemini CLIs ([9edbdcb](https://github.com/fstubner/xtctx/commit/9edbdcba2f6f1545a87c82d7930d462b5cf81daa))
+
+
+### Bug Fixes
+
+* **scrapers:** platform-gate Cursor default path (same P1 class as Copilot) ([4d62948](https://github.com/fstubner/xtctx/commit/4d6294832f432a406a1b51f02c5fb5a1a492e576))
+
 ## [0.4.6](https://github.com/fstubner/xtctx/compare/xtctx-v0.4.5...xtctx-v0.4.6) (2026-04-21)
 
 
