@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.4.3](https://github.com/fstubner/xtctx/compare/xtctx-v0.4.2...xtctx-v0.4.3) (2026-04-21)
+
+
+### Miscellaneous
+
+* testing rigor — ranking eval, drift mutations, golden snapshots, bench stub ([689e497](https://github.com/fstubner/xtctx/commit/689e497e80cecd2d9e5b418a873b33521f4dfee6))
+* testing rigor — ranking eval, drift mutations, golden snapshots, bench stub ([1f4e23c](https://github.com/fstubner/xtctx/commit/1f4e23c78cd5094052111d8da0ff1b126c8d85d4))
+
 ## [0.4.2](https://github.com/fstubner/xtctx/compare/xtctx-v0.4.1...xtctx-v0.4.2) (2026-04-21)
 
 
