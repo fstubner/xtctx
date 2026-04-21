@@ -1,20 +1,21 @@
 /**
- * Scraper mutation-drift test suite.
+ * Scraper mutation-drift test suite — STRICT mode.
  *
  * For each of the five built-in scrapers we build a known-good fixture that
  * produces >= 1 chunk, then systematically mutate the fixture shape
  * (rename keys, null values, change types, drop fields, add unknown fields)
  * and run the scraper again.
  *
- * Assertion contract:
- *   - The scraper SHOULD either throw, log at WARN+, or produce a clearly
- *     degraded-but-correct output (documented in the whitelist).
- *   - A **silent empty return** for a structural schema change is flagged as a
- *     DRIFT-RESILIENCE GAP. The test does NOT patch src/ — it reports.
- *
- * Gaps are reported via console.warn() and tabulated in a summary at the end.
- * The test itself passes as long as each scraper either handles the mutation
- * loudly or the mutation is an explicitly permitted degradation.
+ * Strict assertion contract (enforced, not reported):
+ *   - For every mutation marked `"loud-or-degraded"`, the scraper MUST do at
+ *     least one of:
+ *       1. throw,
+ *       2. emit a `console.warn`/`console.error`, or
+ *       3. produce output whose length differs from baseline (degraded).
+ *     A silent-identical OR silent-empty return is an assertion FAILURE.
+ *   - For every mutation marked `"silent-ok"` (explicit whitelist), the
+ *     scraper MUST NOT throw AND MUST NOT warn AND MUST produce the same
+ *     chunk count as baseline (forward-compat for new sibling fields).
  */
 
 import Database from "better-sqlite3";
@@ -50,25 +51,21 @@ interface MutationCase {
   expectation?: "loud-or-degraded" | "silent-ok";
 }
 
-interface GapReport {
-  scraper: string;
-  mutation: string;
-  note: string;
-}
-
-const gapReports: GapReport[] = [];
-
-async function collect(
-  scraper: ConversationScraper,
-): Promise<{ chunks: ConversationChunk[]; threw: boolean; warned: boolean; error?: string }> {
-  const warnings: unknown[] = [];
+async function collect(scraper: ConversationScraper): Promise<{
+  chunks: ConversationChunk[];
+  threw: boolean;
+  warned: boolean;
+  warnings: string[];
+  error?: string;
+}> {
+  const warnings: string[] = [];
   const origWarn = console.warn;
   const origError = console.error;
   console.warn = (...args) => {
-    warnings.push(args);
+    warnings.push(args.map((a) => String(a)).join(" "));
   };
   console.error = (...args) => {
-    warnings.push(args);
+    warnings.push(args.map((a) => String(a)).join(" "));
   };
 
   try {
@@ -76,9 +73,15 @@ async function collect(
     for await (const chunk of scraper.fullSync()) {
       chunks.push(chunk);
     }
-    return { chunks, threw: false, warned: warnings.length > 0 };
+    return { chunks, threw: false, warned: warnings.length > 0, warnings };
   } catch (err) {
-    return { chunks: [], threw: true, warned: warnings.length > 0, error: String(err) };
+    return {
+      chunks: [],
+      threw: true,
+      warned: warnings.length > 0,
+      warnings,
+      error: String(err),
+    };
   } finally {
     console.warn = origWarn;
     console.error = origError;
@@ -205,6 +208,12 @@ async function runScraperMutationBattery(
   const baselineScraper = await setupBaseline();
   const baseline = await collect(baselineScraper);
   expect(baseline.threw, `${label} baseline must not throw`).toBe(false);
+  expect(
+    baseline.warned,
+    `${label} baseline must not warn — any warn means the fixture itself triggers drift-detection: ${baseline.warnings.join(
+      " | ",
+    )}`,
+  ).toBe(false);
   expect(baseline.chunks.length, `${label} baseline must produce >=1 chunk`).toBeGreaterThan(0);
 
   for (const mutationCase of cases) {
@@ -216,42 +225,40 @@ async function runScraperMutationBattery(
 
     const result = await collect(scraper);
     const expectation = mutationCase.expectation ?? "loud-or-degraded";
+    const label2 = `${label} :: ${mutationCase.name} [${mutationLabel(mutationCase.mutation)}]`;
 
     if (expectation === "silent-ok") {
-      // Scraper may tolerate the mutation silently; still must not throw
-      // unless we opt into it.
-      if (result.threw) {
-        gapReports.push({
-          scraper: label,
-          mutation: mutationLabel(mutationCase.mutation),
-          note: `threw unexpectedly on whitelisted mutation: ${result.error}`,
-        });
-      }
+      expect(
+        result.threw,
+        `${label2} must NOT throw on whitelisted forward-compat mutation (${result.error})`,
+      ).toBe(false);
+      expect(
+        result.warned,
+        `${label2} must NOT warn on whitelisted forward-compat mutation: ${result.warnings.join(" | ")}`,
+      ).toBe(false);
+      expect(
+        result.chunks.length,
+        `${label2} must emit the same chunk count as baseline (got ${result.chunks.length}, baseline ${baseline.chunks.length})`,
+      ).toBe(baseline.chunks.length);
       continue;
     }
 
-    // "loud-or-degraded": must throw, warn, or produce fewer chunks / no chunks.
-    const sameLength = result.chunks.length === baseline.chunks.length;
-    const silentIdentical = !result.threw && !result.warned && sameLength;
+    // "loud-or-degraded": MUST throw, warn, OR produce a different chunk count.
+    const degraded = result.chunks.length !== baseline.chunks.length;
+    const loud = result.threw || result.warned;
+    const pass = loud || degraded;
 
-    if (silentIdentical) {
-      gapReports.push({
-        scraper: label,
-        mutation: mutationLabel(mutationCase.mutation),
-        note:
-          `silent identical output — scraper did not notice the schema change ` +
-          `(${result.chunks.length} chunks with mutation vs ${baseline.chunks.length} baseline)`,
-      });
-    }
+    expect(pass, `${label2} silently tolerated a destructive schema change — drift invisible in prod ` +
+      `(chunks=${result.chunks.length}, baseline=${baseline.chunks.length}, threw=${result.threw}, warned=${result.warned})`).toBe(true);
 
-    // A silently-empty return for a destructive mutation is the worst failure mode.
-    const silentEmpty = !result.threw && !result.warned && result.chunks.length === 0 && baseline.chunks.length > 0;
-    if (silentEmpty) {
-      gapReports.push({
-        scraper: label,
-        mutation: mutationLabel(mutationCase.mutation),
-        note: `silent empty return on ${mutationCase.name} — drift would be invisible in prod`,
-      });
+    // An empty-return must be accompanied by a warn/throw — otherwise whole
+    // sessions silently vanish upstream.
+    if (result.chunks.length === 0 && baseline.chunks.length > 0) {
+      expect(
+        loud,
+        `${label2} emitted ZERO chunks (baseline ${baseline.chunks.length}) without any warn/throw — ` +
+          `this is the worst failure mode (silent data loss).`,
+      ).toBe(true);
     }
   }
 }
@@ -389,19 +396,12 @@ describe("Scraper mutation drift", () => {
   const tempDirs: string[] = [];
 
   beforeEach(() => {
-    gapReports.length = 0;
+    // no-op: strict mode — gaps now fail the test, not report.
   });
 
   afterEach(async () => {
     await cleanupTemp(tempDirs);
     tempDirs.length = 0;
-
-    if (gapReports.length > 0) {
-      const summary = gapReports
-        .map((g) => `  - [${g.scraper}] ${g.mutation}: ${g.note}`)
-        .join("\n");
-      console.warn(`\n[drift-resilience gaps]\n${summary}\n`);
-    }
   });
 
   it("claude-code: JSONL field mutations", async () => {

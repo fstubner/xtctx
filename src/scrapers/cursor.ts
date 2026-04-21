@@ -9,6 +9,38 @@ import { AbstractScraper, estimateTokens, toDate } from "./base.js";
 const BUBBLE_TYPE_USER = 1;
 const BUBBLE_TYPE_ASSISTANT = 2;
 
+const SCRAPER_NAME = "cursor";
+
+/**
+ * Shapes the cursor scraper tolerates silently without logging. All other
+ * shape surprises warn; missing required tables throw.
+ */
+export const ACCEPTED_DEGRADATIONS = {
+  /** Store path missing — Cursor not installed on this machine. */
+  missingStorePath: "cursor workspaceStorage path absent",
+  /** Workspace has no composerData yet — empty workspace. */
+  emptyWorkspace: "workspace has no composer.composerData row",
+  /** A composer whose bubble row is missing — bubble pruned by Cursor. */
+  prunedBubble: "bubble referenced by composer but missing from globalStorage",
+  /** Empty bubble text (tool-call only, etc.). */
+  emptyBubbleText: "bubble has no user-visible text",
+  /** Forward-compat unknown keys alongside known composer fields. */
+  unknownFieldsAlongside: "extra keys alongside known composer schema",
+};
+
+function warnDrift(sourcePath: string, surprise: string, recordsAffected: number): void {
+  console.warn(
+    `[${SCRAPER_NAME}] schema-drift surprise at ${sourcePath}: ${surprise} ` +
+      `(records affected: ${recordsAffected})`,
+  );
+}
+
+function describeType(value: unknown): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "array";
+  return typeof value;
+}
+
 interface WorkspaceComposerRef {
   composerId: string;
   unifiedMode?: string;
@@ -78,9 +110,15 @@ export class CursorScraper extends AbstractScraper<CursorChunk> {
       let globalDb: Database.Database | null = null;
       try {
         globalDb = new Database(globalPath, { readonly: true, fileMustExist: true });
-        yield* this.readComposerMessages(globalDb, composerRefs, since);
-      } catch {
-        // Skip if global storage is unavailable or malformed.
+        yield* this.readComposerMessages(globalDb, composerRefs, since, wsPath);
+      } catch (err) {
+        // Global storage unreadable — treat as schema drift and warn.
+        // The cursorDiskKV table is required; if it's gone, something changed.
+        warnDrift(
+          globalPath,
+          `globalStorage unreadable: ${(err as Error).message}`,
+          composerRefs.length,
+        );
       } finally {
         globalDb?.close();
       }
@@ -89,21 +127,54 @@ export class CursorScraper extends AbstractScraper<CursorChunk> {
 
   private readWorkspaceComposers(wsDbPath: string): WorkspaceComposerRef[] {
     let db: Database.Database | null = null;
+
     try {
       db = new Database(wsDbPath, { readonly: true, fileMustExist: true });
+    } catch {
+      // File missing / unopenable — treat as absent workspace, not drift.
+      return [];
+    }
+
+    try {
       const row = db
         .prepare("SELECT value FROM ItemTable WHERE key = 'composer.composerData'")
         .get() as { value: string } | undefined;
 
-      if (!row) return [];
+      if (!row) {
+        // ACCEPTED_DEGRADATIONS.emptyWorkspace
+        return [];
+      }
 
-      const data = JSON.parse(row.value) as {
-        allComposers?: WorkspaceComposerRef[];
-      };
+      let data: { allComposers?: WorkspaceComposerRef[] };
+      try {
+        data = JSON.parse(row.value) as { allComposers?: WorkspaceComposerRef[] };
+      } catch (err) {
+        warnDrift(
+          wsDbPath,
+          `composer.composerData value is not valid JSON: ${(err as Error).message}`,
+          0,
+        );
+        return [];
+      }
+
+      if (data.allComposers !== undefined && !Array.isArray(data.allComposers)) {
+        warnDrift(
+          wsDbPath,
+          `expected 'allComposers' to be an array, got ${describeType(data.allComposers)}`,
+          0,
+        );
+        return [];
+      }
 
       return data.allComposers ?? [];
-    } catch {
-      return [];
+    } catch (err) {
+      // The ItemTable is a required workspace-storage contract — the db
+      // opened but a query against it failed, meaning Cursor's internal
+      // format changed. Throw so callers surface the drift instead of
+      // silently returning zero chunks.
+      throw new Error(
+        `[${SCRAPER_NAME}] ItemTable unreadable at ${wsDbPath}: ${(err as Error).message}`,
+      );
     } finally {
       db?.close();
     }
@@ -113,6 +184,7 @@ export class CursorScraper extends AbstractScraper<CursorChunk> {
     globalDb: Database.Database,
     composerRefs: WorkspaceComposerRef[],
     since: Date,
+    wsPathForWarn: string,
   ): Iterable<CursorChunk> {
     const getComposer = globalDb.prepare(
       "SELECT value FROM cursorDiskKV WHERE key = ?",
@@ -126,13 +198,71 @@ export class CursorScraper extends AbstractScraper<CursorChunk> {
         `composerData:${ref.composerId}`,
       ) as { value: string } | undefined;
 
-      if (!composerRow) continue;
+      if (!composerRow) {
+        warnDrift(
+          `${wsPathForWarn}#composerData:${ref.composerId}`,
+          "workspace references a composer that is missing from globalStorage",
+          0,
+        );
+        continue;
+      }
 
       let composer: CursorComposerData;
       try {
         composer = JSON.parse(composerRow.value) as CursorComposerData;
-      } catch {
+      } catch (err) {
+        warnDrift(
+          `${wsPathForWarn}#composerData:${ref.composerId}`,
+          `composer JSON not parseable: ${(err as Error).message}`,
+          0,
+        );
         continue;
+      }
+
+      // Strict-mode schema check: 'fullConversationHeadersOnly' is the
+      // required list of turns. If it's missing or renamed, emitting zero
+      // chunks would be silent data loss. Warn so drift is observable.
+      if (composer.fullConversationHeadersOnly === undefined) {
+        const suspiciousRename = Object.entries(composer as unknown as Record<string, unknown>).find(
+          ([, v]) =>
+            Array.isArray(v) &&
+            v.length > 0 &&
+            isRecord(v[0]) &&
+            "bubbleId" in (v[0] as Record<string, unknown>),
+        );
+        warnDrift(
+          `${wsPathForWarn}#composerData:${ref.composerId}`,
+          suspiciousRename
+            ? `'fullConversationHeadersOnly' missing; suspected rename to '${suspiciousRename[0]}'`
+            : "'fullConversationHeadersOnly' missing — composer has no turn list",
+          0,
+        );
+        continue;
+      }
+
+      if (!Array.isArray(composer.fullConversationHeadersOnly)) {
+        warnDrift(
+          `${wsPathForWarn}#composerData:${ref.composerId}`,
+          `expected 'fullConversationHeadersOnly' to be an array, got ` +
+            describeType(composer.fullConversationHeadersOnly),
+          0,
+        );
+        continue;
+      }
+
+      if (composer.modelConfig !== undefined && composer.modelConfig !== null &&
+          !isRecord(composer.modelConfig)) {
+        warnDrift(
+          `${wsPathForWarn}#composerData:${ref.composerId}`,
+          `expected 'modelConfig' to be object or absent, got ${describeType(composer.modelConfig)}`,
+          0,
+        );
+      } else if (composer.modelConfig === null) {
+        warnDrift(
+          `${wsPathForWarn}#composerData:${ref.composerId}`,
+          "'modelConfig' is null — falling back to composerId as model label",
+          0,
+        );
       }
 
       const headers = composer.fullConversationHeadersOnly ?? [];
@@ -261,6 +391,10 @@ function normalizeRole(value?: number | string): CursorChunk["role"] {
 
 function normalizeComposerMode(value?: string): CursorChunk["metadata"]["composerMode"] {
   return value === "agent" ? "agent" : "normal";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function toNonEmptyString(value: unknown): string | undefined {

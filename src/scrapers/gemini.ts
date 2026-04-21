@@ -4,6 +4,41 @@ import { glob } from "glob";
 import type { GeminiChunk } from "../types/scraper.js";
 import { AbstractScraper, estimateTokens, toDate } from "./base.js";
 
+const SCRAPER_NAME = "gemini";
+
+/**
+ * Shapes the gemini scraper tolerates silently. Anything else warns.
+ * Required-schema violations (messages must be an array) warn and return
+ * zero chunks for that file so the rest of the batch still processes.
+ */
+export const ACCEPTED_DEGRADATIONS = {
+  /** History path absent — Gemini CLI not installed. */
+  missingHistoryPath: "~/.gemini/tmp not present",
+  /** Unparseable JSON file — warn, skip. */
+  malformedJsonFile: "session JSON not parseable",
+  /** Legacy layout with 'sessions' array (supported explicitly). */
+  legacySessionsLayout: "session file uses legacy 'sessions' layout",
+  /** Info/error typed entries are intentionally skipped. */
+  infoOrErrorMessage: "info/error messages are not conversation turns",
+  /** Empty content (tool-call only etc.). */
+  emptyContent: "message has no user-visible content",
+  /** Forward-compat unknown siblings. */
+  unknownFieldsAlongside: "extra keys alongside known schema",
+};
+
+function warnDrift(sourcePath: string, surprise: string, recordsAffected: number): void {
+  console.warn(
+    `[${SCRAPER_NAME}] schema-drift surprise at ${sourcePath}: ${surprise} ` +
+      `(records affected: ${recordsAffected})`,
+  );
+}
+
+function describeType(value: unknown): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "array";
+  return typeof value;
+}
+
 const ROLE_MAP: Record<string, GeminiChunk["role"]> = {
   user: "user",
   human: "user",
@@ -88,11 +123,12 @@ export class GeminiCliScraper extends AbstractScraper<GeminiChunk> {
 
       try {
         parsed = JSON.parse(await readFile(filePath, "utf-8")) as unknown;
-      } catch {
+      } catch (err) {
+        warnDrift(filePath, `session JSON not parseable: ${(err as Error).message}`, 0);
         continue;
       }
 
-      const messages = extractGeminiMessages(parsed, fileSessionId);
+      const messages = extractGeminiMessages(parsed, fileSessionId, filePath);
       for (const message of messages) {
         const timestamp = toDate(message.timestamp);
         if (timestamp <= since) {
@@ -160,7 +196,11 @@ export class GeminiCliScraper extends AbstractScraper<GeminiChunk> {
  *  2. Sessions-with-turns: { sessions: [{ turns: [{prompt, response}] }] }
  *  3. Flat array of messages: [{role, content, timestamp}]
  */
-function extractGeminiMessages(input: unknown, fallbackSessionId: string): ParsedGeminiMessage[] {
+function extractGeminiMessages(
+  input: unknown,
+  fallbackSessionId: string,
+  sourcePath: string,
+): ParsedGeminiMessage[] {
   if (Array.isArray(input)) {
     return input
       .filter((entry): entry is Record<string, unknown> => isRecord(entry))
@@ -168,10 +208,33 @@ function extractGeminiMessages(input: unknown, fallbackSessionId: string): Parse
   }
 
   if (!isRecord(input)) {
+    warnDrift(
+      sourcePath,
+      `expected session file to be an object or array, got ${describeType(input)}`,
+      0,
+    );
     return [];
   }
 
   // Gemini CLI native format: { sessionId, messages: [...] }
+  // Strict-mode: if 'messages' is present as a non-array, that's structural
+  // drift — warn. Don't return early, though: mixed files that carry valid
+  // legacy 'sessions' alongside a non-array 'messages' metadata field must
+  // still fall through to the legacy parser rather than dropping every
+  // recoverable turn. The legacy branch below will handle them; if neither
+  // shape is usable, the final "unknown shape" guard will report it.
+  if (input.messages !== undefined && !Array.isArray(input.messages)) {
+    warnDrift(
+      sourcePath,
+      `'messages' is present but not an array (got ${describeType(input.messages)})`,
+      0,
+    );
+  }
+
+  if (input.sessionId === null) {
+    warnDrift(sourcePath, "'sessionId' is null — falling back to filename", 0);
+  }
+
   if (Array.isArray(input.messages)) {
     const sessionId = toStringValue(input.sessionId ?? input.session_id) ?? fallbackSessionId;
     const rows: ParsedGeminiMessage[] = [];
@@ -274,6 +337,22 @@ function extractGeminiMessages(input: unknown, fallbackSessionId: string): Parse
     return rows;
   }
 
+  // Neither 'messages' (native) nor 'sessions' (legacy) recognised. If the
+  // file has any array-shaped sibling, treat it as a likely rename and warn.
+  const suspiciousRename = Object.entries(input).find(([, v]) => Array.isArray(v));
+  if (suspiciousRename) {
+    warnDrift(
+      sourcePath,
+      `no 'messages' or 'sessions' key; suspected rename to '${suspiciousRename[0]}'`,
+      0,
+    );
+  } else {
+    warnDrift(
+      sourcePath,
+      "session object has neither 'messages' nor 'sessions' array",
+      0,
+    );
+  }
   return [];
 }
 
