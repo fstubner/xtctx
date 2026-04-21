@@ -47,6 +47,11 @@ jobs:
           npm run test:security
           npm run security:checklist
 
+      - name: Ranking eval and drift tests
+        run: |
+          npm run test:eval
+          npm run test:drift
+
       - name: Build packages (for smoke)
         run: npm run build
 

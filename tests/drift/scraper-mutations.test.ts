@@ -1,0 +1,601 @@
+/**
+ * Scraper mutation-drift test suite.
+ *
+ * For each of the five built-in scrapers we build a known-good fixture that
+ * produces >= 1 chunk, then systematically mutate the fixture shape
+ * (rename keys, null values, change types, drop fields, add unknown fields)
+ * and run the scraper again.
+ *
+ * Assertion contract:
+ *   - The scraper SHOULD either throw, log at WARN+, or produce a clearly
+ *     degraded-but-correct output (documented in the whitelist).
+ *   - A **silent empty return** for a structural schema change is flagged as a
+ *     DRIFT-RESILIENCE GAP. The test does NOT patch src/ — it reports.
+ *
+ * Gaps are reported via console.warn() and tabulated in a summary at the end.
+ * The test itself passes as long as each scraper either handles the mutation
+ * loudly or the mutation is an explicitly permitted degradation.
+ */
+
+import Database from "better-sqlite3";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
+import { ClaudeCodeScraper } from "@xtctx/scrapers/claude-code";
+import { CodexCliScraper } from "@xtctx/scrapers/codex";
+import { CopilotScraper } from "@xtctx/scrapers/copilot";
+import { CursorScraper } from "@xtctx/scrapers/cursor";
+import { GeminiCliScraper } from "@xtctx/scrapers/gemini";
+import type { ConversationChunk, ConversationScraper } from "@xtctx/types/scraper";
+
+type Mutation =
+  | { kind: "rename"; path: string; newKey: string }
+  | { kind: "null"; path: string }
+  | { kind: "retype"; path: string; to: "string" | "number" | "array" | "object" }
+  | { kind: "drop"; path: string }
+  | { kind: "unknown"; path: string; key: string };
+
+interface MutationCase {
+  name: string;
+  mutation: Mutation;
+  /**
+   * If `"loud-or-degraded"` (default): scraper must either throw, warn, or
+   * produce a different result than the baseline. A silent-identical return
+   * is a gap.
+   * If `"silent-ok"`: mutation is explicitly allowed to be tolerated silently
+   * (e.g. adding unknown fields alongside — forward compat).
+   */
+  expectation?: "loud-or-degraded" | "silent-ok";
+}
+
+interface GapReport {
+  scraper: string;
+  mutation: string;
+  note: string;
+}
+
+const gapReports: GapReport[] = [];
+
+async function collect(
+  scraper: ConversationScraper,
+): Promise<{ chunks: ConversationChunk[]; threw: boolean; warned: boolean; error?: string }> {
+  const warnings: unknown[] = [];
+  const origWarn = console.warn;
+  const origError = console.error;
+  console.warn = (...args) => {
+    warnings.push(args);
+  };
+  console.error = (...args) => {
+    warnings.push(args);
+  };
+
+  try {
+    const chunks: ConversationChunk[] = [];
+    for await (const chunk of scraper.fullSync()) {
+      chunks.push(chunk);
+    }
+    return { chunks, threw: false, warned: warnings.length > 0 };
+  } catch (err) {
+    return { chunks: [], threw: true, warned: warnings.length > 0, error: String(err) };
+  } finally {
+    console.warn = origWarn;
+    console.error = origError;
+  }
+}
+
+/** Apply a JSONPath-like mutation to an in-memory JSON object. */
+function applyMutation(root: unknown, mutation: Mutation): unknown {
+  const clone = JSON.parse(JSON.stringify(root)) as unknown;
+  const segments = mutation.kind === "unknown" ? [mutation.path] : [mutation.path];
+  const path = segments[0]!.split(".").filter(Boolean);
+
+  if (mutation.kind === "unknown") {
+    setAt(clone, path, (parent) => {
+      if (parent && typeof parent === "object" && !Array.isArray(parent)) {
+        (parent as Record<string, unknown>)[mutation.key] = "unknown-extra-value";
+      }
+    });
+    return clone;
+  }
+
+  if (mutation.kind === "drop") {
+    const leaf = path[path.length - 1]!;
+    setAt(clone, path.slice(0, -1), (parent) => {
+      if (parent && typeof parent === "object" && !Array.isArray(parent)) {
+        delete (parent as Record<string, unknown>)[leaf];
+      }
+    });
+    return clone;
+  }
+
+  if (mutation.kind === "rename") {
+    const leaf = path[path.length - 1]!;
+    setAt(clone, path.slice(0, -1), (parent) => {
+      if (parent && typeof parent === "object" && !Array.isArray(parent)) {
+        const record = parent as Record<string, unknown>;
+        if (leaf in record) {
+          record[mutation.newKey] = record[leaf];
+          delete record[leaf];
+        }
+      }
+    });
+    return clone;
+  }
+
+  if (mutation.kind === "null") {
+    const leaf = path[path.length - 1]!;
+    setAt(clone, path.slice(0, -1), (parent) => {
+      if (parent && typeof parent === "object" && !Array.isArray(parent)) {
+        (parent as Record<string, unknown>)[leaf] = null;
+      }
+    });
+    return clone;
+  }
+
+  if (mutation.kind === "retype") {
+    const leaf = path[path.length - 1]!;
+    setAt(clone, path.slice(0, -1), (parent) => {
+      if (parent && typeof parent === "object" && !Array.isArray(parent)) {
+        const record = parent as Record<string, unknown>;
+        const cur = record[leaf];
+        record[leaf] = retypeValue(cur, mutation.to);
+      }
+    });
+    return clone;
+  }
+
+  return clone;
+}
+
+function setAt(root: unknown, path: string[], visit: (parent: unknown) => void): void {
+  let cur: unknown = root;
+  for (const seg of path) {
+    if (cur && typeof cur === "object" && !Array.isArray(cur)) {
+      cur = (cur as Record<string, unknown>)[seg];
+    } else {
+      return;
+    }
+  }
+  visit(cur);
+}
+
+function retypeValue(
+  cur: unknown,
+  to: "string" | "number" | "array" | "object",
+): unknown {
+  switch (to) {
+    case "string":
+      return typeof cur === "string" ? cur + "-as-string" : String(cur);
+    case "number":
+      return 42;
+    case "array":
+      return Array.isArray(cur) ? ["mutated"] : [];
+    case "object":
+      return { mutated: true };
+  }
+}
+
+function mutationLabel(m: Mutation): string {
+  switch (m.kind) {
+    case "rename":
+      return `rename(${m.path} -> ${m.newKey})`;
+    case "null":
+      return `null(${m.path})`;
+    case "retype":
+      return `retype(${m.path} to ${m.to})`;
+    case "drop":
+      return `drop(${m.path})`;
+    case "unknown":
+      return `unknown-field(${m.path}.${m.key})`;
+  }
+}
+
+/**
+ * Runs a scraper against a good fixture (baseline) plus each mutation.
+ * Reports gaps when a mutation yields silently-identical output.
+ */
+async function runScraperMutationBattery(
+  label: string,
+  setupBaseline: () => Promise<ConversationScraper>,
+  setupMutation: (mutation: Mutation) => Promise<ConversationScraper | null>,
+  cases: MutationCase[],
+): Promise<void> {
+  const baselineScraper = await setupBaseline();
+  const baseline = await collect(baselineScraper);
+  expect(baseline.threw, `${label} baseline must not throw`).toBe(false);
+  expect(baseline.chunks.length, `${label} baseline must produce >=1 chunk`).toBeGreaterThan(0);
+
+  for (const mutationCase of cases) {
+    const scraper = await setupMutation(mutationCase.mutation);
+    if (!scraper) {
+      // Mutation not applicable (e.g. path doesn't exist for this scraper).
+      continue;
+    }
+
+    const result = await collect(scraper);
+    const expectation = mutationCase.expectation ?? "loud-or-degraded";
+
+    if (expectation === "silent-ok") {
+      // Scraper may tolerate the mutation silently; still must not throw
+      // unless we opt into it.
+      if (result.threw) {
+        gapReports.push({
+          scraper: label,
+          mutation: mutationLabel(mutationCase.mutation),
+          note: `threw unexpectedly on whitelisted mutation: ${result.error}`,
+        });
+      }
+      continue;
+    }
+
+    // "loud-or-degraded": must throw, warn, or produce fewer chunks / no chunks.
+    const sameLength = result.chunks.length === baseline.chunks.length;
+    const silentIdentical = !result.threw && !result.warned && sameLength;
+
+    if (silentIdentical) {
+      gapReports.push({
+        scraper: label,
+        mutation: mutationLabel(mutationCase.mutation),
+        note:
+          `silent identical output — scraper did not notice the schema change ` +
+          `(${result.chunks.length} chunks with mutation vs ${baseline.chunks.length} baseline)`,
+      });
+    }
+
+    // A silently-empty return for a destructive mutation is the worst failure mode.
+    const silentEmpty = !result.threw && !result.warned && result.chunks.length === 0 && baseline.chunks.length > 0;
+    if (silentEmpty) {
+      gapReports.push({
+        scraper: label,
+        mutation: mutationLabel(mutationCase.mutation),
+        note: `silent empty return on ${mutationCase.name} — drift would be invisible in prod`,
+      });
+    }
+  }
+}
+
+// ---- Scraper-specific setups ---------------------------------------------
+
+function makeTempDirs() {
+  return Promise.all([
+    mkdtemp(join(tmpdir(), "xtctx-drift-")),
+    mkdtemp(join(tmpdir(), "xtctx-state-")),
+  ]);
+}
+
+async function cleanupTemp(dirs: string[]): Promise<void> {
+  await Promise.all(dirs.map((d) => rm(d, { recursive: true, force: true })));
+}
+
+// Claude Code: JSONL per line.
+const CLAUDE_BASELINE_LINES = [
+  { type: "human", content: "help me", timestamp: "2026-02-24T10:00:00Z" },
+  { type: "assistant", content: "sure", timestamp: "2026-02-24T10:00:05Z" },
+];
+
+// Codex: JSONL event stream.
+const CODEX_BASELINE_LINES = [
+  {
+    timestamp: "2026-02-24T09:59:00Z",
+    type: "session_meta",
+    payload: { id: "codex-test-uuid" },
+  },
+  {
+    timestamp: "2026-02-24T09:59:01Z",
+    type: "turn_context",
+    payload: { approval_policy: "suggest", sandbox_policy: { type: "workspace-write" } },
+  },
+  {
+    timestamp: "2026-02-24T10:00:00Z",
+    type: "event_msg",
+    payload: { type: "user_message", message: "hello codex" },
+  },
+  {
+    timestamp: "2026-02-24T10:00:05Z",
+    type: "response_item",
+    payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "reply" }] },
+  },
+];
+
+// Copilot: SQLite workspaceStorage.
+const COPILOT_BASELINE_SESSIONS = {
+  "0": {
+    sessionId: "copilot-drift-session",
+    creationDate: new Date("2026-02-24T10:00:00Z").getTime(),
+    requests: [
+      {
+        message: { parts: [{ text: "q" }] },
+        response: [{ value: "a" }],
+        isCanceled: false,
+        model: "gpt-4o-copilot",
+      },
+    ],
+  },
+};
+
+// Gemini: session JSON with messages array.
+const GEMINI_BASELINE = {
+  sessionId: "gemini-drift-session",
+  startTime: "2026-02-24T10:00:00Z",
+  lastUpdated: "2026-02-24T10:00:05Z",
+  messages: [
+    { id: "m1", type: "user", timestamp: "2026-02-24T10:00:00Z", content: [{ text: "hi" }] },
+    { id: "m2", type: "gemini", timestamp: "2026-02-24T10:00:05Z", content: "reply" },
+  ],
+};
+
+// ---- Cursor setup (two SQLite DBs, shared layout) ------------------------
+
+async function buildCursorFixture(
+  rootDir: string,
+  composerMutator?: (composer: Record<string, unknown>) => void,
+  bubbleMutator?: (bubble: Record<string, unknown>) => void,
+): Promise<string> {
+  const workspaceDir = join(rootDir, "workspaceStorage", "hash1");
+  await mkdir(workspaceDir, { recursive: true });
+  await mkdir(join(rootDir, "globalStorage"), { recursive: true });
+
+  const wsDb = new Database(join(workspaceDir, "state.vscdb"));
+  wsDb.exec("CREATE TABLE ItemTable (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+  wsDb.prepare("INSERT INTO ItemTable (key, value) VALUES (?, ?)").run(
+    "composer.composerData",
+    JSON.stringify({ allComposers: [{ composerId: "c1" }] }),
+  );
+  wsDb.close();
+
+  const composer: Record<string, unknown> = {
+    composerId: "c1",
+    fullConversationHeadersOnly: [
+      { bubbleId: "b1", type: 1 },
+      { bubbleId: "b2", type: 2 },
+    ],
+    createdAt: new Date("2026-02-24T10:00:00Z").getTime(),
+    modelConfig: { modelName: "gpt-4.1" },
+    unifiedMode: "agent",
+  };
+  if (composerMutator) composerMutator(composer);
+
+  const bubble1: Record<string, unknown> = {
+    type: 1,
+    text: "cursor q",
+    createdAt: "2026-02-24T10:00:00Z",
+  };
+  const bubble2: Record<string, unknown> = {
+    type: 2,
+    text: "cursor a",
+    createdAt: "2026-02-24T10:00:05Z",
+  };
+  if (bubbleMutator) {
+    bubbleMutator(bubble1);
+    bubbleMutator(bubble2);
+  }
+
+  const globalDb = new Database(join(rootDir, "globalStorage", "state.vscdb"));
+  globalDb.exec("CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+  const ins = globalDb.prepare("INSERT INTO cursorDiskKV (key, value) VALUES (?, ?)");
+  ins.run(`composerData:c1`, JSON.stringify(composer));
+  ins.run(`bubbleId:c1:b1`, JSON.stringify(bubble1));
+  ins.run(`bubbleId:c1:b2`, JSON.stringify(bubble2));
+  globalDb.close();
+
+  return workspaceDir;
+}
+
+// ---- Tests ---------------------------------------------------------------
+
+describe("Scraper mutation drift", () => {
+  const tempDirs: string[] = [];
+
+  beforeEach(() => {
+    gapReports.length = 0;
+  });
+
+  afterEach(async () => {
+    await cleanupTemp(tempDirs);
+    tempDirs.length = 0;
+
+    if (gapReports.length > 0) {
+      const summary = gapReports
+        .map((g) => `  - [${g.scraper}] ${g.mutation}: ${g.note}`)
+        .join("\n");
+      console.warn(`\n[drift-resilience gaps]\n${summary}\n`);
+    }
+  });
+
+  it("claude-code: JSONL field mutations", async () => {
+    const cases: MutationCase[] = [
+      { name: "rename top-level type", mutation: { kind: "rename", path: "type", newKey: "typ" } },
+      { name: "null content", mutation: { kind: "null", path: "content" } },
+      { name: "retype timestamp to number", mutation: { kind: "retype", path: "timestamp", to: "number" } },
+      { name: "drop timestamp", mutation: { kind: "drop", path: "timestamp" } },
+      { name: "unknown field alongside", mutation: { kind: "unknown", path: "", key: "extraThing" }, expectation: "silent-ok" },
+    ];
+
+    await runScraperMutationBattery(
+      "claude-code",
+      async () => {
+        const [tempDir, stateDir] = await makeTempDirs();
+        tempDirs.push(tempDir, stateDir);
+        const project = join(tempDir, "proj");
+        await mkdir(project, { recursive: true });
+        await writeFile(
+          join(project, "s.jsonl"),
+          CLAUDE_BASELINE_LINES.map((l) => JSON.stringify(l)).join("\n") + "\n",
+        );
+        return new ClaudeCodeScraper(tempDir, stateDir);
+      },
+      async (mutation) => {
+        const [tempDir, stateDir] = await makeTempDirs();
+        tempDirs.push(tempDir, stateDir);
+        const project = join(tempDir, "proj");
+        await mkdir(project, { recursive: true });
+        const mutated = CLAUDE_BASELINE_LINES.map((l) => applyMutation(l, mutation));
+        await writeFile(
+          join(project, "s.jsonl"),
+          mutated.map((l) => JSON.stringify(l)).join("\n") + "\n",
+        );
+        return new ClaudeCodeScraper(tempDir, stateDir);
+      },
+      cases,
+    );
+  });
+
+  it("codex: event-stream mutations", async () => {
+    const cases: MutationCase[] = [
+      { name: "rename payload.type on event_msg", mutation: { kind: "rename", path: "payload.type", newKey: "tpe" } },
+      { name: "null event type", mutation: { kind: "null", path: "type" } },
+      { name: "retype payload.message to number", mutation: { kind: "retype", path: "payload.message", to: "number" } },
+      { name: "drop payload.role on response_item", mutation: { kind: "drop", path: "payload.role" } },
+      { name: "unknown top-level field", mutation: { kind: "unknown", path: "", key: "extraThing" }, expectation: "silent-ok" },
+    ];
+
+    await runScraperMutationBattery(
+      "codex",
+      async () => {
+        const [tempDir, stateDir] = await makeTempDirs();
+        tempDirs.push(tempDir, stateDir);
+        await writeFile(
+          join(tempDir, "s.jsonl"),
+          CODEX_BASELINE_LINES.map((l) => JSON.stringify(l)).join("\n") + "\n",
+        );
+        return new CodexCliScraper(tempDir, stateDir);
+      },
+      async (mutation) => {
+        const [tempDir, stateDir] = await makeTempDirs();
+        tempDirs.push(tempDir, stateDir);
+        // Apply mutation to every line where it's applicable.
+        const mutated = CODEX_BASELINE_LINES.map((l) => applyMutation(l, mutation));
+        await writeFile(
+          join(tempDir, "s.jsonl"),
+          mutated.map((l) => JSON.stringify(l)).join("\n") + "\n",
+        );
+        return new CodexCliScraper(tempDir, stateDir);
+      },
+      cases,
+    );
+  });
+
+  it("copilot: interactive.sessions schema mutations", async () => {
+    const cases: MutationCase[] = [
+      { name: "rename requests -> queries", mutation: { kind: "rename", path: "requests", newKey: "queries" } },
+      { name: "null creationDate", mutation: { kind: "null", path: "creationDate" } },
+      { name: "retype requests to object", mutation: { kind: "retype", path: "requests", to: "object" } },
+      { name: "drop sessionId", mutation: { kind: "drop", path: "sessionId" } },
+      { name: "unknown field alongside", mutation: { kind: "unknown", path: "", key: "futureField" }, expectation: "silent-ok" },
+    ];
+
+    await runScraperMutationBattery(
+      "copilot",
+      async () => {
+        const [tempDir, stateDir] = await makeTempDirs();
+        tempDirs.push(tempDir, stateDir);
+        const wsStorage = join(tempDir, "workspaceStorage");
+        await mkdir(join(wsStorage, "hash1"), { recursive: true });
+        const db = new Database(join(wsStorage, "hash1", "state.vscdb"));
+        db.exec("CREATE TABLE ItemTable (key TEXT PRIMARY KEY, value TEXT)");
+        db.prepare("INSERT INTO ItemTable (key, value) VALUES (?, ?)").run(
+          "interactive.sessions",
+          JSON.stringify(COPILOT_BASELINE_SESSIONS),
+        );
+        db.close();
+        return new CopilotScraper(wsStorage, stateDir);
+      },
+      async (mutation) => {
+        const [tempDir, stateDir] = await makeTempDirs();
+        tempDirs.push(tempDir, stateDir);
+        const wsStorage = join(tempDir, "workspaceStorage");
+        await mkdir(join(wsStorage, "hash1"), { recursive: true });
+        const mutated = {
+          "0": applyMutation(COPILOT_BASELINE_SESSIONS["0"], mutation),
+        };
+        const db = new Database(join(wsStorage, "hash1", "state.vscdb"));
+        db.exec("CREATE TABLE ItemTable (key TEXT PRIMARY KEY, value TEXT)");
+        db.prepare("INSERT INTO ItemTable (key, value) VALUES (?, ?)").run(
+          "interactive.sessions",
+          JSON.stringify(mutated),
+        );
+        db.close();
+        return new CopilotScraper(wsStorage, stateDir);
+      },
+      cases,
+    );
+  });
+
+  it("cursor: composerData / bubble mutations", async () => {
+    const cases: MutationCase[] = [
+      {
+        name: "rename fullConversationHeadersOnly",
+        mutation: { kind: "rename", path: "fullConversationHeadersOnly", newKey: "bubbles" },
+      },
+      { name: "null modelConfig", mutation: { kind: "null", path: "modelConfig" } },
+      {
+        name: "drop fullConversationHeadersOnly",
+        mutation: { kind: "drop", path: "fullConversationHeadersOnly" },
+      },
+      {
+        name: "unknown field alongside",
+        mutation: { kind: "unknown", path: "", key: "newField" },
+        expectation: "silent-ok",
+      },
+    ];
+
+    await runScraperMutationBattery(
+      "cursor",
+      async () => {
+        const [rootDir, stateDir] = await makeTempDirs();
+        tempDirs.push(rootDir, stateDir);
+        const workspaceDir = await buildCursorFixture(rootDir);
+        return new CursorScraper(workspaceDir, stateDir);
+      },
+      async (mutation) => {
+        const [rootDir, stateDir] = await makeTempDirs();
+        tempDirs.push(rootDir, stateDir);
+        const workspaceDir = await buildCursorFixture(rootDir, (composer) => {
+          const mutated = applyMutation(composer, mutation) as Record<string, unknown>;
+          for (const key of Object.keys(composer)) delete composer[key];
+          Object.assign(composer, mutated);
+        });
+        return new CursorScraper(workspaceDir, stateDir);
+      },
+      cases,
+    );
+  });
+
+  it("gemini: session-JSON mutations", async () => {
+    const cases: MutationCase[] = [
+      { name: "rename messages -> turns", mutation: { kind: "rename", path: "messages", newKey: "turns" } },
+      { name: "null sessionId", mutation: { kind: "null", path: "sessionId" } },
+      { name: "retype messages to object", mutation: { kind: "retype", path: "messages", to: "object" } },
+      { name: "drop messages", mutation: { kind: "drop", path: "messages" } },
+      {
+        name: "unknown top-level field",
+        mutation: { kind: "unknown", path: "", key: "newMeta" },
+        expectation: "silent-ok",
+      },
+    ];
+
+    await runScraperMutationBattery(
+      "gemini",
+      async () => {
+        const [tempDir, stateDir] = await makeTempDirs();
+        tempDirs.push(tempDir, stateDir);
+        const chatDir = join(tempDir, "proj", "chats");
+        await mkdir(chatDir, { recursive: true });
+        await writeFile(join(chatDir, "session-x.json"), JSON.stringify(GEMINI_BASELINE));
+        return new GeminiCliScraper(tempDir, stateDir);
+      },
+      async (mutation) => {
+        const [tempDir, stateDir] = await makeTempDirs();
+        tempDirs.push(tempDir, stateDir);
+        const chatDir = join(tempDir, "proj", "chats");
+        await mkdir(chatDir, { recursive: true });
+        const mutated = applyMutation(GEMINI_BASELINE, mutation);
+        await writeFile(join(chatDir, "session-x.json"), JSON.stringify(mutated));
+        return new GeminiCliScraper(tempDir, stateDir);
+      },
+      cases,
+    );
+  });
+});

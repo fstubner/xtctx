@@ -1,0 +1,190 @@
+{
+  "seed": 20260420,
+  "sessionsPerTool": 40,
+  "anchorRate": 0.4,
+  "turnsPerSession": 6,
+  "totalAnchors": 63,
+  "totalQueries": 234,
+  "generatedAt": "2026-04-20T23:24:02.439Z",
+  "overall": {
+    "queryCount": 234,
+    "mrr": 0.8708689458689461,
+    "recallAt5": 1,
+    "recallAt10": 1,
+    "top1Accuracy": 0.7692307692307693
+  },
+  "negationOutOfTop1": 0,
+  "byCategory": {
+    "gotcha": {
+      "overall": {
+        "queryCount": 48,
+        "mrr": 0.8836805555555555,
+        "recallAt5": 1,
+        "recallAt10": 1,
+        "top1Accuracy": 0.7916666666666666
+      },
+      "byIntent": {
+        "exact": {
+          "queryCount": 12,
+          "mrr": 1,
+          "recallAt5": 1,
+          "recallAt10": 1,
+          "top1Accuracy": 1
+        },
+        "paraphrase": {
+          "queryCount": 24,
+          "mrr": 0.7881944444444445,
+          "recallAt5": 1,
+          "recallAt10": 1,
+          "top1Accuracy": 0.625
+        },
+        "cross": {
+          "queryCount": 12,
+          "mrr": 0.9583333333333334,
+          "recallAt5": 1,
+          "recallAt10": 1,
+          "top1Accuracy": 0.9166666666666666
+        }
+      }
+    },
+    "decision": {
+      "overall": {
+        "queryCount": 36,
+        "mrr": 0.9861111111111112,
+        "recallAt5": 1,
+        "recallAt10": 1,
+        "top1Accuracy": 0.9722222222222222
+      },
+      "byIntent": {
+        "exact": {
+          "queryCount": 9,
+          "mrr": 1,
+          "recallAt5": 1,
+          "recallAt10": 1,
+          "top1Accuracy": 1
+        },
+        "paraphrase": {
+          "queryCount": 18,
+          "mrr": 0.9722222222222222,
+          "recallAt5": 1,
+          "recallAt10": 1,
+          "top1Accuracy": 0.9444444444444444
+        },
+        "negation": {
+          "queryCount": 9,
+          "mrr": 1,
+          "recallAt5": 1,
+          "recallAt10": 1,
+          "top1Accuracy": 1
+        }
+      }
+    },
+    "error-solution": {
+      "overall": {
+        "queryCount": 60,
+        "mrr": 0.8491666666666667,
+        "recallAt5": 1,
+        "recallAt10": 1,
+        "top1Accuracy": 0.7333333333333333
+      },
+      "byIntent": {
+        "exact": {
+          "queryCount": 12,
+          "mrr": 0.9166666666666666,
+          "recallAt5": 1,
+          "recallAt10": 1,
+          "top1Accuracy": 0.8333333333333334
+        },
+        "paraphrase": {
+          "queryCount": 24,
+          "mrr": 0.8680555555555555,
+          "recallAt5": 1,
+          "recallAt10": 1,
+          "top1Accuracy": 0.75
+        },
+        "cross": {
+          "queryCount": 24,
+          "mrr": 0.7965277777777776,
+          "recallAt5": 1,
+          "recallAt10": 1,
+          "top1Accuracy": 0.6666666666666666
+        }
+      }
+    },
+    "insight": {
+      "overall": {
+        "queryCount": 27,
+        "mrr": 0.7685185185185185,
+        "recallAt5": 1,
+        "recallAt10": 1,
+        "top1Accuracy": 0.5925925925925926
+      },
+      "byIntent": {
+        "exact": {
+          "queryCount": 9,
+          "mrr": 1,
+          "recallAt5": 1,
+          "recallAt10": 1,
+          "top1Accuracy": 1
+        },
+        "paraphrase": {
+          "queryCount": 18,
+          "mrr": 0.6527777777777778,
+          "recallAt5": 1,
+          "recallAt10": 1,
+          "top1Accuracy": 0.3888888888888889
+        }
+      }
+    },
+    "convention": {
+      "overall": {
+        "queryCount": 42,
+        "mrr": 0.861111111111111,
+        "recallAt5": 1,
+        "recallAt10": 1,
+        "top1Accuracy": 0.7619047619047619
+      },
+      "byIntent": {
+        "exact": {
+          "queryCount": 14,
+          "mrr": 0.9642857142857143,
+          "recallAt5": 1,
+          "recallAt10": 1,
+          "top1Accuracy": 0.9285714285714286
+        },
+        "paraphrase": {
+          "queryCount": 28,
+          "mrr": 0.8095238095238095,
+          "recallAt5": 1,
+          "recallAt10": 1,
+          "top1Accuracy": 0.6785714285714286
+        }
+      }
+    },
+    "faq": {
+      "overall": {
+        "queryCount": 21,
+        "mrr": 0.8571428571428571,
+        "recallAt5": 1,
+        "recallAt10": 1,
+        "top1Accuracy": 0.7142857142857143
+      },
+      "byIntent": {
+        "exact": {
+          "queryCount": 7,
+          "mrr": 0.8571428571428571,
+          "recallAt5": 1,
+          "recallAt10": 1,
+          "top1Accuracy": 0.7142857142857143
+        },
+        "paraphrase": {
+          "queryCount": 14,
+          "mrr": 0.8571428571428571,
+          "recallAt5": 1,
+          "recallAt10": 1,
+          "top1Accuracy": 0.7142857142857143
+        }
+      }
+    }
+  }
+}

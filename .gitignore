@@ -16,3 +16,6 @@ firebase-debug.log
 # Local scratch dirs for smoke tests, reproduction harnesses, etc.
 tmp/
 .xtctx-tmp/
+
+# Per-run artifact from ranking eval (only the committed baseline is tracked)
+tests/eval/results/ranking-latest.json

@@ -1,0 +1,20 @@
+[
+  {
+    "tool": "gemini",
+    "sessionId": "snap-gemini-session",
+    "role": "user",
+    "content": "gemini snap q",
+    "timestamp": "2026-02-24T10:00:00.000Z",
+    "messageIndex": 0,
+    "tokenEstimate": 4
+  },
+  {
+    "tool": "gemini",
+    "sessionId": "snap-gemini-session",
+    "role": "assistant",
+    "content": "gemini snap a",
+    "timestamp": "2026-02-24T10:00:05.000Z",
+    "messageIndex": 1,
+    "tokenEstimate": 4
+  }
+]

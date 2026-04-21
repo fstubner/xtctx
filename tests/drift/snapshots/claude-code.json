@@ -1,0 +1,29 @@
+[
+  {
+    "tool": "claude-code",
+    "sessionId": "session-snap",
+    "role": "user",
+    "content": "snapshot question one",
+    "timestamp": "2026-02-24T10:00:00.000Z",
+    "messageIndex": 0,
+    "tokenEstimate": 6
+  },
+  {
+    "tool": "claude-code",
+    "sessionId": "session-snap",
+    "role": "assistant",
+    "content": "snapshot answer one",
+    "timestamp": "2026-02-24T10:00:05.000Z",
+    "messageIndex": 1,
+    "tokenEstimate": 5
+  },
+  {
+    "tool": "claude-code",
+    "sessionId": "session-snap",
+    "role": "user",
+    "content": "snapshot question two",
+    "timestamp": "2026-02-24T10:01:00.000Z",
+    "messageIndex": 2,
+    "tokenEstimate": 6
+  }
+]
