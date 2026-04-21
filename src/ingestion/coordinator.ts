@@ -12,6 +12,14 @@ export interface EmbeddingProvider {
 
 export interface VectorStoreLike {
   upsert(tableName: string, records: VectorRecord[]): Promise<void>;
+  /** Optional: delete all rows whose metadata carries the given source_tool. */
+  purgeByTool?(tableName: string, tool: string): Promise<number>;
+}
+
+export interface RebuildToolResult {
+  tool: string;
+  purged: number;
+  processedChunks: number;
 }
 
 /** Optional hook called after each ingestion cycle completes a write. */
@@ -78,6 +86,54 @@ export class IngestionCoordinator {
     }
 
     return { processedScrapers, processedChunks };
+  }
+
+  /**
+   * Clean-rebuild a single tool: purge its existing chunks from the store,
+   * reset its scraper state to time zero, then fullSync just that scraper.
+   *
+   * Primary use case: one-shot migration after a chunk-ID scheme change,
+   * where upserting fresh chunks would leave legacy rows in place and
+   * duplicate every piece of conversation history for the affected tool.
+   *
+   * Throws if the tool isn't detected (no scraper available or the tool
+   * has no data on disk) — callers should validate the tool name first.
+   */
+  async rebuildTool(toolName: string): Promise<RebuildToolResult> {
+    const available = await this.deps.registry.detectAvailable();
+    const scraper = available.find((s) => s.tool === toolName);
+    if (!scraper) {
+      throw new Error(
+        `No scraper named '${toolName}' is detected. ` +
+          `Available: ${available.map((s) => s.tool).join(", ") || "(none)"}`,
+      );
+    }
+
+    const purged = this.deps.store.purgeByTool
+      ? await this.deps.store.purgeByTool(this.tableName, toolName)
+      : 0;
+
+    // Reset the scraper's state so fullSync emits every chunk.
+    await scraper.saveScrapedPosition({ lastTimestamp: new Date(0) });
+
+    // Any purge is a visibility change, even when fullSync yields zero chunks
+    // afterward (e.g. the tool was uninstalled). Invalidate the session cache
+    // before re-ingest so stale entries can't survive the rebuild.
+    if (purged > 0) {
+      this.deps.sessionCache?.invalidate();
+    }
+
+    const chunks = await collectChunks(scraper.fullSync());
+    if (chunks.length > 0) {
+      const records = await this.toVectorRecords(chunks);
+      if (records.length > 0) {
+        await this.deps.store.upsert(this.tableName, records);
+        this.deps.sessionCache?.invalidate();
+      }
+      await scraper.saveScrapedPosition({ lastTimestamp: maxTimestamp(chunks) });
+    }
+
+    return { tool: toolName, purged, processedChunks: chunks.length };
   }
 
   async fullSync(): Promise<IngestionCycleResult> {

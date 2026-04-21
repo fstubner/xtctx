@@ -120,6 +120,109 @@ describe("IngestionCoordinator", () => {
     expect(store.upserts).toHaveLength(1);
     expect(store.upserts[0].records[0].vector.length).toBeGreaterThan(0);
   });
+
+  describe("rebuildTool", () => {
+    it("purges the tool's chunks, resets state, then fullSyncs just that scraper", async () => {
+      const chunks = [
+        makeChunk("s1", "2026-01-01T00:00:03.000Z", "user", "hello"),
+        makeChunk("s1", "2026-01-01T00:00:08.000Z", "assistant", "hi"),
+      ];
+      const scraper = new MockScraper(chunks);
+      // Pre-existing state that would otherwise gate `scrape()`, but `fullSync`
+      // should ignore it AND `rebuildTool` resets it beforehand.
+      await scraper.saveScrapedPosition({
+        lastTimestamp: new Date("2099-01-01T00:00:00.000Z"),
+      });
+
+      const store = new FakeStore();
+      const coordinator = new IngestionCoordinator(
+        {
+          registry: new FakeRegistry([scraper]),
+          store,
+          embeddings: new FakeEmbeddings(),
+        },
+        { tableName: "context" },
+      );
+
+      const result = await coordinator.rebuildTool("mock-tool");
+
+      expect(result.tool).toBe("mock-tool");
+      expect(result.purged).toBe(0); // FakeStore.purgeByTool returns 0 (no prior rows)
+      expect(result.processedChunks).toBe(2);
+
+      expect(store.purges).toEqual([{ table: "context", tool: "mock-tool" }]);
+      expect(store.upserts).toHaveLength(1);
+      expect(store.upserts[0].records).toHaveLength(2);
+
+      // Final saved state should track fullSync's max timestamp, not the
+      // pre-rebuild future-dated state.
+      const finalState = await scraper.getLastScrapedPosition();
+      expect(finalState.lastTimestamp.toISOString()).toBe("2026-01-01T00:00:08.000Z");
+    });
+
+    it("throws when the named tool is not detected", async () => {
+      const coordinator = new IngestionCoordinator(
+        {
+          registry: new FakeRegistry([new MockScraper([])]),
+          store: new FakeStore(),
+          embeddings: new FakeEmbeddings(),
+        },
+        { tableName: "context" },
+      );
+
+      await expect(coordinator.rebuildTool("unknown-tool")).rejects.toThrow(
+        /No scraper named 'unknown-tool'/,
+      );
+    });
+
+    it("invalidates session cache on purge-only rebuild (even when fullSync yields zero chunks)", async () => {
+      // Scraper with no chunks available — fullSync emits nothing, but the
+      // pre-existing purge still needs to invalidate cached reads.
+      const scraper = new MockScraper([]);
+      const store = new FakeStore();
+      store.purgeReturnValue = 7; // pretend 7 rows were purged
+      const invalidations: number[] = [];
+      const coordinator = new IngestionCoordinator(
+        {
+          registry: new FakeRegistry([scraper]),
+          store,
+          embeddings: new FakeEmbeddings(),
+          sessionCache: {
+            invalidate: () => invalidations.push(Date.now()),
+          },
+        },
+        { tableName: "context" },
+      );
+
+      const result = await coordinator.rebuildTool("mock-tool");
+
+      expect(result.purged).toBe(7);
+      expect(result.processedChunks).toBe(0);
+      expect(invalidations.length).toBe(1); // invalidated once despite zero chunks
+    });
+
+    it("does not invalidate cache when there's nothing to purge or ingest", async () => {
+      const scraper = new MockScraper([]);
+      const store = new FakeStore();
+      store.purgeReturnValue = 0;
+      const invalidations: number[] = [];
+      const coordinator = new IngestionCoordinator(
+        {
+          registry: new FakeRegistry([scraper]),
+          store,
+          embeddings: new FakeEmbeddings(),
+          sessionCache: {
+            invalidate: () => invalidations.push(Date.now()),
+          },
+        },
+        { tableName: "context" },
+      );
+
+      await coordinator.rebuildTool("mock-tool");
+
+      expect(invalidations.length).toBe(0);
+    });
+  });
 });
 
 class FakeRegistry {
@@ -146,12 +249,19 @@ class FakeStore {
       metadata: string;
     }>;
   }> = [];
+  readonly purges: Array<{ table: string; tool: string }> = [];
+  purgeReturnValue = 0;
 
   async upsert(
     table: string,
     records: Array<{ id: string; text: string; vector: number[]; metadata: string }>,
   ): Promise<void> {
     this.upserts.push({ table, records });
+  }
+
+  async purgeByTool(table: string, tool: string): Promise<number> {
+    this.purges.push({ table, tool });
+    return this.purgeReturnValue;
   }
 }
 

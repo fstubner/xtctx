@@ -79,11 +79,16 @@ export async function main(argv = process.argv): Promise<void> {
     .command("ingest")
     .option("-p, --project <path>", "Project root (defaults to cwd)")
     .option("--full", "Run a full re-sync instead of incremental", false)
+    .option(
+      "--rebuild-tool <name>",
+      "Purge stored chunks for one tool (e.g. copilot) and re-ingest from scratch. Use after a chunk-ID or scraper upgrade to avoid duplicate history.",
+    )
     .description("Manually trigger ingestion")
-    .action(async (options: { project?: string; full: boolean }) => {
+    .action(async (options: { project?: string; full: boolean; rebuildTool?: string }) => {
       await runIngest({
         projectPath: options.project,
         full: options.full,
+        rebuildTool: options.rebuildTool,
       });
     });
 
