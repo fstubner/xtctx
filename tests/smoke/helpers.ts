@@ -397,21 +397,32 @@ export async function seedCursor(
 }
 
 /**
- * Copilot (VS Code chat) stores a single SQLite DB at:
- *   <APPDATA>/Code/User/workspaceStorage/<hash>/state.vscdb
- * with ItemTable(key='interactive.sessions', value=JSON map).
+ * Copilot (VS Code chat) stores a single SQLite DB. VS Code uses
+ * platform-specific workspaceStorage roots, and the scraper resolves them
+ * with `process.platform` (win32 → APPDATA, linux → ~/.config, else →
+ * ~/Library/Application Support). Seed at the correct root for this host so
+ * the scraper actually finds the fixture on both Windows devs and Linux CI.
  *
- * Scraper source: src/scrapers/copilot.ts.
- * The sessions map is keyed arbitrarily; each value has {sessionId, creationDate, requests:[{message:{parts:[{text}]}, response:[{value}]}]}.
+ * Scraper source: src/scrapers/copilot.ts; default-path logic in
+ * src/runtime/ingestion.ts::defaultCopilotHistoryPath.
  */
+function copilotWorkspaceRoot(fakeHome: string): string {
+  if (process.platform === "win32") {
+    return join(fakeHome, "AppData", "Roaming", "Code", "User", "workspaceStorage");
+  }
+  if (process.platform === "linux") {
+    return join(fakeHome, ".config", "Code", "User", "workspaceStorage");
+  }
+  return join(fakeHome, "Library", "Application Support", "Code", "User", "workspaceStorage");
+}
+
 export async function seedCopilot(
   fakeHome: string,
   sessionId: string,
   turns: Array<{ user: string; assistant: string }>,
   creationDate = Date.now() - 60_000,
 ): Promise<void> {
-  const appData = join(fakeHome, "AppData", "Roaming");
-  const dbDir = join(appData, "Code", "User", "workspaceStorage", "copilotws");
+  const dbDir = join(copilotWorkspaceRoot(fakeHome), "copilotws");
   await mkdir(dbDir, { recursive: true });
   const dbPath = join(dbDir, "state.vscdb");
 

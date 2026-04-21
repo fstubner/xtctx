@@ -175,9 +175,14 @@ async function collectChunks(iterable: AsyncIterable<ConversationChunk>): Promis
 }
 
 function createChunkId(chunk: ConversationChunk): string {
+  // Include messageIndex in the hash basis so that scrapers which stamp the
+  // same session-level timestamp on every turn (notably Copilot, which stores
+  // only session `creationDate`) can still emit multiple chunks without ID
+  // collisions. Without messageIndex, two "yes" replies in the same session
+  // would hash identically and silently overwrite on upsert, losing history.
   const hash = createHash("sha256");
   hash.update(
-    `${chunk.tool}|${chunk.sessionId}|${chunk.timestamp.toISOString()}|${chunk.role}|${chunk.content}`,
+    `${chunk.tool}|${chunk.sessionId}|${chunk.timestamp.toISOString()}|${chunk.role}|${chunk.metadata.messageIndex}|${chunk.content}`,
   );
   return hash.digest("hex").slice(0, 24);
 }

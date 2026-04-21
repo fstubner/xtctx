@@ -313,18 +313,21 @@ function defaultCodexSessionsPath(): string {
 
 function defaultCopilotHistoryPath(): string {
   // VS Code stores Copilot Chat history in workspaceStorage SQLite files.
-  const appData = process.env.APPDATA;
-  if (appData) {
+  // Gate on process.platform explicitly — APPDATA can leak into Linux/macOS
+  // shells (e.g. Wine, cross-compilation envs) and mis-route to a Windows
+  // path that doesn't exist on disk (P1 from review).
+  const home = process.env.USERPROFILE ?? process.env.HOME ?? "";
+
+  if (process.platform === "win32") {
+    const appData = process.env.APPDATA ?? join(home, "AppData", "Roaming");
     return join(appData, "Code", "User", "workspaceStorage");
   }
 
-  const home = process.env.USERPROFILE ?? process.env.HOME ?? "";
   if (process.platform === "linux") {
-    // Linux: VS Code workspaceStorage lives under ~/.config (C5).
     return join(home, ".config", "Code", "User", "workspaceStorage");
   }
 
-  // macOS fallback.
+  // darwin (macOS) and any other Unix: use the macOS layout as the last fallback.
   return join(home, "Library", "Application Support", "Code", "User", "workspaceStorage");
 }
 

@@ -242,20 +242,24 @@ describe("CopilotScraper", () => {
     expect(chunks.some((c) => c.sessionId === SESSION_UUID)).toBe(true);
   });
 
-  it("filters out sessions older than the since cursor", async () => {
-    // Passing a since value strictly after the base session's creationDate
-    // should exclude it.
+  it("re-emits turns of stale sessions so late-arriving turns are not lost", async () => {
+    // Copilot only stamps a session-level creationDate — individual turns
+    // inherit it. If the scrape cursor filtered on creationDate, any session
+    // created BEFORE the cursor but updated AFTER (new turns appended) would
+    // be skipped forever, losing those turns. The scraper therefore emits
+    // every turn of every session every cycle; the ingestion layer dedupes
+    // by chunk-ID (which includes messageIndex, so repeat turns collapse and
+    // genuinely new turns land). This test documents that contract.
     const chunks: CopilotChunk[] = [];
     for await (const chunk of scraper.scrape(new Date("2026-02-25T00:00:00Z"))) {
       chunks.push(chunk);
     }
 
-    // Base session (2026-02-24) is older than the cursor, so it is excluded.
     const baseChunk = chunks.find((c) => c.sessionId === SESSION_UUID);
-    expect(baseChunk).toBeUndefined();
+    expect(baseChunk).toBeDefined();
   });
 
-  it("returns only newer session when since cursor is after base session", async () => {
+  it("emits newer session turns alongside re-emitted stale-session turns", async () => {
     const newerSessions = {
       "0": {
         sessionId: "newer-session",
@@ -272,14 +276,13 @@ describe("CopilotScraper", () => {
     await createWorkspaceDb(workspaceStorageDir, "newer-ws-hash", newerSessions);
 
     const chunks: CopilotChunk[] = [];
-    // Cursor is between the base session (2026-02-24) and the newer session (2026-02-25).
     for await (const chunk of scraper.scrape(new Date("2026-02-25T00:00:00Z"))) {
       chunks.push(chunk);
     }
 
-    // Base session is filtered out; only the newer session is returned.
+    // Both sessions are emitted; upstream ingestion dedupes by chunk-ID.
     const baseChunk = chunks.find((c) => c.sessionId === SESSION_UUID);
-    expect(baseChunk).toBeUndefined();
+    expect(baseChunk).toBeDefined();
 
     const newerChunk = chunks.find((c) => c.sessionId === "newer-session");
     expect(newerChunk).toBeDefined();

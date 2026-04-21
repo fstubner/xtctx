@@ -6,6 +6,40 @@ import { glob } from "glob";
 import type { CodexChunk } from "../types/scraper.js";
 import { AbstractScraper, estimateTokens, toDate } from "./base.js";
 
+const SCRAPER_NAME = "codex";
+
+/**
+ * Mutation shapes the codex scraper tolerates silently. Anything outside
+ * this whitelist that causes records to be dropped must warn.
+ */
+export const ACCEPTED_DEGRADATIONS = {
+  /** Sessions path missing — codex CLI simply not installed. */
+  missingSessionsPath: "codex sessions directory absent",
+  /** Blank / malformed JSONL line — we warn but keep reading. */
+  malformedJsonlLine: "JSONL line not parseable — warned, not fatal",
+  /** Event types we intentionally ignore (tool calls, meta-only events). */
+  nonMessageEventType: "event is not a conversation message",
+  /** response_item that carries a non-assistant role (system-injected context). */
+  systemInjectedUserRole: "response_item with role != assistant",
+  /** Forward-compat unknown siblings on a known event. */
+  unknownFieldsAlongside: "extra keys alongside known event schema",
+};
+
+const KNOWN_EVENT_TYPES = new Set([
+  "session_meta",
+  "turn_context",
+  "event_msg",
+  "response_item",
+  "compacted",
+]);
+
+function warnDrift(sourcePath: string, surprise: string, recordsAffected: number): void {
+  console.warn(
+    `[${SCRAPER_NAME}] schema-drift surprise at ${sourcePath}: ${surprise} ` +
+      `(records affected: ${recordsAffected})`,
+  );
+}
+
 const ROLE_MAP: Record<string, CodexChunk["role"]> = {
   user: "user",
   human: "user",
@@ -105,11 +139,36 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
         let parsed: Record<string, unknown>;
         try {
           parsed = JSON.parse(line) as Record<string, unknown>;
-        } catch {
+        } catch (err) {
+          warnDrift(
+            filePath,
+            `JSONL line not parseable: ${(err as Error).message}`,
+            1,
+          );
           continue;
         }
 
         const eventType = toStringValue(parsed.type);
+
+        // Strict-mode drift detection: an event with no readable 'type' is a
+        // surprise — Codex always stamps one. A null/missing/renamed 'type'
+        // means we cannot route the event and will silently lose data
+        // otherwise.
+        if (eventType === undefined) {
+          warnDrift(
+            filePath,
+            `event has no readable 'type' field (got ${describeType(parsed.type)})`,
+            1,
+          );
+          continue;
+        }
+
+        if (!KNOWN_EVENT_TYPES.has(eventType)) {
+          // Unknown event type — could be a new event kind added by a newer
+          // codex version. Warn so drift is observable; continue reading.
+          warnDrift(filePath, `unknown event type '${eventType}'`, 1);
+          continue;
+        }
 
         // session_meta carries the canonical session UUID.
         if (eventType === "session_meta") {
@@ -138,7 +197,25 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
         // (AGENTS.md, permissions, environment) and are intentionally skipped.
         if (eventType === "event_msg") {
           const payload = parsed.payload;
-          if (!isRecord(payload) || payload.type !== "user_message") continue;
+          if (!isRecord(payload)) {
+            warnDrift(
+              filePath,
+              `event_msg payload is not an object (got ${describeType(payload)})`,
+              1,
+            );
+            continue;
+          }
+          if (payload.type !== "user_message") {
+            // Could be a new message sub-type — warn so drift is visible.
+            if (!("type" in payload)) {
+              warnDrift(
+                filePath,
+                "event_msg payload missing 'type' key — likely renamed",
+                1,
+              );
+            }
+            continue;
+          }
 
           const content = toStringValue(payload.message);
           if (!content) {
@@ -199,11 +276,35 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
         if (eventType !== "response_item") continue;
 
         const payload = parsed.payload;
-        if (!isRecord(payload) || payload.type !== "message") continue;
+        if (!isRecord(payload)) {
+          warnDrift(
+            filePath,
+            `response_item payload is not an object (got ${describeType(payload)})`,
+            1,
+          );
+          continue;
+        }
+        if (payload.type !== "message") {
+          if (!("type" in payload)) {
+            warnDrift(
+              filePath,
+              "response_item payload missing 'type' key — likely renamed",
+              1,
+            );
+          }
+          continue;
+        }
 
         // Skip system-injected context which Codex sends as "user" role items.
         const role = toStringValue(payload.role);
         if (role !== "assistant") {
+          if (!("role" in payload)) {
+            warnDrift(
+              filePath,
+              "response_item message payload missing 'role' key",
+              1,
+            );
+          }
           messageIndex++;
           continue;
         }
@@ -336,4 +437,10 @@ function toBoolean(value: unknown): boolean {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function describeType(value: unknown): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "array";
+  return typeof value;
 }
