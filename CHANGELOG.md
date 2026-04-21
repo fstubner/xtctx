@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.4.5](https://github.com/fstubner/xtctx/compare/xtctx-v0.4.4...xtctx-v0.4.5) (2026-04-21)
+
+
+### Bug Fixes
+
+* **scrapers:** close drift gaps + 3 Copilot bugs — graceful-degradation whitelists, Linux path, incremental scrape, chunk-ID collision ([50c9bfd](https://github.com/fstubner/xtctx/commit/50c9bfdafb718c42907ee7a8e1ac253c0f8a3676))
+* **scrapers:** close drift gaps with graceful-degradation whitelists + fix three Copilot bugs ([c352b8f](https://github.com/fstubner/xtctx/commit/c352b8f9fc034601bcbee9b7e90db2bf99a2ea31))
+
 ## [0.4.4](https://github.com/fstubner/xtctx/compare/xtctx-v0.4.3...xtctx-v0.4.4) (2026-04-21)
 
 
