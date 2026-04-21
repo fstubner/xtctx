@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.4.6](https://github.com/fstubner/xtctx/compare/xtctx-v0.4.5...xtctx-v0.4.6) (2026-04-21)
+
+
+### Miscellaneous
+
+* **deps:** resolve all 33 Dependabot vulnerabilities (1 critical, 11 high, 21 moderate) ([a510727](https://github.com/fstubner/xtctx/commit/a510727d8cdc1566e319553c107bbbdd0dd47a1e))
+* **deps:** resolve all 33 Dependabot vulnerabilities (1 critical, 11 high, 21 moderate) ([c306644](https://github.com/fstubner/xtctx/commit/c30664478227808d567a042c5fc35a1d831865c9))
+
 ## [0.4.5](https://github.com/fstubner/xtctx/compare/xtctx-v0.4.4...xtctx-v0.4.5) (2026-04-21)
 
 
