@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.6.0](https://github.com/fstubner/xtctx/compare/xtctx-v0.5.0...xtctx-v0.6.0) (2026-04-21)
+
+
+### Features
+
+* **compact:** index compacted sessions into hybrid search (M2) ([63fdc44](https://github.com/fstubner/xtctx/commit/63fdc445935e81a9b26ec5662aff44d35efbb0c9))
+* **compact:** index compacted sessions into hybrid search (M2) ([7cfe4cf](https://github.com/fstubner/xtctx/commit/7cfe4cf826a7f0356b313380d9911ff01b0623d8))
+
 ## [0.5.0](https://github.com/fstubner/xtctx/compare/xtctx-v0.4.6...xtctx-v0.5.0) (2026-04-21)
 
 
