@@ -1,0 +1,19 @@
+---
+import { site } from '../data/site';
+const { faq, copy } = site;
+---
+<section id="faq">
+  <div class="w">
+    <h2>{copy.faq.heading}</h2>
+    <p class="lead" set:html={copy.faq.leadHtml} />
+
+    <div class="faq">
+      {faq.map((f) => (
+        <details>
+          <summary>{f.q}</summary>
+          <div class="answer" set:html={f.aHtml ?? f.a} />
+        </details>
+      ))}
+    </div>
+  </div>
+</section>
