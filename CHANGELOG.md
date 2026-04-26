@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.7.0](https://github.com/fstubner/xtctx/compare/xtctx-v0.6.0...xtctx-v0.7.0) (2026-04-26)
+
+
+### Features
+
+* **landing:** replace Vite+Vue landing with Astro 5 site adopted from netscli ([a6eb335](https://github.com/fstubner/xtctx/commit/a6eb335c3bb2e10166447a41692f699f5625943b))
+* **landing:** replace Vite+Vue landing with Astro 5 site adopted from netscli ([6a75bd0](https://github.com/fstubner/xtctx/commit/6a75bd022d50077a289fbf358335452117565151))
+
 ## [0.6.0](https://github.com/fstubner/xtctx/compare/xtctx-v0.5.0...xtctx-v0.6.0) (2026-04-21)
 
 
