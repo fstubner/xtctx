@@ -1,48 +1,61 @@
+/*
+ * xtctx landing — visual identity: "active continuity, fast resume."
+ *
+ * Diverges from the netscli-derived primitives:
+ *  - cooler tighter background (#0a0c10) vs neutral #111
+ *  - single bright accent (#5eead4 teal-300), no tri-color gradient
+ *  - sharp sans throughout, no monospace wordmark
+ *  - chevron section markers (›) instead of plain whitespace gaps
+ *  - left-aligned hero with a horizontal tool-handoff strip on the right
+ */
 *,*::before,*::after{box-sizing:border-box}
 html{scroll-behavior:smooth}
 body{
   margin:0;
-  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
-  background:#111;color:#d4d4d4;line-height:1.6;
+  font-family:-apple-system,BlinkMacSystemFont,"Inter","Segoe UI",Helvetica,Arial,sans-serif;
+  background:#0a0c10;color:#d6dbe1;line-height:1.6;
   -webkit-font-smoothing:antialiased;
 }
 a{color:inherit}
 code{
   font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:.85em;
-  background:rgba(255,255,255,.07);padding:2px 6px;border-radius:4px;
+  background:rgba(94,234,212,.06);padding:2px 6px;border-radius:4px;
+  color:#a7f3d0;
 }
 
 /* layout */
-.w{max-width:1060px;margin:0 auto;padding:0 24px}
+.w{max-width:1100px;margin:0 auto;padding:0 24px}
 
 /* nav */
 nav{
   position:sticky;top:0;z-index:10;
-  background:rgba(17,17,17,.85);backdrop-filter:blur(12px);
-  border-bottom:1px solid rgba(255,255,255,.06);
+  background:rgba(10,12,16,.85);backdrop-filter:blur(12px);
+  border-bottom:1px solid rgba(255,255,255,.05);
   padding:12px 24px;display:flex;align-items:center;justify-content:space-between;
 }
 .mark{
   display:inline-block;line-height:0;text-decoration:none;
-  filter:brightness(1);transition:filter 200ms;
+  transition:filter 200ms;
 }
 .mark img{
   display:block;width:160px;height:auto;image-rendering:auto;
 }
-.mark:hover{filter:brightness(1.15) drop-shadow(0 0 10px rgba(124,92,255,.35))}
+.mark:hover{filter:brightness(1.15) drop-shadow(0 0 10px rgba(94,234,212,.4))}
 .wordmark-text{
-  font-family:ui-monospace,"SF Mono",Menlo,monospace;
-  font-size:1.1875rem;font-weight:700;letter-spacing:-.01em;line-height:1;
-  background:linear-gradient(90deg,#7c5cff,#22b8cf 50%,#0aae7a);
-  -webkit-background-clip:text;background-clip:text;color:transparent;
+  font-family:-apple-system,BlinkMacSystemFont,"Inter","Segoe UI",sans-serif;
+  font-size:1.25rem;font-weight:800;letter-spacing:-.025em;line-height:1;
+  color:#5eead4;
+}
+.wordmark-text::before{
+  content:"›";color:#5eead4;margin-right:4px;opacity:.65;
 }
 @media(max-width:600px){
   .mark img{width:132px}
   .wordmark-text{font-size:1.0625rem}
 }
-.nlinks{display:flex;gap:20px;font-size:.8125rem}
-.nlinks a{color:#b0b0b0;text-decoration:none}
-.nlinks a:hover{color:#e5e5e5}
+.nlinks{display:flex;gap:22px;font-size:.8125rem;font-weight:500}
+.nlinks a{color:#9da4ad;text-decoration:none;transition:color 120ms}
+.nlinks a:hover{color:#e7ebf0}
 @media(max-width:600px){.nlinks{display:none}}
 
 /* buttons */
@@ -51,51 +64,98 @@ nav{
   padding:10px 20px;border-radius:8px;font-size:.875rem;font-weight:600;
   text-decoration:none;transition:all 120ms;
 }
-.btn-w{background:#e5e5e5;color:#111;border:1px solid #e5e5e5}
-.btn-w:hover{background:#fff;border-color:#fff}
-.btn-o{background:transparent;color:#999;border:1px solid rgba(255,255,255,.15)}
-.btn-o:hover{color:#e5e5e5;border-color:rgba(255,255,255,.3);text-decoration:none}
+.btn-w{background:#5eead4;color:#0a0c10;border:1px solid #5eead4}
+.btn-w:hover{background:#8af3df;border-color:#8af3df}
+.btn-o{background:transparent;color:#9da4ad;border:1px solid rgba(255,255,255,.12)}
+.btn-o:hover{color:#e7ebf0;border-color:rgba(94,234,212,.4);text-decoration:none}
 .gh-icon{width:16px;height:16px;fill:currentColor;flex-shrink:0}
 
-/* HERO */
-.hero{padding:72px 24px 0;text-align:center}
+/* HERO — left-aligned, two-column with handoff strip on the right */
+.hero{padding:64px 24px 0;max-width:1100px;margin:0 auto}
+.hero-grid{
+  display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,.9fr);
+  gap:48px;align-items:center;
+}
+@media(max-width:860px){
+  .hero-grid{grid-template-columns:1fr;gap:32px}
+}
 .hero .badge{
-  display:inline-block;font-size:.6875rem;font-weight:600;
-  letter-spacing:.06em;text-transform:uppercase;color:#9a9a9a;margin-bottom:16px;
+  display:inline-flex;align-items:center;gap:6px;
+  font-size:.6875rem;font-weight:600;
+  letter-spacing:.06em;text-transform:uppercase;color:#5eead4;margin-bottom:16px;
+}
+.hero .badge::before{
+  content:"";display:inline-block;width:6px;height:6px;border-radius:50%;
+  background:#5eead4;box-shadow:0 0 8px rgba(94,234,212,.6);
 }
 .hero h1{
-  font-size:clamp(1.75rem,4vw,2.75rem);font-weight:700;color:#f5f5f5;
-  letter-spacing:-.02em;margin:0 auto;line-height:1.2;
-  max-width:22ch;
+  font-size:clamp(1.875rem,4.4vw,3rem);font-weight:800;color:#f4f6f9;
+  letter-spacing:-.03em;margin:0;line-height:1.1;
 }
-.hero .sub{font-size:1.0625rem;color:#a3a3a3;max-width:680px;margin:14px auto 0}
+.hero h1 em{
+  font-style:normal;color:#5eead4;
+}
+.hero .sub{font-size:1.0625rem;color:#a8b0ba;max-width:560px;margin:18px 0 0}
 .hero .social-proof{
-  margin:12px auto 0;font-size:.75rem;color:#9a9a9a;
-  display:flex;justify-content:center;align-items:center;gap:10px;
+  margin:18px 0 0;font-size:.75rem;color:#7a818b;
+  display:flex;align-items:center;gap:10px;
   font-variant-numeric:tabular-nums;min-height:1em;
 }
 .hero .social-proof a{color:inherit;text-decoration:none}
-.hero .social-proof a:hover{color:#e5e5e5}
-.hero .social-proof .sep{color:#555}
+.hero .social-proof a:hover{color:#e7ebf0}
+.hero .social-proof .sep{color:#3a3f47}
 .hero .quick-install{
-  margin:28px auto 0;max-width:560px;
-  background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);
+  margin:28px 0 0;max-width:560px;
+  background:rgba(94,234,212,.04);border:1px solid rgba(94,234,212,.22);
   border-radius:10px;padding:12px 16px;
-  /* Soft purple ring outside the element, matching the wordmark gradient */
-  box-shadow:0 0 0 1px rgba(124,92,255,.45),0 0 24px rgba(124,92,255,.15);
   font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:.8125rem;
-  color:#ccc;display:flex;align-items:center;justify-content:space-between;gap:12px;
+  color:#d6dbe1;display:flex;align-items:center;justify-content:space-between;gap:12px;
 }
 .hero .quick-install span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.hero .links{display:flex;gap:16px;justify-content:center;margin-top:16px;flex-wrap:wrap}
-.hero .links a{
-  font-size:.8125rem;color:#a3a3a3;text-decoration:none;
-  border-bottom:1px dotted rgba(255,255,255,.22);padding-bottom:1px;
-  display:inline-flex;align-items:center;gap:4px;
+.hero .quick-install::before{
+  content:"$";color:#5eead4;font-weight:700;margin-right:8px;flex-shrink:0;
 }
-.hero .links a:hover{color:#e5e5e5;border-bottom-color:rgba(255,255,255,.5)}
-.hero .links a.plain{border-bottom:0}
-.hero .links a.plain:hover{border-bottom:0}
+.hero .links{display:flex;gap:18px;margin-top:18px;flex-wrap:wrap}
+.hero .links a{
+  font-size:.8125rem;color:#9da4ad;text-decoration:none;
+  display:inline-flex;align-items:center;gap:4px;font-weight:500;
+  transition:color 120ms;
+}
+.hero .links a::after{content:"›";color:#5eead4;margin-left:2px;opacity:.7}
+.hero .links a:hover{color:#e7ebf0}
+.hero .links a.plain::after{content:""}
+
+/* HANDOFF STRIP (hero right side) */
+.handoff{
+  display:flex;flex-direction:column;gap:14px;
+  padding:24px;border-radius:12px;
+  background:linear-gradient(135deg,rgba(94,234,212,.04),rgba(94,234,212,0));
+  border:1px solid rgba(94,234,212,.14);
+}
+.handoff-label{
+  font-size:.6875rem;font-weight:600;letter-spacing:.08em;
+  text-transform:uppercase;color:#7a818b;
+}
+.handoff-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.handoff-tool{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:6px 12px;border-radius:6px;
+  background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);
+  font-size:.8125rem;font-weight:600;color:#d6dbe1;
+}
+.handoff-tool.active{
+  background:rgba(94,234,212,.1);border-color:rgba(94,234,212,.4);
+  color:#a7f3d0;
+}
+.handoff-arrow{color:#5eead4;font-weight:700;font-size:.875rem;opacity:.7}
+.handoff-thread{
+  margin-top:6px;padding-top:14px;
+  border-top:1px dashed rgba(94,234,212,.22);
+  font-size:.75rem;color:#7a818b;
+  display:flex;align-items:center;gap:8px;
+}
+.handoff-thread::before{content:"↳";color:#5eead4}
+.handoff-thread strong{color:#a7f3d0;font-weight:600}
 
 /* PRODUCT SHOT */
 .bigshot{
@@ -107,24 +167,34 @@ nav{
 .bigshot img{width:100%;height:auto;display:block}
 
 /* SECTIONS */
-section{padding:72px 0}
-section h2{font-size:1.5rem;font-weight:700;color:#f5f5f5;margin:0 0 6px}
-section .lead{color:#a3a3a3;font-size:.9375rem;margin:0 0 28px}
-section .lead a{color:#ccc;text-decoration:underline;text-underline-offset:3px}
+section{padding:80px 0}
+section h2{
+  font-size:1.625rem;font-weight:800;color:#f4f6f9;margin:0 0 6px;
+  letter-spacing:-.02em;
+  display:flex;align-items:center;gap:10px;
+}
+section h2::before{
+  content:"›";color:#5eead4;font-weight:700;font-size:1.25em;
+  line-height:1;
+}
+section .lead{color:#a8b0ba;font-size:.9375rem;margin:0 0 32px;padding-left:24px}
+section .lead a{color:#5eead4;text-decoration:none;font-weight:500}
+section .lead a:hover{color:#8af3df;text-decoration:underline;text-underline-offset:3px}
 
 /* SURFACE CARDS */
 .surfaces{display:grid;gap:48px}
 .surface{
   display:grid;grid-template-columns:1fr 1fr;gap:32px;align-items:center;
 }
-/* Grid children default to min-width:auto (content-based), which lets a
-   long <pre> codeblock force the grid wider than the viewport. Clamping
-   to 0 lets the codeblock's own overflow-x:auto contain the overflow. */
 .surface>*{min-width:0}
 .surface.flip{direction:rtl}
 .surface.flip>*{direction:ltr;min-width:0}
-.surface-text h3{font-size:1.125rem;font-weight:700;color:#f5f5f5;margin:0 0 8px}
-.surface-text p{font-size:.875rem;color:#a8a8a8;margin:0;line-height:1.6}
+.surface-text h3{
+  font-size:1.125rem;font-weight:700;color:#f4f6f9;margin:0 0 8px;
+  letter-spacing:-.01em;
+}
+.surface-text h3 .verb{color:#5eead4}
+.surface-text p{font-size:.875rem;color:#a8b0ba;margin:0;line-height:1.65}
 .surface-text code{font-size:.75rem}
 .surface-visual img{
   width:100%;height:auto;border-radius:10px;
@@ -132,10 +202,10 @@ section .lead a{color:#ccc;text-decoration:underline;text-underline-offset:3px}
   box-shadow:0 12px 40px rgba(0,0,0,.4);
 }
 .surface-visual .codeblock{
-  background:#0b0d0e;border:1px solid rgba(255,255,255,.08);
+  background:#070809;border:1px solid rgba(94,234,212,.1);
   border-radius:10px;padding:16px 20px;
   font-family:ui-monospace,"SF Mono",Menlo,monospace;
-  font-size:.75rem;line-height:1.7;white-space:pre;overflow-x:auto;color:#ccc;
+  font-size:.75rem;line-height:1.7;white-space:pre;overflow-x:auto;color:#d6dbe1;
   box-shadow:0 12px 40px rgba(0,0,0,.4);
   position:relative;
 }
@@ -152,53 +222,53 @@ section .lead a{color:#ccc;text-decoration:underline;text-underline-offset:3px}
 @media(max-width:860px){.install-grid{grid-template-columns:1fr}}
 .install-card{margin-bottom:16px;overflow:hidden}
 .install-card:last-child{margin-bottom:0}
-.install-label{font-size:.8125rem;font-weight:600;color:#e5e5e5;margin:0 0 6px}
-.install-hint{font-size:.6875rem;color:#8a8a8a;margin:4px 0 0}
+.install-label{font-size:.8125rem;font-weight:600;color:#e7ebf0;margin:0 0 6px}
+.install-hint{font-size:.6875rem;color:#7a818b;margin:4px 0 0}
 .cmd{
-  background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);
+  background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);
   border-radius:8px;padding:12px 16px;
   font-family:ui-monospace,"SF Mono",Menlo,monospace;
   font-size:clamp(.6875rem,1.4vw,.8125rem);
-  overflow-x:auto;white-space:pre;color:#ccc;
+  overflow-x:auto;white-space:pre;color:#d6dbe1;
   scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.15) transparent;
   position:relative;
 }
 .tryblock{
-  background:#0b0d0e;border:1px solid rgba(255,255,255,.08);
+  background:#070809;border:1px solid rgba(94,234,212,.1);
   border-radius:10px;padding:16px 20px;height:100%;
   font-family:ui-monospace,"SF Mono",Menlo,monospace;
   font-size:clamp(.6875rem,1.4vw,.8125rem);
-  line-height:1.9;white-space:pre;overflow-x:auto;color:#ccc;
+  line-height:1.9;white-space:pre;overflow-x:auto;color:#d6dbe1;
   position:relative;
 }
-.tryblock .c{color:#555}
+.tryblock .c{color:#4a5058}
 
 /* FAQ */
 .faq{display:grid;gap:8px;margin-top:8px}
 .faq details{
-  background:rgba(255,255,255,.025);
-  border:1px solid rgba(255,255,255,.08);
+  background:rgba(255,255,255,.02);
+  border:1px solid rgba(255,255,255,.07);
   border-radius:10px;padding:14px 18px;
   transition:background 150ms,border-color 150ms;
 }
-.faq details[open]{background:rgba(255,255,255,.04);border-color:rgba(255,255,255,.14)}
+.faq details[open]{
+  background:rgba(94,234,212,.04);
+  border-color:rgba(94,234,212,.22);
+}
 .faq summary{
-  cursor:pointer;font-size:.9375rem;font-weight:600;color:#e5e5e5;
+  cursor:pointer;font-size:.9375rem;font-weight:600;color:#e7ebf0;
   list-style:none;display:flex;align-items:center;gap:10px;
 }
 .faq summary::-webkit-details-marker{display:none}
 .faq summary::before{
-  content:"+";font-family:ui-monospace,"SF Mono",Menlo,monospace;
-  color:#7c5cff;font-weight:700;width:14px;flex-shrink:0;
-  transition:transform 150ms;
+  content:"›";font-family:-apple-system,BlinkMacSystemFont,"Inter","Segoe UI",sans-serif;
+  color:#5eead4;font-weight:800;width:14px;flex-shrink:0;
+  transition:transform 150ms;font-size:1.125em;
 }
-.faq details[open] summary::before{content:"−"}
+.faq details[open] summary::before{transform:rotate(90deg)}
 .faq .answer{
-  color:#b0b0b0;font-size:.875rem;line-height:1.65;margin-top:12px;
+  color:#a8b0ba;font-size:.875rem;line-height:1.65;margin-top:12px;
   padding-left:24px;
-  /* Long URLs inside <code> spans don't break by default and force the
-     details card wider than the viewport. Allow breaks at any char so
-     FAQ answers respect the mobile viewport width. */
   overflow-wrap:anywhere;
   word-break:break-word;
 }
@@ -207,22 +277,21 @@ section .lead a{color:#ccc;text-decoration:underline;text-underline-offset:3px}
   overflow-wrap:anywhere;
   word-break:break-all;
 }
-.faq .answer a{color:#ccc;text-decoration:underline;text-underline-offset:3px;overflow-wrap:anywhere}
+.faq .answer a{color:#5eead4;text-decoration:underline;text-underline-offset:3px;overflow-wrap:anywhere}
 
 /* COPY BUTTON */
 .has-copy{position:relative}
 .copy-btn{
   position:absolute;top:8px;right:8px;
-  /* Opaque background so text behind the button isn't visible through it */
-  background:#222;border:1px solid rgba(255,255,255,.22);
-  border-radius:6px;color:#c8c8c8;font-size:.6875rem;font-weight:600;
+  background:#1a1f25;border:1px solid rgba(94,234,212,.25);
+  border-radius:6px;color:#a7f3d0;font-size:.6875rem;font-weight:600;
   padding:5px 12px;cursor:pointer;opacity:0;
   transition:opacity 150ms,background 120ms,color 120ms;
-  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+  font-family:-apple-system,BlinkMacSystemFont,"Inter","Segoe UI",sans-serif;
 }
 .has-copy:hover .copy-btn,.has-copy:focus-within .copy-btn{opacity:1}
-.copy-btn:hover{background:#333;color:#eee}
-.copy-btn.copied{color:#3fb950;border-color:rgba(63,185,80,.4)}
+.copy-btn:hover{background:#252b32;color:#d6f9ec}
+.copy-btn.copied{color:#5eead4;border-color:rgba(94,234,212,.6)}
 @media (hover: none){
   .copy-btn{opacity:.7}
   .copy-btn:hover{opacity:1}
@@ -230,34 +299,36 @@ section .lead a{color:#ccc;text-decoration:underline;text-underline-offset:3px}
 
 /* FOOTER */
 footer{
-  border-top:1px solid rgba(255,255,255,.06);padding:28px 24px;
+  border-top:1px solid rgba(255,255,255,.05);padding:32px 24px;
   display:flex;justify-content:space-between;align-items:center;
-  flex-wrap:wrap;gap:12px;font-size:.75rem;color:#888;
+  flex-wrap:wrap;gap:12px;font-size:.75rem;color:#7a818b;
 }
-footer a{color:#9a9a9a;text-decoration:none}
-footer a:hover{color:#ccc}
-.flinks{display:flex;gap:16px}
+footer a{color:#9da4ad;text-decoration:none}
+footer a:hover{color:#d6dbe1}
+.flinks{display:flex;gap:18px}
 
 /* RESPONSIVE */
 @media(max-width:600px){
-  .hero h1{font-size:1.625rem}
+  .hero{padding:48px 24px 0}
+  .hero h1{font-size:1.75rem}
   .hero .sub{font-size:.9375rem}
-  section{padding:48px 0}
-  section h2{font-size:1.25rem}
+  section{padding:56px 0}
+  section h2{font-size:1.375rem}
   .hero .quick-install{font-size:.75rem;padding:10px 12px}
   .hero .quick-install span{white-space:normal;overflow:visible;text-overflow:clip;word-break:break-all}
 }
 
 /* TRY BLOCK TITLE */
 .try-title{
-  font-size:.9375rem;font-weight:600;color:#e5e5e5;margin:0 0 8px;
+  font-size:.9375rem;font-weight:700;color:#e7ebf0;margin:0 0 8px;
+  letter-spacing:-.01em;
 }
 .try-title + .tryblock{margin-top:0}
 
 /* BUILT-WITH FOOTER */
 .built-with{
-  width:100%;font-size:.75rem;color:#888;text-align:center;
+  width:100%;font-size:.75rem;color:#7a818b;text-align:center;
   padding-top:18px;border-top:1px solid rgba(255,255,255,.04);margin-top:12px;
 }
-.built-with a{color:#a8a8a8;text-decoration:none}
-.built-with a:hover{color:#ccc}
+.built-with a{color:#9da4ad;text-decoration:none}
+.built-with a:hover{color:#d6dbe1}
