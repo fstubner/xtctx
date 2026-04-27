@@ -1,4 +1,5 @@
 import { startApiServer } from "../api/server.js";
+import { renderStatusBlock } from "./status.js";
 import { syncToolHooks } from "../config/hooks.js";
 import { loadEffectiveContinuityPolicy } from "../config/policy.js";
 import { syncToolConfigs } from "../config/sync.js";
@@ -169,19 +170,9 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
           startApiServer({
             projectPath: services.projectRoot,
             port: services.webPort,
-            // Pass the ingestion runtime's search so the Web UI and MCP tools
+            // Pass the ingestion runtime's search so HTTP API and MCP tools
             // both use the same LanceDB hybrid-search pipeline (fixes C1).
             searchRunner: runtime.search,
-            onScraperConfigChanged: (tool, enabled) => {
-              if (enabled) {
-                // Re-register the scraper when re-enabled via the Web UI
-                // (fixes M5 — previously only the disabled branch was handled).
-                const config = services.ingestion.scrapers.find((s) => s.tool === tool);
-                runtime.reregisterBuiltinScraper(tool, config?.customStorePath);
-              } else {
-                runtime.registry.deregister(tool);
-              }
-            },
           }),
         {
           attempts: 3,
@@ -195,11 +186,12 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
         },
       );
       await waitForApiReadiness(apiHandle.port);
-      console.error(`xtctx serve: API server active on http://127.0.0.1:${apiHandle.port}`);
-      console.error(`xtctx serve: web UI available at http://127.0.0.1:${apiHandle.port}/`);
-      console.error(
-        `xtctx serve: ingestion daemon active (poll ${services.ingestion.pollIntervalMs}ms).`,
-      );
+      const status = await renderStatusBlock({
+        services,
+        port: apiHandle.port,
+      });
+      process.stderr.write(status + "\n");
+      console.error("Press Ctrl+C to stop.");
     }
 
     console.error(`xtctx serve: MCP stdio server active for project ${services.projectRoot}`);

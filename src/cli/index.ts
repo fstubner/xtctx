@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 import { Command } from "commander";
 import { runCompact } from "./compact.js";
-import { runContext } from "./context.js";
+import { runContext, runContextRecent } from "./context.js";
 import { runIngest } from "./ingest.js";
 import { runInit } from "./init.js";
+import { runKnowledgeLs } from "./knowledge.js";
 import { runServe } from "./serve.js";
+import { runStatus } from "./status.js";
 import { runSync } from "./sync.js";
 import { readXtctxPackage } from "../utils/package-info.js";
 
@@ -42,12 +44,21 @@ export async function main(argv = process.argv): Promise<void> {
   program
     .command("sync")
     .option("-p, --project <path>", "Project root (defaults to cwd)")
+    .option("--diff", "Show what would change without writing", false)
     .description("Generate tool-native config files from shared config")
-    .action(async (options: { project?: string }) => {
-      await runSync({ projectPath: options.project });
+    .action(async (options: { project?: string; diff: boolean }) => {
+      await runSync({ projectPath: options.project, diff: options.diff });
     });
 
   program
+    .command("status")
+    .option("-p, --project <path>", "Project root (defaults to cwd)")
+    .description("Print a one-screen runtime summary (works without serve)")
+    .action(async (options: { project?: string }) => {
+      await runStatus({ projectPath: options.project });
+    });
+
+  const contextCmd = program
     .command("context")
     .option("-p, --project <path>", "Project root (defaults to cwd)")
     .option("-t, --tool <name>", "Filter context for a specific tool")
@@ -60,6 +71,46 @@ export async function main(argv = process.argv): Promise<void> {
         projectPath: options.project,
         tool: options.tool,
         sections: options.sections,
+      });
+    });
+
+  contextCmd
+    .command("recent")
+    .option("-p, --project <path>", "Project root (defaults to cwd)")
+    .option("-t, --tool <name>", "Filter to a specific tool")
+    .option("-l, --limit <n>", "Max sessions to show", (v) => Number(v), 10)
+    .option("--watch", "Re-render every 2s, exit on Ctrl+C", false)
+    .description("List recent sessions across tools")
+    .action(async (options: { project?: string; tool?: string; limit: number; watch: boolean }) => {
+      await runContextRecent({
+        projectPath: options.project,
+        tool: options.tool,
+        limit: options.limit,
+        watch: options.watch,
+      });
+    });
+
+  const knowledgeCmd = program
+    .command("knowledge")
+    .description("Inspect saved project knowledge");
+
+  knowledgeCmd
+    .command("ls")
+    .option("-p, --project <path>", "Project root (defaults to cwd)")
+    .option(
+      "--type <type>",
+      "Filter by type: decision|error_solution|insight|convention|gotcha|faq|all",
+      "all",
+    )
+    .option("--query <substring>", "Substring filter against record title")
+    .option("-l, --limit <n>", "Max records to show", (v) => Number(v), 50)
+    .description("List structured knowledge records")
+    .action(async (options: { project?: string; type: string; query?: string; limit: number }) => {
+      await runKnowledgeLs({
+        projectPath: options.project,
+        type: options.type,
+        query: options.query,
+        limit: options.limit,
       });
     });
 

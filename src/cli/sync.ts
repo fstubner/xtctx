@@ -2,14 +2,22 @@ import { join, relative, resolve } from "node:path";
 import { syncToolHooks } from "../config/hooks.js";
 import { loadMcpServerDefinitions, syncToolMcpConfigs } from "../config/mcp-config.js";
 import { loadSkillDefinitions, syncToolSkills } from "../config/skills.js";
-import { syncToolConfigs } from "../config/sync.js";
+import { previewToolContinuity, syncToolConfigs } from "../config/sync.js";
+import { DEFAULT_REGISTERED_TOOLS } from "../config/policy.js";
 
 export interface SyncOptions {
   projectPath?: string;
+  diff?: boolean;
 }
 
 export async function runSync(options: SyncOptions = {}): Promise<void> {
   const projectRoot = resolve(options.projectPath ?? process.cwd());
+
+  if (options.diff) {
+    await runSyncDiff(projectRoot);
+    return;
+  }
+
   const result = await syncToolConfigs(projectRoot);
 
   console.log(
@@ -100,4 +108,69 @@ export async function runSync(options: SyncOptions = {}): Promise<void> {
       }
     }
   }
+}
+
+async function runSyncDiff(projectRoot: string): Promise<void> {
+  let totalChanges = 0;
+
+  for (const tool of DEFAULT_REGISTERED_TOOLS) {
+    const preview = await previewToolContinuity(tool, projectRoot);
+    if (!preview.enabled) {
+      continue;
+    }
+
+    for (const target of preview.targets) {
+      const expected = preview.rendered_content
+        ? renderManagedSectionFromPreview(target.expected_managed_block)
+        : "";
+      const current = target.current_managed_block ?? "";
+
+      if (normalize(expected) === normalize(current) && target.exists) {
+        continue;
+      }
+
+      totalChanges += 1;
+      const displayPath = relative(projectRoot, target.path) || target.path;
+      console.log(`# ${tool}: ${target.exists ? "drift" : "missing"} — ${displayPath}`);
+      console.log(unifiedDiff(current, expected, displayPath));
+      console.log("");
+    }
+  }
+
+  if (totalChanges === 0) {
+    console.log("All tool continuity targets are in sync — nothing to write.");
+  } else {
+    console.log(`# Run 'xtctx sync' (without --diff) to apply ${totalChanges} change(s).`);
+  }
+}
+
+function renderManagedSectionFromPreview(block: string): string {
+  return block;
+}
+
+function normalize(value: string): string {
+  return value.replace(/\r\n/g, "\n").trimEnd();
+}
+
+/**
+ * Tiny line-by-line unified diff that doesn't pull in a dependency. Output is
+ * intentionally simple: full old block followed by full new block with `-`/`+`
+ * prefixes and a single hunk header. Good enough for human inspection of
+ * managed-section drift.
+ */
+function unifiedDiff(oldText: string, newText: string, label: string): string {
+  const oldLines = normalize(oldText).split("\n");
+  const newLines = normalize(newText).split("\n");
+
+  const lines: string[] = [];
+  lines.push(`--- a/${label}`);
+  lines.push(`+++ b/${label}`);
+  lines.push(`@@ -1,${oldLines.length} +1,${newLines.length} @@`);
+  for (const line of oldLines) {
+    lines.push(`-${line}`);
+  }
+  for (const line of newLines) {
+    lines.push(`+${line}`);
+  }
+  return lines.join("\n");
 }

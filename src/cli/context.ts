@@ -7,6 +7,16 @@ export interface ContextOptions {
   projectPath?: string;
   tool?: string;
   sections?: string[];
+  watch?: boolean;
+  watchIntervalMs?: number;
+}
+
+export interface RecentContextOptions {
+  projectPath?: string;
+  tool?: string;
+  watch?: boolean;
+  watchIntervalMs?: number;
+  limit?: number;
 }
 
 const DEFAULT_SECTIONS = ["sessions", "knowledge", "nudge"] as const;
@@ -108,6 +118,91 @@ async function renderKnowledge(knowledge: KnowledgeRepository): Promise<string |
   }
 
   return lines.join("\n");
+}
+
+export async function runContextRecent(options: RecentContextOptions = {}): Promise<void> {
+  const projectRoot = resolve(options.projectPath ?? process.cwd());
+  const services = await createProjectServices(projectRoot);
+  const limit = options.limit && options.limit > 0 ? Math.floor(options.limit) : 10;
+  const filter = options.tool ? [options.tool] : undefined;
+
+  const renderOnce = async (): Promise<string> => {
+    const sessions = await services.sessions.listRecentSessions(limit, filter);
+    return formatRecentTable(sessions, limit);
+  };
+
+  if (!options.watch) {
+    process.stdout.write((await renderOnce()) + "\n");
+    return;
+  }
+
+  const intervalMs = Math.max(500, options.watchIntervalMs ?? 2000);
+  let stopping = false;
+  const stop = () => {
+    if (stopping) return;
+    stopping = true;
+    process.stdout.write("\n");
+    process.exit(0);
+  };
+  process.on("SIGINT", stop);
+  process.on("SIGTERM", stop);
+
+  const draw = async (): Promise<void> => {
+    if (stopping) return;
+    const block = await renderOnce();
+    // Clear screen + move cursor home so each cycle replaces the previous render.
+    process.stdout.write("\x1b[2J\x1b[H");
+    process.stdout.write(`xtctx context recent --watch  (refreshing every ${intervalMs}ms, Ctrl+C to exit)\n\n`);
+    process.stdout.write(block + "\n");
+  };
+
+  await draw();
+  const timer: NodeJS.Timeout = setInterval(() => {
+    void draw();
+  }, intervalMs);
+  // Keep node alive until SIGINT.
+  await new Promise<void>(() => {
+    void timer;
+  });
+}
+
+function formatRecentTable(sessions: SessionSummary[], limit: number): string {
+  if (sessions.length === 0) {
+    return `(no recent sessions; ingestion may not have run yet)`;
+  }
+
+  const headers = ["TOOL", "STARTED", "MSGS", "REF", "SUMMARY"];
+  const rows = sessions.slice(0, limit).map((session) => [
+    session.tool,
+    formatDate(session.started_at),
+    session.message_count != null ? String(session.message_count) : "—",
+    truncate(session.session_ref, 32),
+    truncate(session.summary ?? "", 60),
+  ]);
+
+  const widths = headers.map((header, i) =>
+    Math.max(header.length, ...rows.map((row) => row[i]!.length)),
+  );
+
+  const formatRow = (cells: string[]): string =>
+    cells.map((cell, i) => cell.padEnd(widths[i]!)).join("  ").trimEnd();
+
+  const lines = [formatRow(headers)];
+  for (const row of rows) {
+    lines.push(formatRow(row));
+  }
+  return lines.join("\n");
+}
+
+function formatDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso || "—";
+  return d.toISOString().slice(0, 16).replace("T", " ");
+}
+
+function truncate(value: string, max: number): string {
+  if (value.length <= max) return value;
+  return value.slice(0, max - 1) + "…";
 }
 
 function renderNudge(): string {

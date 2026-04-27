@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
@@ -43,8 +43,8 @@ describe("Sources API routes", () => {
     await rm(workspaceDir, { recursive: true, force: true });
   });
 
-  it("returns source config and persists scraper updates", async () => {
-    const config = await fetchJson(`${baseUrl}/api/sources/config`) as {
+  it("returns introspection-only source config (GET endpoints)", async () => {
+    const config = (await fetchJson(`${baseUrl}/api/sources/config`)) as {
       watchPaths: string[];
       pollIntervalMs: number;
       excludePatterns: string[];
@@ -55,25 +55,15 @@ describe("Sources API routes", () => {
     expect(typeof config.pollIntervalMs).toBe("number");
     expect(config.scrapers.some((scraper) => scraper.tool === "codex")).toBe(true);
 
-    const updated = await fetchJson(`${baseUrl}/api/sources/scrapers/codex`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        enabled: false,
-        customStorePath: ".xtctx/custom-codex-history",
-      }),
-    }) as {
-      tool: string;
-      scraper: { tool: string; enabled: boolean; path: string } | null;
+    const status = (await fetchJson(`${baseUrl}/api/sources/status`)) as {
+      ok: boolean;
+      scrapers: Array<{ tool: string; enabled: boolean; detected: boolean }>;
+      knowledgeRecords: number;
     };
 
-    expect(updated.tool).toBe("codex");
-    expect(updated.scraper?.enabled).toBe(false);
-    expect(updated.scraper?.path).toContain("custom-codex-history");
-
-    const configYaml = await readFile(join(projectDir, ".xtctx", "config.yaml"), "utf-8");
-    expect(configYaml).toContain("tool: codex");
-    expect(configYaml).toContain("customStorePath: .xtctx/custom-codex-history");
+    expect(status.ok).toBe(true);
+    expect(Array.isArray(status.scrapers)).toBe(true);
+    expect(typeof status.knowledgeRecords).toBe("number");
   });
 });
 

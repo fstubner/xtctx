@@ -13,8 +13,7 @@
     }
   },
   "scripts": {
-    "build": "tsc",
-    "build:bundle-web": "npm run web:build && npm run web:copy-dist",
+    "build": "tsc && node scripts/copy-static-assets.mjs",
     "dev": "tsx watch src/cli/index.ts",
     "test": "vitest run --exclude=tests/smoke/** --exclude=tests/eval/** --exclude=tests/drift/** --exclude=tests/bench/**",
     "test:security": "vitest run tests/api/security.test.ts",
@@ -29,17 +28,13 @@
     "lint": "eslint src/ tests/",
     "mcp": "tsx src/mcp/server.ts",
     "api": "tsx src/api/server.ts",
-    "web:dev": "npm --prefix web run dev",
-    "web:build": "npm --prefix web run build",
-    "web:preview": "npm --prefix web run preview",
-    "web:copy-dist": "node scripts/copy-web-dist.mjs",
     "landing:dev": "npm --prefix landing run dev",
     "landing:build": "npm --prefix landing run build",
     "landing:preview": "npm --prefix landing run preview",
-    "prepack": "npm run build && npm run build:bundle-web",
+    "prepack": "npm run build",
     "smoke:cli": "node dist/src/cli/index.js --help",
     "test:smoke": "vitest run tests/smoke --testTimeout=180000",
-    "verify:release": "npm test && npm run test:security && npm run security:checklist && npm run test:eval && npm run test:drift && npm run build && npm run build:bundle-web && npm run landing:build && npm run smoke:cli && npm run test:smoke"
+    "verify:release": "npm test && npm run test:security && npm run security:checklist && npm run test:eval && npm run test:drift && npm run build && npm run landing:build && npm run smoke:cli && npm run test:smoke"
   },
   "dependencies": {
     "@lancedb/lancedb": "^0.13.0",

@@ -33,10 +33,9 @@ Or run everything with:
 
 ## Project Layout
 
-- `src/`: core runtime, CLI, MCP, scrapers, API
+- `src/`: core runtime, CLI, MCP, scrapers, API (incl. static landing page at `src/api/static/`)
 - `tests/`: unit + integration tests
-- `web/`: Vue web UI
-- `landing/`: Vue public landing site (GitHub Pages)
+- `landing/`: Astro public landing site (GitHub Pages)
 - `.xtctx/`: project-local configs, skills, and knowledge conventions
 - `docs/plans/`: design + implementation docs
 
