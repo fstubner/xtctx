@@ -27,7 +27,8 @@ Init -> Sync -> Serve -> Recall -> Writeback
 
 1. `xtctx init` scaffolds `.xtctx/` (config, policy, memory folders).
 2. `xtctx sync` renders managed continuity blocks into tool-native targets.
-3. `xtctx serve` runs MCP + API + runtime web UI, and auto-reconciles sync drift.
+3. `xtctx serve` runs the MCP server + API + ingestion daemon, and
+   auto-reconciles sync drift.
 4. At session start, call recall tools first.
 5. After validated implementation, write outcomes back for the next handoff.
 
@@ -35,7 +36,6 @@ Init -> Sync -> Serve -> Recall -> Writeback
 
 ```bash
 npm ci
-npm --prefix web ci
 npm --prefix landing ci
 npm run build
 
@@ -44,17 +44,32 @@ npx xtctx sync
 npx xtctx serve
 ```
 
-Open:
+Surfaces:
 
-- Runtime UI: `http://127.0.0.1:3232/`
-- Health: `http://127.0.0.1:3232/health`
 - API: `http://127.0.0.1:3232/api/*`
+- Health: `http://127.0.0.1:3232/health`
+- Landing (HTML cheat sheet): `http://127.0.0.1:3232/`
+- MCP: stdio (consumed by your AI assistant)
 
 Optional full re-index:
 
 ```bash
 npx xtctx ingest --full
 ```
+
+## CLI cheat sheet
+
+xtctx is CLI-first — humans drive it from the terminal, AI assistants drive it
+through MCP. Key introspection commands:
+
+| Command | What it does |
+|---|---|
+| `xtctx status` | One-screen runtime summary: store size, last ingest, per-tool sync state. Reads from disk, works whether or not `xtctx serve` is running. |
+| `xtctx context recent [--watch]` | List recent sessions across tools. `--watch` re-renders every 2 seconds; Ctrl+C to exit. |
+| `xtctx knowledge ls [--type=...] [--query="..."] [--limit=N]` | List structured knowledge records (decisions, error solutions, gotchas, FAQs, etc.) as a table. |
+| `xtctx sync [--diff]` | Reconcile tool-native config files. With `--diff`, print a unified diff of what would change instead of writing. |
+| `xtctx ingest [--full]` | Manually trigger ingestion (incremental by default). |
+| `xtctx serve` | Run MCP + API + ingestion daemon. Prints a status block at startup. |
 
 ## Practical Cross-Tool Session Pattern
 
@@ -74,8 +89,6 @@ xtctx_save_faq({ question, answer })
 ```
 
 This is the handoff loop that keeps context continuity stable across assistant boundaries.
-
-![xtctx runtime search UI](docs/screenshots/dashboard-search.png)
 
 ## Continuity Policy Model
 
@@ -157,8 +170,8 @@ Security overrides:
 
 ## Search
 
-`xtctx_search` and the Web UI search bar both use the same **LanceDB hybrid
-search pipeline** (vector + full-text, Reciprocal Rank Fusion):
+`xtctx_search` (MCP) and `GET /api/search` (HTTP) both use the same
+**LanceDB hybrid search pipeline** (vector + full-text, Reciprocal Rank Fusion):
 
 - `hybrid` (default) — fuses semantic and keyword rankings
 - `semantic` — embedding vector similarity only
@@ -180,7 +193,6 @@ The runtime holds a short-lived in-memory index of conversation sessions for
 ## Project Layout
 
 - `src/`: CLI, API, MCP, ingestion, storage, sync engine
-- `web/`: runtime operations console served by `xtctx serve`
 - `landing/`: public site deployed via GitHub Pages
 - `tests/`: unit/integration/security suites
 

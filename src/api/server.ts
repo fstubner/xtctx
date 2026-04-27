@@ -1,8 +1,8 @@
 import express from "express";
 import { createHash, timingSafeEqual } from "node:crypto";
-import { stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { createServer } from "node:http";
-import { dirname, extname, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import rateLimit from "express-rate-limit";
 import helmet from "helmet";
@@ -21,7 +21,6 @@ import { errorMessage } from "../utils/errors.js";
 export interface ApiServerOptions {
   projectPath?: string;
   port?: number;
-  webStaticDir?: string;
   /**
    * Optional pre-built search runner (e.g. from the ingestion runtime in
    * `serve` mode). When omitted, `createApiApp` constructs its own
@@ -30,7 +29,6 @@ export interface ApiServerOptions {
    */
   searchRunner?: SearchRunner;
   security?: Partial<ApiSecurityOptions>;
-  onScraperConfigChanged?: (tool: string, enabled: boolean) => void;
 }
 
 export interface ApiSecurityOptions {
@@ -78,13 +76,13 @@ class LazyEmbeddingService extends EmbeddingService {
 
 export async function createApiApp(
   projectPath?: string,
-  options: Pick<ApiServerOptions, "webStaticDir" | "security" | "onScraperConfigChanged" | "searchRunner"> = {},
+  options: Pick<ApiServerOptions, "security" | "searchRunner"> = {},
 ): Promise<{
   app: express.Express;
   port: number;
 }> {
   const services = await createProjectServices(projectPath);
-  const webAssets = await resolveWebAssets(options.webStaticDir);
+  const landingPage = await loadLandingPage();
   const security = resolveSecurityOptions(services.webPort, {
     ...services.apiSecurity,
     ...(options.security ?? {}),
@@ -161,32 +159,15 @@ export async function createApiApp(
       ingestion: services.ingestion,
       sessions: services.sessions,
       knowledgeRecords,
-      onScraperConfigChanged: options.onScraperConfigChanged,
     }),
   );
   app.use("/api/continuity", createContinuityRouter({ projectRoot: services.projectRoot }));
   app.use("/api/config", createConfigRouter(services.configs));
-  if (webAssets) {
-    app.use(express.static(webAssets.root, { index: false }));
 
-    app.get("/", (_req, res) => {
-      res.sendFile(webAssets.indexFile);
-    });
-
-    app.get("/{*path}", (req, res, next) => {
-      if (req.path === "/health" || req.path === "/api" || req.path.startsWith("/api/")) {
-        next();
-        return;
-      }
-
-      if (extname(req.path)) {
-        next();
-        return;
-      }
-
-      res.sendFile(webAssets.indexFile);
-    });
-  }
+  app.get("/", (_req, res) => {
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.send(landingPage);
+  });
 
   app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     const status = asHttpStatus(error);
@@ -208,9 +189,7 @@ export async function createApiApp(
 
 export async function startApiServer(options: ApiServerOptions = {}): Promise<ApiServerHandle> {
   const { app, port: defaultPort } = await createApiApp(options.projectPath, {
-    webStaticDir: options.webStaticDir,
     security: options.security,
-    onScraperConfigChanged: options.onScraperConfigChanged,
     searchRunner: options.searchRunner,
   });
   const port = options.port ?? defaultPort;
@@ -244,28 +223,22 @@ if (import.meta.url === invokedPath) {
   });
 }
 
-interface WebAssets {
-  root: string;
-  indexFile: string;
-}
-
-async function resolveWebAssets(webStaticDir?: string): Promise<WebAssets | null> {
+async function loadLandingPage(): Promise<string> {
   const moduleDir = dirname(fileURLToPath(import.meta.url));
-  const candidates = dedupePaths([
-    webStaticDir,
-    resolve(moduleDir, "..", "..", "..", "web", "dist"),
-    resolve(moduleDir, "..", "..", "..", "dist", "web"),
-    resolve(moduleDir, "..", "..", "web"),
-  ]);
+  // Resolve from both `dist/src/api/static/` (after `npm run build`) and
+  // `src/api/static/` (when running via tsx, e.g. `npm run api`).
+  const candidates = [
+    resolve(moduleDir, "static", "index.html"),
+    resolve(moduleDir, "..", "..", "..", "src", "api", "static", "index.html"),
+  ];
 
   for (const candidate of candidates) {
-    const indexFile = join(candidate, "index.html");
-    if (await isFile(indexFile)) {
-      return { root: candidate, indexFile };
+    if (await isFile(candidate)) {
+      return readFile(candidate, "utf-8");
     }
   }
 
-  return null;
+  return "<!doctype html><title>xtctx</title><h1>xtctx is running.</h1>";
 }
 
 async function isFile(path: string): Promise<boolean> {

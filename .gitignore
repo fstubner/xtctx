@@ -1,6 +1,5 @@
 node_modules/
 dist/
-web/dist/
 landing/dist/
 .xtctx/.store/
 .xtctx/state/

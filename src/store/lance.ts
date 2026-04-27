@@ -156,6 +156,15 @@ export class LanceStore {
     return names.includes(tableName);
   }
 
+  async countRows(tableName: string): Promise<number> {
+    const db = this.requireDb();
+    if (!(await this.tableExists(tableName))) {
+      return 0;
+    }
+    const table = await db.openTable(tableName);
+    return table.countRows();
+  }
+
   async deleteTable(tableName: string): Promise<void> {
     const db = this.requireDb();
     await db.dropTable(tableName);

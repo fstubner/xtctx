@@ -5,16 +5,19 @@ Guidance for coding agents working in this repository.
 ## Project Scope
 
 - `src/`: runtime code (CLI, API, MCP, ingestion, storage)
-- `web/`: Vue + PrimeVue runtime UI served by `xtctx serve`
-- `landing/`: Vue + PrimeVue public landing app deployed via GitHub Pages
+- `landing/`: Astro public landing site deployed via GitHub Pages
 - `tests/`: unit, integration, and security tests
 - `docs/`: plans and security documentation
+
+xtctx is CLI-first: humans drive it from the terminal (`xtctx status`,
+`xtctx context recent`, `xtctx knowledge ls`, `xtctx sync --diff`); AI
+assistants drive it through MCP. There is no runtime web UI; the API
+server's `/` route serves a static landing page.
 
 ## Common Commands
 
 ```bash
 npm ci
-npm --prefix web ci
 npm --prefix landing ci
 npm run verify:release
 ```
@@ -48,7 +51,7 @@ Session writeback should prioritize concise, actionable records with file/comman
 
 ## UX Quality Checklist
 
-For `web/` and `landing/` changes, verify:
+For `landing/` changes, verify:
 
 1. Visual hierarchy is clear on desktop and mobile.
 2. Empty/loading/error states are explicit and usable.
