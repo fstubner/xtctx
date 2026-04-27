@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.7.1](https://github.com/fstubner/xtctx/compare/xtctx-v0.7.0...xtctx-v0.7.1) (2026-04-27)
+
+
+### Miscellaneous
+
+* **web:** drop runtime SPA in favor of CLI-only introspection ([b07b379](https://github.com/fstubner/xtctx/commit/b07b379b0a05fda2310f95ac6c95f9018d570c6a))
+* **web:** drop runtime SPA in favor of CLI-only introspection ([a06f17b](https://github.com/fstubner/xtctx/commit/a06f17bbf335a98038940308f46655535b98471a))
+
 ## [0.7.0](https://github.com/fstubner/xtctx/compare/xtctx-v0.6.0...xtctx-v0.7.0) (2026-04-26)
 
 
