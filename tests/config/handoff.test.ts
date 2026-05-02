@@ -131,21 +131,40 @@ describe("cross-tool handoff integration", () => {
     const geminiMd = await readFile(join(projectDir, "GEMINI.md"), "utf-8");
     expect(geminiMd).toContain("### Skill: foo");
 
-    // Verify Claude Code gets native MCP config
+    // Verify Claude Code gets native MCP config (.mcp.json, mcpServers root)
     const mcpJson = JSON.parse(await readFile(join(projectDir, ".mcp.json"), "utf-8")) as {
       mcpServers: Record<string, unknown>;
     };
     expect(mcpJson.mcpServers.bar).toBeDefined();
 
-    // Verify Cursor gets native MCP config
+    // Verify Cursor gets native MCP config (.cursor/mcp.json, mcpServers root)
     const cursorMcp = JSON.parse(
       await readFile(join(projectDir, ".cursor", "mcp.json"), "utf-8"),
     ) as { mcpServers: Record<string, unknown> };
     expect(cursorMcp.mcpServers.bar).toBeDefined();
 
-    // Verify Codex/Copilot/Gemini get MCP connection details embedded
-    expect(agentsMd).toContain("## MCP server connection details");
-    expect(agentsMd).toContain("### bar");
+    // Verify VS Code Copilot gets native MCP config (.vscode/mcp.json, `servers` root)
+    const copilotMcp = JSON.parse(
+      await readFile(join(projectDir, ".vscode", "mcp.json"), "utf-8"),
+    ) as { servers: Record<string, unknown> };
+    expect(copilotMcp.servers.bar).toBeDefined();
+
+    // Verify Codex gets native MCP config as TOML in .codex/config.toml
+    const codexToml = await readFile(join(projectDir, ".codex", "config.toml"), "utf-8");
+    expect(codexToml).toMatch(/\[mcp_servers\.bar\]/);
+
+    // Verify Gemini gets native MCP config (.gemini/settings.json, mcpServers root)
+    const geminiSettings = JSON.parse(
+      await readFile(join(projectDir, ".gemini", "settings.json"), "utf-8"),
+    ) as { mcpServers: Record<string, unknown> };
+    expect(geminiSettings.mcpServers.bar).toBeDefined();
+
+    // With native MCP rendering for Codex/Copilot/Gemini, the markdown
+    // embedding should NO LONGER appear in their memory files. The native
+    // config files above are the canonical destination now.
+    expect(agentsMd).not.toContain("## MCP server connection details");
+    expect(copilotMd).not.toContain("## MCP server connection details");
+    expect(geminiMd).not.toContain("## MCP server connection details");
   });
 
   it("is idempotent — double sync produces no second changes", async () => {
