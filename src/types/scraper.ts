@@ -89,3 +89,19 @@ export interface GeminiChunk extends ConversationChunk {
     responseTokens?: number;
   };
 }
+
+export interface OpenCodeChunk extends ConversationChunk {
+  tool: "opencode";
+  metadata: ChunkMetadata & {
+    agent?: string;
+    model?: string;
+    providerID?: string;
+  };
+}
+
+export interface CopilotCliChunk extends ConversationChunk {
+  tool: "copilot-cli";
+  metadata: ChunkMetadata & {
+    eventType?: string;
+  };
+}

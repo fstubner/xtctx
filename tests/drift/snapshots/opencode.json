@@ -1,0 +1,20 @@
+[
+  {
+    "tool": "opencode",
+    "sessionId": "snap-opencode-session",
+    "role": "user",
+    "content": "opencode snap q",
+    "timestamp": "2026-02-24T10:00:00.000Z",
+    "messageIndex": 0,
+    "tokenEstimate": 4
+  },
+  {
+    "tool": "opencode",
+    "sessionId": "snap-opencode-session",
+    "role": "assistant",
+    "content": "opencode snap a",
+    "timestamp": "2026-02-24T10:00:05.000Z",
+    "messageIndex": 1,
+    "tokenEstimate": 4
+  }
+]

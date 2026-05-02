@@ -19,8 +19,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ClaudeCodeScraper } from "@xtctx/scrapers/claude-code";
 import { CodexCliScraper } from "@xtctx/scrapers/codex";
 import { CopilotScraper } from "@xtctx/scrapers/copilot";
+import { CopilotCliScraper } from "@xtctx/scrapers/copilot-cli";
 import { CursorScraper } from "@xtctx/scrapers/cursor";
 import { GeminiCliScraper } from "@xtctx/scrapers/gemini";
+import { OpenCodeScraper } from "@xtctx/scrapers/opencode";
 import type { ConversationChunk, ConversationScraper } from "@xtctx/types/scraper";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -234,6 +236,108 @@ describe("Golden snapshots", () => {
     const scraper = new CursorScraper(workspaceDir, stateDir);
     const chunks = await collectChunks(scraper);
     await assertSnapshot("cursor", normalise(chunks));
+  });
+
+  it("opencode", async () => {
+    const rootDir = await mkTemp("xtctx-snap-opencode-");
+    const stateDir = await mkTemp("xtctx-snap-state-");
+    const dbPath = join(rootDir, "opencode.db");
+
+    const db = new Database(dbPath);
+    db.exec(`
+      CREATE TABLE session (
+        id TEXT PRIMARY KEY, project_id TEXT NOT NULL, workspace_id TEXT,
+        parent_id TEXT, slug TEXT NOT NULL, directory TEXT NOT NULL,
+        path TEXT, title TEXT NOT NULL, version TEXT NOT NULL, share_url TEXT,
+        time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL,
+        time_compacting INTEGER, time_archived INTEGER
+      );
+      CREATE TABLE message (
+        id TEXT PRIMARY KEY, session_id TEXT NOT NULL,
+        time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL,
+        data TEXT NOT NULL
+      );
+      CREATE TABLE part (
+        id TEXT PRIMARY KEY, message_id TEXT NOT NULL,
+        session_id TEXT NOT NULL, time_created INTEGER NOT NULL,
+        data TEXT NOT NULL
+      );
+    `);
+    const sessId = "snap-opencode-session";
+    const t0 = new Date("2026-02-24T10:00:00Z").getTime();
+    const t1 = new Date("2026-02-24T10:00:05Z").getTime();
+    db.prepare(
+      `INSERT INTO session VALUES (?, 'p1', NULL, NULL, 's', '/tmp', NULL, 'snap', '0.1', NULL, ?, ?, NULL, NULL)`,
+    ).run(sessId, t0, t1);
+    db.prepare(`INSERT INTO message VALUES (?, ?, ?, ?, ?)`).run(
+      "m1",
+      sessId,
+      t0,
+      t0,
+      JSON.stringify({ id: "m1", sessionID: sessId, role: "user", agent: "build", time: { created: t0 } }),
+    );
+    db.prepare(`INSERT INTO message VALUES (?, ?, ?, ?, ?)`).run(
+      "m2",
+      sessId,
+      t1,
+      t1,
+      JSON.stringify({
+        id: "m2",
+        sessionID: sessId,
+        role: "assistant",
+        agent: "build",
+        modelID: "claude-3-5-sonnet",
+        providerID: "anthropic",
+        time: { created: t1 },
+      }),
+    );
+    db.prepare(`INSERT INTO part VALUES (?, ?, ?, ?, ?)`).run(
+      "p1",
+      "m1",
+      sessId,
+      t0,
+      JSON.stringify({ type: "text", text: "opencode snap q" }),
+    );
+    db.prepare(`INSERT INTO part VALUES (?, ?, ?, ?, ?)`).run(
+      "p2",
+      "m2",
+      sessId,
+      t1,
+      JSON.stringify({ type: "text", text: "opencode snap a" }),
+    );
+    db.close();
+
+    const scraper = new OpenCodeScraper(dbPath, stateDir);
+    const chunks = await collectChunks(scraper);
+    await assertSnapshot("opencode", normalise(chunks));
+  });
+
+  it("copilot-cli", async () => {
+    const tempDir = await mkTemp("xtctx-snap-copilot-cli-");
+    const stateDir = await mkTemp("xtctx-snap-state-");
+    const sessionDir = join(tempDir, "snap-copilot-cli-session");
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      join(sessionDir, "events.jsonl"),
+      [
+        JSON.stringify({
+          type: "message",
+          role: "user",
+          content: "copilot cli snap q",
+          timestamp: "2026-02-24T10:00:00Z",
+        }),
+        JSON.stringify({
+          type: "message",
+          role: "assistant",
+          content: "copilot cli snap a",
+          timestamp: "2026-02-24T10:00:05Z",
+        }),
+      ].join("\n") + "\n",
+    );
+
+    const scraper = new CopilotCliScraper(tempDir, stateDir);
+    const chunks = await collectChunks(scraper);
+    await assertSnapshot("copilot-cli", normalise(chunks));
   });
 
   it("gemini", async () => {

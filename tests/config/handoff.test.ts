@@ -87,7 +87,7 @@ describe("cross-tool handoff integration", () => {
 
     // Phase 2: Sync hooks
     const hookResults = await syncToolHooks(projectDir);
-    expect(hookResults.length).toBe(5); // claude, cursor, codex, copilot, gemini
+    expect(hookResults.length).toBe(7); // claude, cursor, codex, copilot, gemini, opencode, copilot-cli
 
     // Phase 3: Sync skill files
     const configRoot = join(projectDir, ".xtctx", "tool-config");
@@ -245,13 +245,13 @@ describe("cross-tool handoff integration", () => {
     expect(cursorMcp.mcpServers.bar.command).toBe("npx");
   });
 
-  it("hooks are generated for all five tools", async () => {
+  it("hooks are generated for all seven tools", async () => {
     const results = await syncToolHooks(projectDir);
 
-    expect(results).toHaveLength(5);
+    expect(results).toHaveLength(7);
 
     const tools = results.map((r) => r.tool).sort();
-    expect(tools).toEqual(["claude", "codex", "copilot", "cursor", "gemini"]);
+    expect(tools).toEqual(["claude", "codex", "copilot", "copilot-cli", "cursor", "gemini", "opencode"]);
 
     // Claude gets a real hook
     const hooksJson = JSON.parse(
