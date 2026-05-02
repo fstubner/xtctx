@@ -9,7 +9,10 @@
  */
 import { describe, it, expect } from "vitest";
 
-// @ts-expect-error - .mjs with no type definitions; we use it as JS here.
+// drift-canary.mjs is plain ESM (no shebang — it's only ever invoked as
+// `node scripts/drift-canary.mjs`, never executed directly). Static import
+// works once the shebang is gone.
+// @ts-expect-error - .mjs has no .d.mts companion; treated as JS here.
 import { runCanary } from "../../scripts/drift-canary.mjs";
 
 type Chunk = {

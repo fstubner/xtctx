@@ -1,8 +1,12 @@
-#!/usr/bin/env node
 /**
  * drift-canary.mjs — runs a real AI CLI tool against a scripted prompt, lets it
  * write its actual on-disk storage, then runs xtctx's scraper against that
  * storage and asserts the scraper still returns usable output.
+ *
+ * Note: no `#!/usr/bin/env node` shebang. The script is always invoked as
+ * `node scripts/drift-canary.mjs ...` (CI workflow + docs), never executed
+ * directly. Vitest's transformer can't strip shebangs from imported modules,
+ * so the absence of one keeps `tests/canary/orchestrator.test.ts` importable.
  *
  * This is the only test that catches *upstream* drift: when Claude Code,
  * Codex CLI, or Gemini CLI changes its storage format, synthetic fixtures stay
