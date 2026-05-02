@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.8.0](https://github.com/fstubner/xtctx/compare/xtctx-v0.7.1...xtctx-v0.8.0) (2026-05-02)
+
+
+### Features
+
+* **mcp:** pluggable format adapters + native MCP rendering for all 7 tools ([c16abdf](https://github.com/fstubner/xtctx/commit/c16abdf0124a6a5d10c0bafcd760f0d6ec00bd86))
+* **mcp:** pluggable format adapters + native MCP rendering for all 7 tools ([7e08c07](https://github.com/fstubner/xtctx/commit/7e08c07894d5b7d40b9623f8faf3de6890a6fb87))
+
 ## [0.7.1](https://github.com/fstubner/xtctx/compare/xtctx-v0.7.0...xtctx-v0.7.1) (2026-04-27)
 
 
