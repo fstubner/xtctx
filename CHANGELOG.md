@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.9.1](https://github.com/fstubner/xtctx/compare/xtctx-v0.9.0...xtctx-v0.9.1) (2026-05-02)
+
+
+### Bug Fixes
+
+* **canary:** drop shebang from drift-canary.mjs so the orchestrator test can import it ([45f14a4](https://github.com/fstubner/xtctx/commit/45f14a458f923fd43c95d1fa34aa1bf30e8c0d52))
+* **canary:** drop shebang from drift-canary.mjs so the orchestrator test passes ([42eb566](https://github.com/fstubner/xtctx/commit/42eb566a5cf2e6672cc233b8680a2acd1b0d897b))
+
 ## [0.9.0](https://github.com/fstubner/xtctx/compare/xtctx-v0.8.0...xtctx-v0.9.0) (2026-05-02)
 
 
