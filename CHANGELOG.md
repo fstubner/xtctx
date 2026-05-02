@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.9.0](https://github.com/fstubner/xtctx/compare/xtctx-v0.8.0...xtctx-v0.9.0) (2026-05-02)
+
+
+### Features
+
+* **scrapers:** add opencode and Copilot CLI scrapers ([99c464e](https://github.com/fstubner/xtctx/commit/99c464e818e6387c3ea95a29b9dbee0bda96689b))
+* **scrapers:** add opencode and GitHub Copilot CLI scrapers ([7b93bcc](https://github.com/fstubner/xtctx/commit/7b93bccaf9b6290ae3735bf151cf41a819a38bc3))
+
 ## [0.8.0](https://github.com/fstubner/xtctx/compare/xtctx-v0.7.1...xtctx-v0.8.0) (2026-05-02)
 
 
