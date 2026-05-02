@@ -8,89 +8,112 @@
 [![License](https://img.shields.io/github/license/fstubner/xtctx)](LICENSE)
 [![Node >=20](https://img.shields.io/badge/node-%3E%3D20-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 
-xtctx is a **cross-tool continuity orchestrator** for AI coding workflows.
+> Cross-tool memory and config sync for AI coding agents. Local-first.
+> One searchable index of your project history across seven tools, plus
+> a single shared config rendered into each tool's native files.
 
-It keeps project context portable across assistants by:
+xtctx (short for **cross-tool context**, with `ctx` taken from the Python
+variable convention) is a CLI + MCP server that does two things across the
+AI coding tools you actually use:
 
-1. ingesting local conversation history and project memory;
-2. indexing it for recall (`xtctx_search`, `xtctx_project_knowledge`);
-3. syncing shared tool behavior (skills, commands, agents, MCP/slash config, whitelist policy);
-4. letting you resume in any tool without re-briefing.
+1. **Reads** each tool's local conversation history into one searchable
+   index (LanceDB, BM25 + vector via Reciprocal Rank Fusion).
+2. **Writes** one shared config (skills, hooks, slash commands, MCP
+   servers, whitelist policy) into each tool's native files inside
+   fenced markers.
+
+Result: switch between AI coding tools without re-pasting decisions or
+re-configuring setup. Everything stays on your machine. No account, no
+telemetry, no outbound calls during normal operation.
 
 ![xtctx landing page](docs/screenshots/landing-light.png)
 
-## Core Workflow
+## Supported tools
 
-```text
-Init -> Sync -> Serve -> Recall -> Writeback
-```
+xtctx reads conversation history from and writes shared config into seven
+AI coding tools:
 
-1. `xtctx init` scaffolds `.xtctx/` (config, policy, memory folders).
-2. `xtctx sync` renders managed continuity blocks into tool-native targets.
-3. `xtctx serve` runs the MCP server + API + ingestion daemon, and
-   auto-reconciles sync drift.
-4. At session start, call recall tools first.
-5. After validated implementation, write outcomes back for the next handoff.
+| Tool | Memory file (instructions) | Native MCP destination |
+|---|---|---|
+| **Claude Code** | `CLAUDE.md` (project) · `~/.claude/CLAUDE.md` (global) | `.mcp.json` |
+| **Cursor** | `.cursorrules` (project) · `~/.cursor/rules/.cursorrules` (global) | `.cursor/mcp.json` |
+| **GitHub Copilot** (VS Code) | `.github/copilot-instructions.md` | `.vscode/mcp.json` (root key: `servers`) |
+| **GitHub Copilot CLI** | `.github/copilot-instructions.md` (shared with VS Code) | `~/.copilot/mcp-config.json` (user-level) |
+| **Codex CLI** | `AGENTS.md` (shared with opencode) · `~/.codex/AGENTS.md` (global) | `~/.codex/config.toml` (TOML, `[mcp_servers.<name>]`) |
+| **Gemini CLI** | `GEMINI.md` (project) · `~/.gemini/GEMINI.md` (global) | `~/.gemini/settings.json` (`mcpServers`) |
+| **opencode** (sst/opencode-ai) | `AGENTS.md` (shared with Codex) · `~/.config/opencode/AGENTS.md` (global) | `opencode.json` (nested `mcp` key, `command` as array) |
 
-## Quick Start
+Hand-edits outside the managed markers are preserved verbatim. `xtctx
+serve` reconciles drift on a timer if a tool overwrites a managed
+section.
 
-```bash
-npm ci
-npm --prefix landing ci
-npm run build
+## Install
 
-npx xtctx init
-npx xtctx sync
-npx xtctx serve
-```
-
-Surfaces:
-
-- API: `http://127.0.0.1:3232/api/*`
-- Health: `http://127.0.0.1:3232/health`
-- Landing (HTML cheat sheet): `http://127.0.0.1:3232/`
-- MCP: stdio (consumed by your AI assistant)
-
-Optional full re-index:
+End-user (most cases):
 
 ```bash
-npx xtctx ingest --full
+npm install -g xtctx        # requires Node >= 20
+xtctx init                  # scaffolds .xtctx/ in your project
+xtctx serve                 # starts MCP + API + ingestion daemon
 ```
 
-## CLI cheat sheet
+That's it. The first time you run `xtctx serve`, it downloads a ~28 MB
+embedding model from HuggingFace; subsequent starts are fast.
 
-xtctx is CLI-first — humans drive it from the terminal, AI assistants drive it
-through MCP. Key introspection commands:
+Optional one-time full re-index (rebuilds LanceDB from every conversation
+file the scrapers can find):
 
-| Command | What it does |
-|---|---|
-| `xtctx status` | One-screen runtime summary: store size, last ingest, per-tool sync state. Reads from disk, works whether or not `xtctx serve` is running. |
-| `xtctx context recent [--watch]` | List recent sessions across tools. `--watch` re-renders every 2 seconds; Ctrl+C to exit. |
-| `xtctx knowledge ls [--type=...] [--query="..."] [--limit=N]` | List structured knowledge records (decisions, error solutions, gotchas, FAQs, etc.) as a table. |
-| `xtctx sync [--diff]` | Reconcile tool-native config files. With `--diff`, print a unified diff of what would change instead of writing. |
-| `xtctx ingest [--full]` | Manually trigger ingestion (incremental by default). |
-| `xtctx serve` | Run MCP + API + ingestion daemon. Prints a status block at startup. |
+```bash
+xtctx ingest --full
+```
 
-## Practical Cross-Tool Session Pattern
+## Quick session pattern
 
-These are **MCP tool calls** your AI assistant makes — not shell commands. Ask your assistant to run them, or configure `SessionStart` hooks to inject context automatically (generated by `xtctx sync` for Claude Code).
+The MCP tools that follow are calls **your AI assistant makes** (driven
+through the MCP protocol), not shell commands. `xtctx sync` generates a
+`SessionStart` hook for Claude Code that fires the recall calls
+automatically; for the other tools, ask the assistant to run them or
+configure their equivalent session-opener mechanism.
 
-**Before coding** — ask your assistant to recall:
+**Before coding** — recall:
 ```
 xtctx_search("auth error after last deploy")
 xtctx_project_knowledge({ type: "all" })
 ```
 
-**After coding** — ask your assistant to save what you learned:
+**After coding** — write outcomes back so the next handoff has them:
 ```
 xtctx_save_decision({ title, rationale, alternatives_considered })
 xtctx_save_error_solution({ error, solution, context })
 xtctx_save_faq({ question, answer })
 ```
 
-This is the handoff loop that keeps context continuity stable across assistant boundaries.
+That's the cross-tool handoff loop.
 
-## Continuity Policy Model
+## CLI cheat sheet
+
+xtctx is CLI-first — humans drive it from the terminal, AI assistants
+drive it through MCP. Key introspection commands:
+
+| Command | What it does |
+|---|---|
+| `xtctx status` | One-screen runtime summary: store size, last ingest, per-tool sync state. Reads from disk; works whether or not `xtctx serve` is running. |
+| `xtctx context recent [--watch]` | List recent sessions across tools. `--watch` re-renders every 2s; Ctrl+C to exit. |
+| `xtctx knowledge ls [--type=...] [--query="..."] [--limit=N]` | List structured knowledge records (decisions, error solutions, gotchas, FAQs, etc.) as a table. |
+| `xtctx search "..."` | Hybrid (BM25 + vector) search across the whole index. |
+| `xtctx sync [--diff]` | Reconcile tool-native config files. `--diff` prints a unified diff of what would change instead of writing. |
+| `xtctx ingest [--full]` | Manually trigger ingestion (incremental by default). |
+| `xtctx ingest --rebuild-tool <name>` | Wipe one tool's chunks from the store and re-ingest cleanly. Useful after the chunk-ID scheme changes between versions. |
+| `xtctx serve` | Run MCP + API + ingestion daemon. Prints a status block at startup. |
+
+## Surfaces (when `xtctx serve` is running)
+
+- **MCP**: stdio (consumed by your AI assistant via the standard MCP transport)
+- **API**: `http://127.0.0.1:3232/api/*`
+- **Health**: `http://127.0.0.1:3232/health`
+- **Status page**: `http://127.0.0.1:3232/` — single static HTML cheat sheet, replaces the older Vue SPA
+
+## Continuity policy model
 
 Repo policy lives in:
 
@@ -112,8 +135,8 @@ Merge order:
 
 Per-tool controls:
 
-- scope: `project` | `global` | `hybrid`
-- categories: Core 7
+- `scope`: `project` | `global` | `hybrid`
+- categories (the seven that map to managed-block content):
   - `context_feed`
   - `skills`
   - `commands`
@@ -122,12 +145,13 @@ Per-tool controls:
   - `slash_commands`
   - `whitelist_policy`
 
-## Sync + Status Surfaces
+## Sync surfaces
 
 ### CLI
 
-- `xtctx sync`: manual reconciliation
-- `xtctx serve`: startup sync + periodic drift reconciliation
+- `xtctx sync` — manual reconciliation
+- `xtctx sync --diff` — preview without writing
+- `xtctx serve` — startup sync + periodic drift reconciliation
 
 ### API
 
@@ -142,9 +166,13 @@ Per-tool controls:
 
 - `xtctx_continuity_status`
 - `xtctx_effective_policy`
-- Existing recall/writeback/config tools remain available.
+- Plus all recall (`xtctx_search`, `xtctx_project_knowledge`,
+  `xtctx_recent_sessions`, `xtctx_session_detail`) and writeback
+  (`xtctx_save_decision`, `xtctx_save_error_solution`, `xtctx_save_faq`,
+  `xtctx_save_insight`, `xtctx_save_convention`, `xtctx_save_gotcha`)
+  tools.
 
-## Knowledge Types
+## Knowledge types
 
 xtctx stores structured records in `.xtctx/knowledge/*`:
 
@@ -155,57 +183,117 @@ xtctx stores structured records in `.xtctx/knowledge/*`:
 - `gotcha`
 - `faq`
 
-## Config Philosophy
+## Search
+
+`xtctx_search` (MCP), `xtctx search` (CLI), and `GET /api/search` (HTTP)
+all use the same **LanceDB hybrid search pipeline** (vector + full-text,
+Reciprocal Rank Fusion):
+
+- `hybrid` (default) — fuses semantic and keyword rankings
+- `semantic` — embedding vector similarity only
+- `keyword` — full-text search (FTS) only
+
+The first search in a new server process may be slower while the
+embedding model loads lazily.
+
+### Session cache
+
+The runtime holds a short-lived in-memory index of conversation sessions
+for `xtctx_recent_sessions`. The cache is refreshed:
+
+1. **Automatically** — entries expire after 60 seconds (configurable).
+2. **On write** — any ingestion cycle that produces new data invalidates
+   the cache, so the next read reflects the new messages without waiting
+   for the TTL.
+
+## Config philosophy
 
 - Primary source: `.xtctx/config.yaml` and `.xtctx/tool-config/shared.yaml`
 - Environment variables are override-only for explicit temporary use
 
 Security overrides:
 
-- `XTCTX_API_TOKEN`
-- `XTCTX_ALLOWED_ORIGINS`
-- `XTCTX_ALLOW_LOCALHOST_ORIGINS`
-- `XTCTX_RATE_LIMIT_WINDOW_MS`
-- `XTCTX_RATE_LIMIT_MAX`
+- `XTCTX_API_TOKEN` — require Bearer auth on the HTTP API
+- `XTCTX_ALLOWED_ORIGINS` — CORS allowlist
+- `XTCTX_ALLOW_LOCALHOST_ORIGINS` — allow `http://localhost:*` / `http://127.0.0.1:*`
+- `XTCTX_RATE_LIMIT_WINDOW_MS` — rate limit window
+- `XTCTX_RATE_LIMIT_MAX` — max requests per window
 
-## Search
+## Drift resilience
 
-`xtctx_search` (MCP) and `GET /api/search` (HTTP) both use the same
-**LanceDB hybrid search pipeline** (vector + full-text, Reciprocal Rank Fusion):
+Each scraper carries an `ACCEPTED_DEGRADATIONS` whitelist documenting
+which schema-shape surprises are tolerated silently and which throw or
+warn loudly. Format drift in any of the seven tools surfaces as either:
 
-- `hybrid` (default) — fuses semantic and keyword rankings
-- `semantic` — embedding vector similarity only
-- `keyword` — full-text search (FTS) only
+- A failing test in `tests/drift/scraper-mutations.test.ts` (synthetic
+  mutation suite that runs on every CI build), or
+- A failing run of `.github/workflows/drift-canary.yml` (nightly job
+  that exercises the live CLIs of Claude Code, Codex, Gemini, opencode,
+  and Copilot CLI against actual current releases).
 
-The first search in a new server process may be slower as the embedding model
-is loaded lazily on first use.
+Cursor and VS Code Copilot are GUI-only and are covered by mutation +
+golden-snapshot tests, not the live canary.
 
-### Session cache
+## Troubleshooting
 
-The runtime holds a short-lived in-memory index of conversation sessions for
-`xtctx_recent_sessions`. The cache is refreshed:
+**`xtctx ingest` runs but produces zero chunks.** No supported tool's
+storage was found. `xtctx status` reports per-tool detection state. If a
+tool is installed but xtctx didn't find it, the storage path may be
+non-default — set a `customStorePath` per tool under `.xtctx/config.yaml`.
 
-1. **Automatically** — entries expire after 60 seconds (configurable).
-2. **On write** — any ingestion cycle that produces new data immediately
-   invalidates the cache, so the next read reflects the new messages without
-   waiting for the TTL.
+**First `xtctx serve` startup takes ~30 seconds.** Expected — the
+~28 MB embedding model is downloading. You'll see
+`[xtctx] Loading embedding model (first run may download ~28 MB)...` on
+stderr; subsequent starts are <2s.
 
-## Project Layout
+**Sync overwrites my hand-edits.** It shouldn't. Hand-edits *outside*
+the `xtctx:begin` / `xtctx:end` fenced markers are preserved verbatim;
+edits *inside* the markers will be reconciled away on the next
+`xtctx serve` tick (this is the drift-reconciliation feature, by
+design). If a managed block is in the wrong place, edit the block
+content yourself, then move it outside the markers — `xtctx sync` will
+write a fresh block at the marker location and your moved copy stays.
 
-- `src/`: CLI, API, MCP, ingestion, storage, sync engine
-- `landing/`: public site deployed via GitHub Pages
-- `tests/`: unit/integration/security suites
+**`better-sqlite3` MODULE_VERSION mismatch.** Native module compiled for
+a different Node version than the one currently running. Run
+`npm rebuild better-sqlite3` once after switching Node versions.
 
-## Development + Release
+**Cross-tool recall returns nothing for a tool I know I used.** Check
+`xtctx context recent --tool <name>` — does that tool's history show
+up? If yes, the search index may be stale; run `xtctx ingest --full`.
+If no, the scraper isn't finding the storage; check
+`xtctx status`.
+
+## Project layout
+
+- `src/scrapers/` — per-tool conversation history readers (one file per tool).
+- `src/config/` — sync engine, MCP renderers, hooks, skills, policy.
+- `src/runtime/` — ingestion daemon, scraper registry, session cache.
+- `src/mcp/` — MCP server + per-tool handlers.
+- `src/api/` — HTTP API + static status page.
+- `src/cli/` — CLI entry points (`init`, `sync`, `serve`, `ingest`,
+  `compact`, `status`, `context`, `knowledge`).
+- `landing/` — public site deployed via GitHub Pages.
+- `tests/` — unit, integration, smoke, drift, eval, security suites.
+
+## Development + release
 
 ```bash
-npm run verify:release
+npm ci
+npm --prefix landing ci
+npm run build
+npm test                    # unit + integration
+npm run test:smoke          # cross-tool subprocess smoke tests
+npm run test:drift          # mutation + snapshot drift tests
+npm run test:eval           # ranking eval against the synthetic corpus
+npm run verify:release      # everything end-to-end
 ```
 
 Release automation:
 
-- Conventional commits -> Release Please release PR
-- Merge release PR on `main` -> GitHub Release
-- Published GitHub release -> npm publish (OIDC trusted publishing)
+- Conventional commits → release-please opens a release PR.
+- Merging the release PR on `main` → tagged GitHub Release.
+- Published GitHub release → npm publish via OIDC trusted publishing.
 
-See `CONTRIBUTING.md` and `SECURITY.md` for contributor and security policy details.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`SECURITY.md`](SECURITY.md)
+for contributor and security policy details.
