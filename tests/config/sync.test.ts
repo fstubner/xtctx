@@ -109,10 +109,15 @@ describe("syncToolConfigs", () => {
     await syncToolConfigs(projectDir);
 
     const globalCursor = await readFile(
-      join(homeDir, ".cursor", "rules", ".cursorrules"),
+      join(homeDir, ".cursor", "rules", "xtctx-managed.mdc"),
       "utf-8",
     );
 
+    // .mdc rules require YAML frontmatter with `alwaysApply: true` or Cursor's
+    // Agent mode silently ignores them. The legacy `.cursorrules` path was
+    // dropped in favor of this new format.
+    expect(globalCursor.startsWith("---\n")).toBe(true);
+    expect(globalCursor).toContain("alwaysApply: true");
     expect(globalCursor).toContain("xtctx sync");
     expect(globalCursor).not.toContain("## Skills");
   });
