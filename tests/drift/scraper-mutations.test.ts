@@ -27,8 +27,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ClaudeCodeScraper } from "@xtctx/scrapers/claude-code";
 import { CodexCliScraper } from "@xtctx/scrapers/codex";
 import { CopilotScraper } from "@xtctx/scrapers/copilot";
+import { CopilotCliScraper } from "@xtctx/scrapers/copilot-cli";
 import { CursorScraper } from "@xtctx/scrapers/cursor";
 import { GeminiCliScraper } from "@xtctx/scrapers/gemini";
+import { OpenCodeScraper } from "@xtctx/scrapers/opencode";
 import type { ConversationChunk, ConversationScraper } from "@xtctx/types/scraper";
 
 type Mutation =
@@ -558,6 +560,139 @@ describe("Scraper mutation drift", () => {
           Object.assign(composer, mutated);
         });
         return new CursorScraper(workspaceDir, stateDir);
+      },
+      cases,
+    );
+  });
+
+  it("opencode: message.data JSON mutations", async () => {
+    const cases: MutationCase[] = [
+      // Rename `role` so the scraper's role-extractor can't find it.
+      { name: "rename role", mutation: { kind: "rename", path: "role", newKey: "rol" } },
+      { name: "null role", mutation: { kind: "null", path: "role" } },
+      { name: "drop role", mutation: { kind: "drop", path: "role" } },
+      { name: "retype role to number", mutation: { kind: "retype", path: "role", to: "number" } },
+      {
+        name: "unknown field alongside",
+        mutation: { kind: "unknown", path: "", key: "futureField" },
+        expectation: "silent-ok",
+      },
+    ];
+
+    interface OpenCodeFixture {
+      role: string;
+      sessionID: string;
+      agent: string;
+      time: { created: number };
+    }
+
+    const buildOpenCodeFixture = async (
+      mutator?: (data: OpenCodeFixture) => OpenCodeFixture,
+    ): Promise<{ scraper: OpenCodeScraper }> => {
+      const [tempDir, stateDir] = await makeTempDirs();
+      tempDirs.push(tempDir, stateDir);
+      const dbPath = join(tempDir, "opencode.db");
+      const db = new Database(dbPath);
+      db.exec(`
+        CREATE TABLE session (
+          id TEXT PRIMARY KEY, project_id TEXT NOT NULL, workspace_id TEXT,
+          parent_id TEXT, slug TEXT NOT NULL, directory TEXT NOT NULL,
+          path TEXT, title TEXT NOT NULL, version TEXT NOT NULL, share_url TEXT,
+          time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL,
+          time_compacting INTEGER, time_archived INTEGER
+        );
+        CREATE TABLE message (
+          id TEXT PRIMARY KEY, session_id TEXT NOT NULL,
+          time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL,
+          data TEXT NOT NULL
+        );
+        CREATE TABLE part (
+          id TEXT PRIMARY KEY, message_id TEXT NOT NULL,
+          session_id TEXT NOT NULL, time_created INTEGER NOT NULL,
+          data TEXT NOT NULL
+        );
+      `);
+      const t0 = 1000;
+      db.prepare(
+        `INSERT INTO session VALUES ('s1', 'p1', NULL, NULL, 's', '/tmp', NULL, 't', '0.1', NULL, ?, ?, NULL, NULL)`,
+      ).run(t0, t0);
+      const baseData: OpenCodeFixture = {
+        role: "user",
+        sessionID: "s1",
+        agent: "build",
+        time: { created: t0 },
+      };
+      const data = mutator ? mutator(baseData) : baseData;
+      db.prepare(`INSERT INTO message VALUES ('m1', 's1', ?, ?, ?)`).run(
+        t0,
+        t0,
+        JSON.stringify(data),
+      );
+      db.prepare(`INSERT INTO part VALUES ('p1', 'm1', 's1', ?, ?)`).run(
+        t0,
+        JSON.stringify({ type: "text", text: "hello opencode" }),
+      );
+      db.close();
+      return { scraper: new OpenCodeScraper(dbPath, stateDir) };
+    };
+
+    await runScraperMutationBattery(
+      "opencode",
+      async () => (await buildOpenCodeFixture()).scraper,
+      async (mutation) => {
+        const { scraper } = await buildOpenCodeFixture((data) => {
+          return applyMutation(data, mutation) as OpenCodeFixture;
+        });
+        return scraper;
+      },
+      cases,
+    );
+  });
+
+  it("copilot-cli: events.jsonl mutations", async () => {
+    const cases: MutationCase[] = [
+      { name: "rename role", mutation: { kind: "rename", path: "role", newKey: "rol" } },
+      { name: "null content", mutation: { kind: "null", path: "content" } },
+      { name: "retype content to number", mutation: { kind: "retype", path: "content", to: "number" } },
+      { name: "drop role", mutation: { kind: "drop", path: "role" } },
+      {
+        name: "unknown field alongside",
+        mutation: { kind: "unknown", path: "", key: "newKey" },
+        expectation: "silent-ok",
+      },
+    ];
+
+    const COPILOT_CLI_BASELINE = {
+      type: "message",
+      role: "user",
+      content: "hello copilot cli",
+      timestamp: "2026-02-24T10:00:00Z",
+    };
+
+    await runScraperMutationBattery(
+      "copilot-cli",
+      async () => {
+        const [tempDir, stateDir] = await makeTempDirs();
+        tempDirs.push(tempDir, stateDir);
+        const sessionDir = join(tempDir, "sess-1");
+        await mkdir(sessionDir, { recursive: true });
+        await writeFile(
+          join(sessionDir, "events.jsonl"),
+          JSON.stringify(COPILOT_CLI_BASELINE) + "\n",
+        );
+        return new CopilotCliScraper(tempDir, stateDir);
+      },
+      async (mutation) => {
+        const [tempDir, stateDir] = await makeTempDirs();
+        tempDirs.push(tempDir, stateDir);
+        const sessionDir = join(tempDir, "sess-1");
+        await mkdir(sessionDir, { recursive: true });
+        const mutated = applyMutation(COPILOT_CLI_BASELINE, mutation);
+        await writeFile(
+          join(sessionDir, "events.jsonl"),
+          JSON.stringify(mutated) + "\n",
+        );
+        return new CopilotCliScraper(tempDir, stateDir);
       },
       cases,
     );

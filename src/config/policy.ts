@@ -20,6 +20,8 @@ export const DEFAULT_REGISTERED_TOOLS = [
   "codex",
   "copilot",
   "gemini",
+  "opencode",
+  "copilot-cli",
 ] as const;
 
 const ROOT_KEYS = new Set(["defaults", "tools", "policy"]);

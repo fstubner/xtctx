@@ -37,6 +37,14 @@ interface ToolDefinition {
   projectPath: string;
   globalPath: string;
   markerKind: MarkerKind;
+  /**
+   * When two tools write into the same memory file (e.g. codex + opencode →
+   * AGENTS.md, copilot + copilot-cli → .github/copilot-instructions.md), each
+   * tool needs a distinct managed-block marker so they don't overwrite one
+   * another. Set to a tool slug when the tool shares a file with another;
+   * leave undefined for the default `xtctx:begin/end` markers.
+   */
+  markerSuffix?: string;
 }
 
 interface ToolTarget {
@@ -151,6 +159,18 @@ const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
     projectPath: "GEMINI.md",
     globalPath: ".gemini/GEMINI.md",
     markerKind: "markdown",
+  },
+  opencode: {
+    projectPath: "AGENTS.md",
+    globalPath: ".config/opencode/AGENTS.md",
+    markerKind: "markdown",
+    markerSuffix: "opencode",
+  },
+  "copilot-cli": {
+    projectPath: ".github/copilot-instructions.md",
+    globalPath: ".copilot/copilot-instructions.md",
+    markerKind: "markdown",
+    markerSuffix: "copilot-cli",
   },
 };
 
@@ -378,7 +398,7 @@ function deriveState(enabled: boolean, targets: ToolTargetStatus[]): ToolSyncSta
 async function syncTarget(target: ToolTarget, content: string): Promise<ToolTargetStatus> {
   const existing = await readUtf8IfExists(target.path);
   const expectedBlock = renderManagedSection(content, target.markers);
-  const inspected = inspectContent(existing, expectedBlock, target.path);
+  const inspected = inspectContent(existing, expectedBlock, target.path, target.markers);
 
   const next = existing
     ? upsertManagedSection(existing, content, target.markers)
@@ -416,13 +436,14 @@ async function syncTarget(target: ToolTarget, content: string): Promise<ToolTarg
 async function inspectTarget(target: ToolTarget, content: string): Promise<ToolTargetStatus> {
   const existing = await readUtf8IfExists(target.path);
   const expectedBlock = renderManagedSection(content, target.markers);
-  return inspectContent(existing, expectedBlock, target.path);
+  return inspectContent(existing, expectedBlock, target.path, target.markers);
 }
 
 function inspectContent(
   existing: string | null,
   expectedManagedBlock: string,
   filePath: string,
+  markers: { begin: string; end: string },
 ): ToolTargetStatus {
   if (!existing) {
     return {
@@ -436,8 +457,6 @@ function inspectContent(
     };
   }
 
-  const isMarkdown = expectedManagedBlock.includes("<!-- xtctx:begin -->");
-  const markers = isMarkdown ? MARKERS.markdown : MARKERS.text;
   const existingManagedBlock = extractManagedSection(existing, markers);
   if (!existingManagedBlock) {
     return {
@@ -465,7 +484,7 @@ function inspectContent(
 
 function resolveToolTargets(projectRoot: string, tool: string, scope: ContinuityScope): ToolTarget[] {
   const definition = resolveToolDefinition(tool);
-  const markers = MARKERS[definition.markerKind];
+  const markers = applyMarkerSuffix(MARKERS[definition.markerKind], definition.markerSuffix);
   const projectTarget: ToolTarget = {
     path: join(projectRoot, definition.projectPath),
     markers,
@@ -492,6 +511,20 @@ function resolveToolTargets(projectRoot: string, tool: string, scope: Continuity
   }
 
   return [projectTarget];
+}
+
+function applyMarkerSuffix(
+  base: { begin: string; end: string },
+  suffix: string | undefined,
+): { begin: string; end: string } {
+  if (!suffix) return base;
+  // Inject ":<suffix>" before the closing token of each marker so a file can
+  // host multiple non-conflicting managed blocks (codex + opencode share
+  // AGENTS.md; copilot + copilot-cli share .github/copilot-instructions.md).
+  return {
+    begin: base.begin.replace(/begin/, `begin:${suffix}`),
+    end: base.end.replace(/end/, `end:${suffix}`),
+  };
 }
 
 function resolveToolDefinition(tool: string): ToolDefinition {
@@ -684,14 +717,25 @@ function upsertManagedSection(
     `${escapeRegExp(markers.begin)}[\\s\\S]*?${escapeRegExp(markers.end)}\\n?`,
     "g",
   );
-  const withoutManagedSection = normalized.replace(sectionPattern, "").trimEnd();
   const managedSection = renderManagedSection(blockContent, markers).trimEnd();
 
-  if (withoutManagedSection.length === 0) {
+  // If the file already contains a block with these markers, replace it in
+  // place. Repositioning to the end every pass causes order-thrash when two
+  // tools share a memory file (codex + opencode → AGENTS.md): each pass would
+  // flip the relative order of the two blocks and the sync would never report
+  // 0 updates. In-place replacement keeps the file byte-stable across passes.
+  if (sectionPattern.test(normalized)) {
+    sectionPattern.lastIndex = 0;
+    const replaced = normalized.replace(sectionPattern, `${managedSection}\n`);
+    return replaced.endsWith("\n") ? replaced : `${replaced}\n`;
+  }
+
+  const trimmed = normalized.trimEnd();
+  if (trimmed.length === 0) {
     return `${managedSection}\n`;
   }
 
-  return `${withoutManagedSection}\n\n${managedSection}\n`;
+  return `${trimmed}\n\n${managedSection}\n`;
 }
 
 function renderManagedSection(

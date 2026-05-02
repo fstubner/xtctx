@@ -6,8 +6,10 @@ import { IngestionDaemon } from "../ingestion/daemon.js";
 import { ClaudeCodeScraper } from "../scrapers/claude-code.js";
 import { CodexCliScraper } from "../scrapers/codex.js";
 import { CopilotScraper } from "../scrapers/copilot.js";
+import { CopilotCliScraper } from "../scrapers/copilot-cli.js";
 import { CursorScraper } from "../scrapers/cursor.js";
 import { GeminiCliScraper } from "../scrapers/gemini.js";
+import { OpenCodeScraper } from "../scrapers/opencode.js";
 import { ScraperRegistry } from "../scrapers/registry.js";
 import { EmbeddingService } from "../store/embeddings.js";
 import { LanceStore } from "../store/lance.js";
@@ -183,6 +185,20 @@ export async function createIngestionRuntime(
     defaultGeminiHistoryPath(),
     (storePath) => new GeminiCliScraper(storePath, services.stateDir),
   );
+  registerConfiguredScraper(
+    registry,
+    scraperConfigByTool,
+    "opencode",
+    defaultOpenCodeStorePath(),
+    (storePath) => new OpenCodeScraper(storePath, services.stateDir),
+  );
+  registerConfiguredScraper(
+    registry,
+    scraperConfigByTool,
+    "copilot-cli",
+    defaultCopilotCliSessionPath(),
+    (storePath) => new CopilotCliScraper(storePath, services.stateDir),
+  );
 
   // Load any community or project-local scrapers from .xtctx/scrapers.mjs.
   // Track tool names so we can cleanly deregister them on hot-reload.
@@ -267,6 +283,14 @@ export async function createIngestionRuntime(
         defaultPath: defaultGeminiHistoryPath(),
         factory: (p) => new GeminiCliScraper(p, services.stateDir),
       },
+      opencode: {
+        defaultPath: defaultOpenCodeStorePath(),
+        factory: (p) => new OpenCodeScraper(p, services.stateDir),
+      },
+      "copilot-cli": {
+        defaultPath: defaultCopilotCliSessionPath(),
+        factory: (p) => new CopilotCliScraper(p, services.stateDir),
+      },
     };
 
     const entry = builtins[tool];
@@ -335,6 +359,33 @@ function defaultGeminiHistoryPath(): string {
   const home = process.env.USERPROFILE ?? process.env.HOME ?? "";
   // Gemini CLI stores session files under ~/.gemini/tmp/<project>/chats/session-*.json
   return join(home, ".gemini", "tmp");
+}
+
+function defaultOpenCodeStorePath(): string {
+  // opencode stores conversations in a single SQLite file under a per-platform
+  // application-data directory. Branch on process.platform explicitly so a
+  // stray APPDATA env var (Wine, cross-compile shells) doesn't mis-route.
+  const home = process.env.USERPROFILE ?? process.env.HOME ?? "";
+
+  if (process.platform === "win32") {
+    const appData = process.env.APPDATA ?? join(home, "AppData", "Roaming");
+    return join(appData, "opencode", "opencode.db");
+  }
+
+  if (process.platform === "linux") {
+    const xdgDataHome = process.env.XDG_DATA_HOME ?? join(home, ".local", "share");
+    return join(xdgDataHome, "opencode", "opencode.db");
+  }
+
+  // darwin (macOS) and any other Unix.
+  return join(home, "Library", "Application Support", "opencode", "opencode.db");
+}
+
+function defaultCopilotCliSessionPath(): string {
+  // GitHub Copilot CLI stores per-session directories under ~/.copilot/session-state/.
+  // Path is identical across all platforms.
+  const home = process.env.USERPROFILE ?? process.env.HOME ?? "";
+  return join(home, ".copilot", "session-state");
 }
 
 function uniquePaths(paths: string[]): string[] {
