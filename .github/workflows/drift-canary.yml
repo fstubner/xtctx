@@ -22,6 +22,8 @@ on:
           - claude-code
           - codex
           - gemini
+          - opencode
+          - copilot-cli
 
 permissions:
   contents: read
@@ -33,7 +35,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        tool: [claude-code, codex, gemini]
+        tool: [claude-code, codex, gemini, opencode, copilot-cli]
     steps:
       - name: Skip tool when workflow_dispatch selects a single one
         if: >
@@ -81,6 +83,19 @@ jobs:
         if: matrix.tool == 'gemini'
         run: npm i -g @google/gemini-cli
 
+      - name: Install opencode CLI
+        # opencode reuses provider keys (ANTHROPIC_API_KEY / OPENAI_API_KEY) —
+        # no new secret required, just at least one provider configured below.
+        if: matrix.tool == 'opencode'
+        run: npm i -g opencode-ai
+
+      - name: Install copilot CLI
+        # Copilot CLI authenticates via GitHub. We pass GITHUB_TOKEN below
+        # (the workflow's built-in token) and also forward GH_TOKEN if the repo
+        # has a dedicated CLI secret with broader scope.
+        if: matrix.tool == 'copilot-cli'
+        run: npm i -g @github/copilot
+
       - name: Run canary (${{ matrix.tool }})
         id: canary
         if: >
@@ -91,6 +106,11 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # opencode reuses ANTHROPIC_API_KEY / OPENAI_API_KEY above — no new secret.
+          # copilot-cli authenticates via GitHub: GH_TOKEN (optional dedicated PAT
+          # with copilot scope) falls back to the built-in GITHUB_TOKEN.
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set +e
           node scripts/drift-canary.mjs --tool ${{ matrix.tool }} 2>canary-stderr.log | tee canary-stdout.log

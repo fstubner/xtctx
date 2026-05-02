@@ -39,7 +39,7 @@ const BASELINE_PATH = resolve(__dirname, "results/ranking-baseline.json");
 const BASELINE_TOLERANCE = 0.05; // 5% regression gate.
 
 const SEED = 20260420;
-const SESSIONS_PER_TOOL = 40; // 5 tools -> 200 sessions total
+const SESSIONS_PER_TOOL = 40; // 7 tools -> 280 sessions total
 const ANCHOR_RATE = 0.4;
 const TURNS_PER_SESSION = 6;
 

@@ -3,25 +3,57 @@
   "sessionsPerTool": 40,
   "anchorRate": 0.4,
   "turnsPerSession": 6,
-  "totalAnchors": 63,
-  "totalQueries": 234,
-  "generatedAt": "2026-04-20T23:24:02.439Z",
+  "totalAnchors": 88,
+  "totalQueries": 325,
+  "generatedAt": "2026-05-02T22:02:35.443Z",
   "overall": {
-    "queryCount": 234,
-    "mrr": 0.8708689458689461,
-    "recallAt5": 1,
+    "queryCount": 325,
+    "mrr": 0.8673113553113556,
+    "recallAt5": 0.9938461538461538,
     "recallAt10": 1,
-    "top1Accuracy": 0.7692307692307693
+    "top1Accuracy": 0.7661538461538462
   },
   "negationOutOfTop1": 0,
   "byCategory": {
     "gotcha": {
       "overall": {
-        "queryCount": 48,
-        "mrr": 0.8836805555555555,
+        "queryCount": 68,
+        "mrr": 0.8791666666666668,
         "recallAt5": 1,
         "recallAt10": 1,
-        "top1Accuracy": 0.7916666666666666
+        "top1Accuracy": 0.8088235294117647
+      },
+      "byIntent": {
+        "exact": {
+          "queryCount": 17,
+          "mrr": 1,
+          "recallAt5": 1,
+          "recallAt10": 1,
+          "top1Accuracy": 1
+        },
+        "paraphrase": {
+          "queryCount": 34,
+          "mrr": 0.7730392156862744,
+          "recallAt5": 1,
+          "recallAt10": 1,
+          "top1Accuracy": 0.6470588235294118
+        },
+        "cross": {
+          "queryCount": 17,
+          "mrr": 0.9705882352941176,
+          "recallAt5": 1,
+          "recallAt10": 1,
+          "top1Accuracy": 0.9411764705882353
+        }
+      }
+    },
+    "decision": {
+      "overall": {
+        "queryCount": 48,
+        "mrr": 0.9895833333333334,
+        "recallAt5": 1,
+        "recallAt10": 1,
+        "top1Accuracy": 0.9791666666666666
       },
       "byIntent": {
         "exact": {
@@ -33,45 +65,13 @@
         },
         "paraphrase": {
           "queryCount": 24,
-          "mrr": 0.7881944444444445,
+          "mrr": 0.9791666666666666,
           "recallAt5": 1,
           "recallAt10": 1,
-          "top1Accuracy": 0.625
-        },
-        "cross": {
-          "queryCount": 12,
-          "mrr": 0.9583333333333334,
-          "recallAt5": 1,
-          "recallAt10": 1,
-          "top1Accuracy": 0.9166666666666666
-        }
-      }
-    },
-    "decision": {
-      "overall": {
-        "queryCount": 36,
-        "mrr": 0.9861111111111112,
-        "recallAt5": 1,
-        "recallAt10": 1,
-        "top1Accuracy": 0.9722222222222222
-      },
-      "byIntent": {
-        "exact": {
-          "queryCount": 9,
-          "mrr": 1,
-          "recallAt5": 1,
-          "recallAt10": 1,
-          "top1Accuracy": 1
-        },
-        "paraphrase": {
-          "queryCount": 18,
-          "mrr": 0.9722222222222222,
-          "recallAt5": 1,
-          "recallAt10": 1,
-          "top1Accuracy": 0.9444444444444444
+          "top1Accuracy": 0.9583333333333334
         },
         "negation": {
-          "queryCount": 9,
+          "queryCount": 12,
           "mrr": 1,
           "recallAt5": 1,
           "recallAt10": 1,
@@ -81,108 +81,108 @@
     },
     "error-solution": {
       "overall": {
-        "queryCount": 60,
-        "mrr": 0.8491666666666667,
-        "recallAt5": 1,
+        "queryCount": 80,
+        "mrr": 0.852827380952381,
+        "recallAt5": 0.975,
         "recallAt10": 1,
-        "top1Accuracy": 0.7333333333333333
+        "top1Accuracy": 0.7375
       },
       "byIntent": {
         "exact": {
-          "queryCount": 12,
-          "mrr": 0.9166666666666666,
+          "queryCount": 16,
+          "mrr": 0.90625,
           "recallAt5": 1,
           "recallAt10": 1,
-          "top1Accuracy": 0.8333333333333334
+          "top1Accuracy": 0.8125
         },
         "paraphrase": {
-          "queryCount": 24,
-          "mrr": 0.8680555555555555,
+          "queryCount": 32,
+          "mrr": 0.8541666666666666,
           "recallAt5": 1,
           "recallAt10": 1,
-          "top1Accuracy": 0.75
+          "top1Accuracy": 0.71875
         },
         "cross": {
-          "queryCount": 24,
-          "mrr": 0.7965277777777776,
-          "recallAt5": 1,
+          "queryCount": 32,
+          "mrr": 0.8247767857142857,
+          "recallAt5": 0.9375,
           "recallAt10": 1,
-          "top1Accuracy": 0.6666666666666666
+          "top1Accuracy": 0.71875
         }
       }
     },
     "insight": {
       "overall": {
-        "queryCount": 27,
-        "mrr": 0.7685185185185185,
+        "queryCount": 36,
+        "mrr": 0.8111111111111111,
         "recallAt5": 1,
         "recallAt10": 1,
-        "top1Accuracy": 0.5925925925925926
+        "top1Accuracy": 0.6666666666666666
       },
       "byIntent": {
         "exact": {
-          "queryCount": 9,
+          "queryCount": 12,
           "mrr": 1,
           "recallAt5": 1,
           "recallAt10": 1,
           "top1Accuracy": 1
         },
         "paraphrase": {
-          "queryCount": 18,
-          "mrr": 0.6527777777777778,
+          "queryCount": 24,
+          "mrr": 0.7166666666666667,
           "recallAt5": 1,
           "recallAt10": 1,
-          "top1Accuracy": 0.3888888888888889
+          "top1Accuracy": 0.5
         }
       }
     },
     "convention": {
       "overall": {
-        "queryCount": 42,
-        "mrr": 0.861111111111111,
+        "queryCount": 54,
+        "mrr": 0.882716049382716,
         "recallAt5": 1,
         "recallAt10": 1,
-        "top1Accuracy": 0.7619047619047619
+        "top1Accuracy": 0.7962962962962963
       },
       "byIntent": {
         "exact": {
-          "queryCount": 14,
-          "mrr": 0.9642857142857143,
+          "queryCount": 18,
+          "mrr": 0.9722222222222222,
           "recallAt5": 1,
           "recallAt10": 1,
-          "top1Accuracy": 0.9285714285714286
+          "top1Accuracy": 0.9444444444444444
         },
         "paraphrase": {
-          "queryCount": 28,
-          "mrr": 0.8095238095238095,
+          "queryCount": 36,
+          "mrr": 0.8379629629629629,
           "recallAt5": 1,
           "recallAt10": 1,
-          "top1Accuracy": 0.6785714285714286
+          "top1Accuracy": 0.7222222222222222
         }
       }
     },
     "faq": {
       "overall": {
-        "queryCount": 21,
-        "mrr": 0.8571428571428571,
+        "queryCount": 39,
+        "mrr": 0.7564102564102563,
         "recallAt5": 1,
         "recallAt10": 1,
-        "top1Accuracy": 0.7142857142857143
+        "top1Accuracy": 0.5384615384615384
       },
       "byIntent": {
         "exact": {
-          "queryCount": 7,
-          "mrr": 0.8571428571428571,
+          "queryCount": 13,
+          "mrr": 0.7564102564102565,
           "recallAt5": 1,
           "recallAt10": 1,
-          "top1Accuracy": 0.7142857142857143
+          "top1Accuracy": 0.5384615384615384
         },
         "paraphrase": {
-          "queryCount": 14,
-          "mrr": 0.8571428571428571,
+          "queryCount": 26,
+          "mrr": 0.7564102564102565,
           "recallAt5": 1,
           "recallAt10": 1,
-          "top1Accuracy": 0.7142857142857143
+          "top1Accuracy": 0.5384615384615384
         }
       }
     }

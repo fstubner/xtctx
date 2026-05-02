@@ -9,13 +9,14 @@
  * "correct" but this canary will fail.
  *
  * Usage:
- *   node scripts/drift-canary.mjs --tool <claude-code|codex|gemini>
+ *   node scripts/drift-canary.mjs --tool <claude-code|codex|gemini|opencode|copilot-cli>
  *   node scripts/drift-canary.mjs --help
  *
  * Env:
- *   ANTHROPIC_API_KEY   required for --tool claude-code
- *   OPENAI_API_KEY      required for --tool codex
+ *   ANTHROPIC_API_KEY   required for --tool claude-code (and a likely fallback for opencode)
+ *   OPENAI_API_KEY      required for --tool codex (also accepted by opencode)
  *   GEMINI_API_KEY      required for --tool gemini
+ *   GH_TOKEN            required for --tool copilot-cli (Copilot CLI authenticates via GitHub)
  *
  * Exits 0 on success with a one-line summary; exits 1 on any failure with
  * details written to stderr.
@@ -40,6 +41,8 @@ Tools:
   claude-code   Anthropic Claude Code CLI   (needs ANTHROPIC_API_KEY)
   codex         OpenAI Codex CLI            (needs OPENAI_API_KEY)
   gemini        Google Gemini CLI           (needs GEMINI_API_KEY)
+  opencode      opencode CLI                (needs ANTHROPIC_API_KEY or OPENAI_API_KEY — provider key)
+  copilot-cli   GitHub Copilot CLI          (needs GH_TOKEN — GitHub auth)
 
 Options:
   --tool <name>     Which tool to exercise. Required.
@@ -295,6 +298,138 @@ export async function invokeGemini({ sandboxHome, prompt, timeoutMs }) {
   return { sessionPath: historyDir, invocationMs };
 }
 
+/**
+ * opencode CLI — `opencode`
+ *
+ * Install (Ubuntu):
+ *   npm i -g opencode-ai
+ *   # or via the upstream installer: curl -fsSL https://opencode.ai/install | bash
+ *
+ * Non-interactive invocation uses `opencode run "<prompt>"` which executes a
+ * single agent turn against the configured provider and exits. opencode reuses
+ * provider keys (ANTHROPIC_API_KEY / OPENAI_API_KEY / etc.) — at least one
+ * provider must be configured, otherwise the CLI errors with a credential
+ * message before producing a session.
+ *
+ * Sessions land in opencode.db at the platform-correct path:
+ *   - linux: $XDG_DATA_HOME/opencode/opencode.db (~/.local/share/opencode/opencode.db)
+ *   - macOS: ~/Library/Application Support/opencode/opencode.db
+ *   - win32: %APPDATA%/opencode/opencode.db
+ *
+ * If opencode renames `run` (e.g. → `chat`, `exec`) the --help probe fails and
+ * we surface that as drift loudly rather than silently invoking the wrong subcmd.
+ */
+export async function invokeOpencode({ sandboxHome, prompt, timeoutMs }) {
+  if (!process.env.ANTHROPIC_API_KEY && !process.env.OPENAI_API_KEY) {
+    throw new Error(
+      "neither ANTHROPIC_API_KEY nor OPENAI_API_KEY is set — export at least one provider key to run the opencode canary.",
+    );
+  }
+  if (!(await probeCommand("opencode"))) {
+    throw new Error(
+      "opencode CLI not found on PATH. Install with: npm i -g opencode-ai",
+    );
+  }
+
+  const { stdout: help } = await runCommand("opencode", ["--help"], { timeoutMs: 15_000 });
+  if (!/\brun\b/.test(help)) {
+    throw new Error(
+      "opencode CLI --help no longer advertises a `run` subcommand; invocation has drifted. " +
+        "Check recent opencode releases and update scripts/drift-canary.mjs.",
+    );
+  }
+
+  // opencode.db lives at a per-platform location; resolve it the same way the
+  // scraper's defaultOpenCodeStorePath does.
+  let dbPath;
+  if (process.platform === "win32") {
+    dbPath = join(sandboxHome, "AppData", "Roaming", "opencode", "opencode.db");
+  } else if (process.platform === "linux") {
+    dbPath = join(sandboxHome, ".local", "share", "opencode", "opencode.db");
+  } else {
+    dbPath = join(sandboxHome, "Library", "Application Support", "opencode", "opencode.db");
+  }
+
+  const start = Date.now();
+  await runCommand("opencode", ["run", prompt], {
+    env: {
+      HOME: sandboxHome,
+      USERPROFILE: sandboxHome,
+      XDG_DATA_HOME: join(sandboxHome, ".local", "share"),
+      XDG_CONFIG_HOME: join(sandboxHome, ".config"),
+      APPDATA: join(sandboxHome, "AppData", "Roaming"),
+      LOCALAPPDATA: join(sandboxHome, "AppData", "Local"),
+    },
+    timeoutMs,
+    cwd: sandboxHome,
+  });
+  const invocationMs = Date.now() - start;
+
+  if (!(await pathExists(dbPath))) {
+    throw new Error(
+      `opencode ran but did not create ${dbPath} — session-storage layout may have drifted.`,
+    );
+  }
+  return { sessionPath: dbPath, invocationMs };
+}
+
+/**
+ * GitHub Copilot CLI — `copilot` (binary name) / `@github/copilot-cli`
+ *
+ * Install (Ubuntu):
+ *   npm i -g @github/copilot
+ *
+ * Authentication is via GitHub (gh auth or a GH_TOKEN env var) — this is
+ * different from every other tool's API-key model. Sessions land at
+ * `~/.copilot/session-state/<id>/events.jsonl` on every platform.
+ *
+ * Non-interactive invocation uses `copilot -p "<prompt>"`. If that flag drifts
+ * the --help probe fails loudly. Note: as of writing the Copilot CLI's
+ * non-interactive path is still maturing — if a future release removes -p in
+ * favor of, say, an `exec` subcommand, this canary surfaces the change.
+ */
+export async function invokeCopilotCli({ sandboxHome, prompt, timeoutMs }) {
+  if (!process.env.GH_TOKEN && !process.env.GITHUB_TOKEN) {
+    throw new Error(
+      "neither GH_TOKEN nor GITHUB_TOKEN is set — export a GitHub token to run the copilot-cli canary.",
+    );
+  }
+  if (!(await probeCommand("copilot"))) {
+    throw new Error(
+      "copilot CLI not found on PATH. Install with: npm i -g @github/copilot",
+    );
+  }
+
+  const { stdout: help } = await runCommand("copilot", ["--help"], { timeoutMs: 15_000 });
+  if (!/-p\b|--prompt\b/.test(help)) {
+    throw new Error(
+      "copilot CLI --help no longer advertises -p/--prompt; invocation flag has drifted. " +
+        "Check recent @github/copilot releases and update scripts/drift-canary.mjs.",
+    );
+  }
+
+  const start = Date.now();
+  await runCommand("copilot", ["-p", prompt], {
+    env: {
+      HOME: sandboxHome,
+      USERPROFILE: sandboxHome,
+      GH_TOKEN: process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN ?? "",
+      GITHUB_TOKEN: process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? "",
+    },
+    timeoutMs,
+    cwd: sandboxHome,
+  });
+  const invocationMs = Date.now() - start;
+
+  const sessionRoot = join(sandboxHome, ".copilot", "session-state");
+  if (!(await pathExists(sessionRoot))) {
+    throw new Error(
+      `copilot ran but did not create ${sessionRoot} — session-storage layout may have drifted.`,
+    );
+  }
+  return { sessionPath: sessionRoot, invocationMs };
+}
+
 // -----------------------------------------------------------------------------
 // Scraper dispatch
 // -----------------------------------------------------------------------------
@@ -313,12 +448,17 @@ export async function loadScrapers({ distRoot }) {
   const claude = await tryLoad("dist/src/scrapers/claude-code.js");
   const codex = await tryLoad("dist/src/scrapers/codex.js");
   const gemini = await tryLoad("dist/src/scrapers/gemini.js");
+  const opencode = await tryLoad("dist/src/scrapers/opencode.js");
+  const copilotCli = await tryLoad("dist/src/scrapers/copilot-cli.js");
 
   return {
     "claude-code": (sessionPath, stateDir) =>
       new claude.ClaudeCodeScraper(sessionPath, stateDir),
     codex: (sessionPath, stateDir) => new codex.CodexCliScraper(sessionPath, stateDir),
     gemini: (sessionPath, stateDir) => new gemini.GeminiCliScraper(sessionPath, stateDir),
+    opencode: (sessionPath, stateDir) => new opencode.OpenCodeScraper(sessionPath, stateDir),
+    "copilot-cli": (sessionPath, stateDir) =>
+      new copilotCli.CopilotCliScraper(sessionPath, stateDir),
   };
 }
 
@@ -408,7 +548,7 @@ async function main() {
     return 2;
   }
 
-  const known = ["claude-code", "codex", "gemini"];
+  const known = ["claude-code", "codex", "gemini", "opencode", "copilot-cli"];
   if (!known.includes(args.tool)) {
     console.error(
       `drift-canary: unknown --tool ${args.tool}. Expected one of: ${known.join(", ")}`,
@@ -437,6 +577,8 @@ async function main() {
     "claude-code": invokeClaudeCode,
     codex: invokeCodex,
     gemini: invokeGemini,
+    opencode: invokeOpencode,
+    "copilot-cli": invokeCopilotCli,
   };
 
   try {

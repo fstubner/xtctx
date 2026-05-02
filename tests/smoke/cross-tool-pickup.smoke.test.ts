@@ -29,8 +29,10 @@ import {
   seedClaudeCode,
   seedCodex,
   seedCopilot,
+  seedCopilotCli,
   seedCursor,
   seedGemini,
+  seedOpencode,
   spawnCli,
   type SearchHit,
 } from "./helpers.js";
@@ -190,7 +192,7 @@ describe("cross-tool pickup smoke", () => {
   );
 
   it(
-    "[3] full chain: Claude -> Gemini -> Cursor -> Codex -> Claude (5 hops)",
+    "[3] full chain: Claude -> Gemini -> opencode -> Cursor -> Codex -> copilot-cli -> Claude (7 hops)",
     async () => {
       const { projectDir, fakeHome, env } = await allocScenario("s3");
 
@@ -214,8 +216,18 @@ describe("cross-tool pickup smoke", () => {
       ]);
       await runIngest(projectDir, env);
 
-      // Hop 3: User switches to Cursor; seed Cursor storage.
-      await seedCursor(fakeHome, "cursor-hop-3", [
+      // Hop 3: User switches to opencode; seed opencode storage.
+      await seedOpencode(fakeHome, "opencode-hop-3", [
+        {
+          role: "assistant",
+          content:
+            "Wired up the agent harness. FACT_EPSILON_OPENCODE: opencode runs the harness with a per-session SQLite log under ~/.local/share/opencode.",
+        },
+      ]);
+      await runIngest(projectDir, env);
+
+      // Hop 4: User switches to Cursor; seed Cursor storage.
+      await seedCursor(fakeHome, "cursor-hop-4", [
         {
           role: "assistant",
           content:
@@ -224,8 +236,8 @@ describe("cross-tool pickup smoke", () => {
       ]);
       await runIngest(projectDir, env);
 
-      // Hop 4: User switches to Codex; seed Codex storage.
-      await seedCodex(fakeHome, "codex-hop-4", [
+      // Hop 5: User switches to Codex; seed Codex storage.
+      await seedCodex(fakeHome, "codex-hop-5", [
         {
           role: "user",
           content: "Finalize the dedup rules for knowledge writeback.",
@@ -238,27 +250,45 @@ describe("cross-tool pickup smoke", () => {
       ]);
       await runIngest(projectDir, env);
 
-      // Hop 5: User returns to Claude Code. At this point Claude must be able
-      // to see FACT_ALPHA through FACT_DELTA across all four prior tools.
+      // Hop 6: User switches to Copilot CLI; seed copilot-cli storage.
+      await seedCopilotCli(fakeHome, "copilot-cli-hop-6", [
+        {
+          role: "assistant",
+          content:
+            "Captured the deployment runbook. FACT_ZETA_COPILOT_CLI: production deploys gate on the drift canary going green for 24h before promote.",
+        },
+      ]);
+      await runIngest(projectDir, env);
+
+      // Hop 7: User returns to Claude Code. At this point Claude must be able
+      // to see FACT_ALPHA through FACT_ZETA across all six prior tools.
       const hitsAlpha = await searchViaMcp(projectDir, env, "FACT_ALPHA_CLAUDE sentinel phrase cross-tool handoff");
       const hitsBeta = await searchViaMcp(projectDir, env, "FACT_BETA_GEMINI zod input validation");
+      const hitsEpsilon = await searchViaMcp(projectDir, env, "FACT_EPSILON_OPENCODE per-session SQLite log");
       const hitsGamma = await searchViaMcp(projectDir, env, "FACT_GAMMA_CURSOR hybrid search reciprocal rank fusion");
       const hitsDelta = await searchViaMcp(projectDir, env, "FACT_DELTA_CODEX dedup threshold cosine similarity");
+      const hitsZeta = await searchViaMcp(projectDir, env, "FACT_ZETA_COPILOT_CLI deployment runbook drift canary");
 
       const alpha = findHitWithText(hitsAlpha, "FACT_ALPHA_CLAUDE");
       const beta = findHitWithText(hitsBeta, "FACT_BETA_GEMINI");
+      const epsilon = findHitWithText(hitsEpsilon, "FACT_EPSILON_OPENCODE");
       const gamma = findHitWithText(hitsGamma, "FACT_GAMMA_CURSOR");
       const delta = findHitWithText(hitsDelta, "FACT_DELTA_CODEX");
+      const zeta = findHitWithText(hitsZeta, "FACT_ZETA_COPILOT_CLI");
 
       expect(alpha, "Claude-origin fact missing").toBeDefined();
       expect(beta, "Gemini-origin fact missing").toBeDefined();
+      expect(epsilon, "opencode-origin fact missing").toBeDefined();
       expect(gamma, "Cursor-origin fact missing").toBeDefined();
       expect(delta, "Codex-origin fact missing").toBeDefined();
+      expect(zeta, "copilot-cli-origin fact missing").toBeDefined();
 
       expect(alpha!.metadata.source_tool).toBe("claude-code");
       expect(beta!.metadata.source_tool).toBe("gemini");
+      expect(epsilon!.metadata.source_tool).toBe("opencode");
       expect(gamma!.metadata.source_tool).toBe("cursor");
       expect(delta!.metadata.source_tool).toBe("codex");
+      expect(zeta!.metadata.source_tool).toBe("copilot-cli");
     },
     SCENARIO_TIMEOUT,
   );
@@ -393,11 +423,11 @@ describe("cross-tool pickup smoke", () => {
   );
 
   it(
-    "[6] cold start with mixed corpus: ingest sees all five tools in one pass",
+    "[6] cold start with mixed corpus: ingest sees all seven tools in one pass",
     async () => {
       const { projectDir, fakeHome, env } = await allocScenario("s6");
 
-      // Populate all five tools BEFORE any ingest runs.
+      // Populate all seven tools BEFORE any ingest runs.
       await seedClaudeCode(fakeHome, "proj-hash-s6", "claude-s6", [
         { role: "assistant", content: "COLD_CLAUDE_FACT: bootstrap done from Claude session." },
       ]);
@@ -416,13 +446,19 @@ describe("cross-tool pickup smoke", () => {
       await seedGemini(fakeHome, "gemini-s6", [
         { role: "assistant", content: "COLD_GEMINI_FACT: Gemini added streaming response support in the web UI." },
       ]);
+      await seedOpencode(fakeHome, "opencode-s6", [
+        { role: "assistant", content: "COLD_OPENCODE_FACT: opencode session captured the agent harness layout." },
+      ]);
+      await seedCopilotCli(fakeHome, "copilot-cli-s6", [
+        { role: "assistant", content: "COLD_COPILOT_CLI_FACT: copilot CLI documented the production promote gate." },
+      ]);
 
       const log = await runIngest(projectDir, env);
-      // All five should have been detected and processed.
+      // All seven should have been detected and processed.
       const match = log.match(/(\d+)\s+chunks\s+from\s+(\d+)\s+scraper/);
       expect(match, `cannot parse ingest log: ${log}`).toBeTruthy();
       const scrapers = Number(match![2]);
-      expect(scrapers, "expected 5 scrapers to have contributed").toBe(5);
+      expect(scrapers, "expected 7 scrapers to have contributed").toBe(7);
 
       const queries: Array<{ query: string; needle: string; tool: string }> = [
         { query: "COLD_CLAUDE_FACT bootstrap", needle: "COLD_CLAUDE_FACT", tool: "claude-code" },
@@ -430,6 +466,8 @@ describe("cross-tool pickup smoke", () => {
         { query: "COLD_CODEX_FACT auto-edit approval", needle: "COLD_CODEX_FACT", tool: "codex" },
         { query: "COLD_COPILOT_FACT rate limit config", needle: "COLD_COPILOT_FACT", tool: "copilot" },
         { query: "COLD_GEMINI_FACT streaming response", needle: "COLD_GEMINI_FACT", tool: "gemini" },
+        { query: "COLD_OPENCODE_FACT agent harness layout", needle: "COLD_OPENCODE_FACT", tool: "opencode" },
+        { query: "COLD_COPILOT_CLI_FACT production promote gate", needle: "COLD_COPILOT_CLI_FACT", tool: "copilot-cli" },
       ];
 
       for (const q of queries) {

@@ -514,6 +514,151 @@ export async function seedCodex(
 }
 
 /**
+ * opencode stores all sessions/messages/parts in a single SQLite DB at a
+ * platform-specific application-data directory. Mirror of
+ * defaultOpenCodeStorePath() in src/runtime/ingestion.ts:
+ *   - win32: <APPDATA>/opencode/opencode.db
+ *   - linux: <XDG_DATA_HOME>/opencode/opencode.db (~/.local/share)
+ *   - else:  ~/Library/Application Support/opencode/opencode.db
+ *
+ * Schema (subset the scraper actually queries):
+ *   session(id, time_created, title)
+ *   message(id, session_id, time_created, data TEXT JSON)
+ *   part(id, message_id, time_created, data TEXT JSON)
+ *
+ * The scraper opens the DB read-only with `fileMustExist`, runs SELECT
+ * queries on `session`, `message`, `part`, and never enables foreign-key
+ * enforcement. We deliberately omit a `project` table — the scraper never
+ * references it and FK enforcement is off by default in SQLite.
+ */
+function opencodeDbPath(fakeHome: string): string {
+  if (process.platform === "win32") {
+    return join(fakeHome, "AppData", "Roaming", "opencode", "opencode.db");
+  }
+  if (process.platform === "linux") {
+    return join(fakeHome, ".local", "share", "opencode", "opencode.db");
+  }
+  return join(fakeHome, "Library", "Application Support", "opencode", "opencode.db");
+}
+
+export async function seedOpencode(
+  fakeHome: string,
+  sessionId: string,
+  messages: SeedMessage[],
+  startMs = Date.now() - 60_000,
+): Promise<void> {
+  const dbPath = opencodeDbPath(fakeHome);
+  await mkdir(dirname(dbPath), { recursive: true });
+
+  const db = new Database(dbPath);
+  // Foreign keys are off by default in SQLite; we leave them off so we don't
+  // need to seed a parent `project` table the scraper never reads.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS session (
+      id TEXT PRIMARY KEY,
+      project_id TEXT,
+      slug TEXT,
+      directory TEXT,
+      title TEXT,
+      version TEXT,
+      time_created INTEGER NOT NULL,
+      time_updated INTEGER
+    );
+    CREATE TABLE IF NOT EXISTS message (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      time_created INTEGER NOT NULL,
+      time_updated INTEGER,
+      data TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS part (
+      id TEXT PRIMARY KEY,
+      message_id TEXT NOT NULL,
+      session_id TEXT,
+      time_created INTEGER NOT NULL,
+      data TEXT NOT NULL
+    );
+  `);
+
+  const sessionCreated = startMs;
+  db.prepare(
+    "INSERT OR REPLACE INTO session (id, project_id, slug, directory, title, version, time_created, time_updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+  ).run(
+    sessionId,
+    "proj-test",
+    sessionId,
+    "/fake/project",
+    `Session ${sessionId}`,
+    "0.1.0",
+    sessionCreated,
+    sessionCreated,
+  );
+
+  const insertMsg = db.prepare(
+    "INSERT OR REPLACE INTO message (id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?)",
+  );
+  const insertPart = db.prepare(
+    "INSERT OR REPLACE INTO part (id, message_id, session_id, time_created, data) VALUES (?, ?, ?, ?, ?)",
+  );
+
+  for (const [i, m] of messages.entries()) {
+    const ts = m.timestamp ? Date.parse(m.timestamp) : startMs + (i + 1) * 1000;
+    const messageId = `${sessionId}-msg-${i}`;
+    const partId = `${sessionId}-part-${i}`;
+    insertMsg.run(
+      messageId,
+      sessionId,
+      ts,
+      ts,
+      JSON.stringify({
+        id: messageId,
+        sessionID: sessionId,
+        role: m.role,
+        time: { created: ts },
+      }),
+    );
+    insertPart.run(
+      partId,
+      messageId,
+      sessionId,
+      ts,
+      JSON.stringify({ type: "text", text: m.content }),
+    );
+  }
+  db.close();
+}
+
+/**
+ * Copilot CLI stores per-session directories at ~/.copilot/session-state/<id>/
+ * with an events.jsonl file. Path is identical across all platforms (mirror of
+ * defaultCopilotCliSessionPath() in src/runtime/ingestion.ts).
+ *
+ * The scraper accepts a defensive shape: top-level `role` + `content` string +
+ * `timestamp` numeric — that's the simplest form we can emit.
+ */
+export async function seedCopilotCli(
+  fakeHome: string,
+  sessionId: string,
+  messages: SeedMessage[],
+  startMs = Date.now() - 60_000,
+): Promise<void> {
+  const sessionDir = join(fakeHome, ".copilot", "session-state", sessionId);
+  await mkdir(sessionDir, { recursive: true });
+  const file = join(sessionDir, "events.jsonl");
+
+  const lines = messages.map((m, i) => {
+    const ts = m.timestamp ? Date.parse(m.timestamp) : startMs + (i + 1) * 1000;
+    return JSON.stringify({
+      type: "message",
+      role: m.role,
+      content: m.content,
+      timestamp: ts,
+    });
+  });
+  await writeFile(file, lines.join("\n") + "\n", "utf-8");
+}
+
+/**
  * Gemini CLI stores session files at:
  *   ~/.gemini/tmp/<project>/chats/session-<id>.json
  * Shape: { sessionId, messages: [{ type: "user"|"gemini", content: [{text}], timestamp }] }.

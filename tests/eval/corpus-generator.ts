@@ -75,7 +75,15 @@ export interface CorpusOptions {
   tools?: string[];
 }
 
-const DEFAULT_TOOLS = ["claude-code", "cursor", "codex", "copilot", "gemini"];
+const DEFAULT_TOOLS = [
+  "claude-code",
+  "cursor",
+  "codex",
+  "copilot",
+  "gemini",
+  "opencode",
+  "copilot-cli",
+];
 
 // ---- Vocabulary pool ------------------------------------------------------
 // Each list is intentionally ~40 items so anchors stay distinct from each other.
