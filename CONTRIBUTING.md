@@ -4,7 +4,7 @@ Thanks for contributing.
 
 ## Development Setup
 
-1. Install Node.js 20+.
+1. Install Node.js 22+ (Node 20 reached end-of-life on 2026-04-30).
 2. Install dependencies:
    - `npm ci`
    - `npm --prefix web ci`

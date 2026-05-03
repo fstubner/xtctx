@@ -167,7 +167,7 @@ export const site: SiteData = {
   },
 
   hero: {
-    badge: 'Open source · MIT · Node ≥20 · Local-first',
+    badge: 'Open source · MIT · Node ≥22 · Local-first',
     heading: 'Your AI coding history, indexed across every tool',
     subhead:
       'xtctx ingests conversations from Claude Code, Cursor, Copilot, Codex, and Gemini, indexes them locally with hybrid search (BM25 + embeddings), and exposes recall and writeback over MCP. Switch tools mid-project without re-briefing the model.',
@@ -255,7 +255,7 @@ config.yaml      knowledge/       lancedb/         tool-config/
         label: 'npm (global)',
         command: 'npm install -g xtctx',
         hint:
-          'Requires Node ≥20. Installs the <code>xtctx</code> CLI on your PATH.',
+          'Requires Node ≥22. Installs the <code>xtctx</code> CLI on your PATH.',
       },
       {
         label: 'npx (no install)',
