@@ -37,6 +37,7 @@
     "verify:release": "npm test && npm run test:security && npm run security:checklist && npm run test:eval && npm run test:drift && npm run build && npm run landing:build && npm run smoke:cli && npm run test:smoke"
   },
   "dependencies": {
+    "@clack/prompts": "^1.3.0",
     "@iarna/toml": "^2.2.5",
     "@lancedb/lancedb": "^0.13.0",
     "@modelcontextprotocol/sdk": "^1.12.0",
