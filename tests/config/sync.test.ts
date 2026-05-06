@@ -176,4 +176,94 @@ describe("syncToolConfigs", () => {
     const claudeMd = await readFile(join(projectDir, "CLAUDE.md"), "utf-8");
     expect(claudeMd).toContain("- xtctx (required for recall/writeback continuity)");
   });
+
+  describe("handoff brief injection", () => {
+    // Use a recent timestamp so the brief generator's default 7-day staleness
+    // threshold is comfortably satisfied at test runtime.
+    const recentIso = () => new Date(Date.now() - 5 * 60_000).toISOString();
+
+    it("renders the handoff brief in CLAUDE.md when a recent session in another tool is supplied", async () => {
+      const sessions = [
+        {
+          session_ref: "cursor:abc-123",
+          tool: "cursor",
+          started_at: recentIso(),
+          last_activity_at: recentIso(),
+          summary: "Picked jose over jsonwebtoken for auth.",
+          message_count: 14,
+        },
+      ];
+
+      await syncToolConfigs(projectDir, sessions);
+
+      const claudeMd = await readFile(join(projectDir, "CLAUDE.md"), "utf-8");
+      expect(claudeMd).toContain("## Last session in another tool");
+      expect(claudeMd).toContain("**Tool:** Cursor");
+      // The session-ref appears inside the brief, helping the agent find the
+      // source transcript via xtctx_session_detail if it wants to.
+      expect(claudeMd).toContain("`cursor:abc-123`");
+      expect(claudeMd).toContain("Picked jose over jsonwebtoken for auth.");
+    });
+
+    it("omits the brief section when only sessions in the destination tool exist", async () => {
+      // The brief should never tell tool A about its own session; it's
+      // a *handoff* — only useful when sourced from a different tool.
+      const claudeOnly = [
+        {
+          session_ref: "claude-code:xyz",
+          tool: "claude-code",
+          started_at: recentIso(),
+          last_activity_at: recentIso(),
+          summary: "Worked on auth refactor.",
+          message_count: 8,
+        },
+      ];
+
+      await syncToolConfigs(projectDir, claudeOnly);
+
+      const claudeMd = await readFile(join(projectDir, "CLAUDE.md"), "utf-8");
+      expect(claudeMd).not.toContain("## Last session in another tool");
+    });
+
+    it("omits the brief section when no sessions are passed at all", async () => {
+      // Standalone `xtctx sync` (no running ingest daemon) calls without
+      // session data; the brief degrades to empty so the section is skipped
+      // rather than rendering an empty header.
+      await syncToolConfigs(projectDir);
+
+      const claudeMd = await readFile(join(projectDir, "CLAUDE.md"), "utf-8");
+      expect(claudeMd).not.toContain("## Last session in another tool");
+    });
+
+    it("targets only the destination tool's brief; other tools see briefs from their own non-self sessions", async () => {
+      // Two recent sessions, one in cursor and one in codex. Each
+      // destination tool's managed block should contain a brief from the
+      // *other* tool's session, never its own.
+      const sessions = [
+        {
+          session_ref: "cursor:1",
+          tool: "cursor",
+          started_at: recentIso(),
+          last_activity_at: recentIso(),
+          summary: "From cursor.",
+          message_count: 3,
+        },
+      ];
+
+      await syncToolConfigs(projectDir, sessions);
+
+      // CLAUDE.md (claude-code's memory file) sees the cursor brief.
+      const claudeMd = await readFile(join(projectDir, "CLAUDE.md"), "utf-8");
+      expect(claudeMd).toContain("**Tool:** Cursor");
+      expect(claudeMd).toContain("From cursor.");
+
+      // Cursor's own managed block (the .mdc file under .cursor/rules/)
+      // should NOT contain a Cursor brief — that would be self-referential.
+      const cursorMdc = await readFile(
+        join(homeDir, ".cursor", "rules", "xtctx-managed.mdc"),
+        "utf-8",
+      );
+      expect(cursorMdc).not.toContain("## Last session in another tool");
+    });
+  });
 });

@@ -22,6 +22,7 @@ import {
 } from "./tools/knowledge.js";
 import { createSearchHandler, type SearchRunner } from "./tools/search.js";
 import {
+  createLastSessionBriefHandler,
   createRecentSessionsHandler,
   createSessionDetailHandler,
   type SessionService,
@@ -132,6 +133,37 @@ export function buildToolDefinitions(): Tool[] {
           limit: { type: "number", description: "Max messages to return" },
         },
         required: ["session_ref"],
+      },
+    },
+    {
+      name: "xtctx_last_session_brief",
+      description:
+        "Programmatic version of the handoff brief that xtctx injects into " +
+        "each tool's memory file. Returns a short markdown summary of the " +
+        "most-recent session in another tool (skipping the agent's own " +
+        "tool when current_tool is set), with a pointer to the source " +
+        "transcript.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          current_tool: {
+            type: "string",
+            description:
+              "Tool slug the calling agent runs in (e.g. 'claude', " +
+              "'cursor'). Sessions in this tool are skipped. Omit to get " +
+              "the most-recent session regardless of tool.",
+          },
+          format: {
+            type: "string",
+            enum: ["markdown", "json"],
+            description: "Response format. Default: markdown",
+          },
+          stale_threshold_days: {
+            type: "number",
+            description:
+              "Sessions older than this are skipped. Default: 7 days.",
+          },
+        },
       },
     },
     {
@@ -303,9 +335,11 @@ export function createToolHandlers(
   if (dependencies.sessions) {
     handlers.set("xtctx_recent_sessions", createRecentSessionsHandler(dependencies.sessions));
     handlers.set("xtctx_session_detail", createSessionDetailHandler(dependencies.sessions));
+    handlers.set("xtctx_last_session_brief", createLastSessionBriefHandler(dependencies.sessions));
   } else {
     handlers.set("xtctx_recent_sessions", missingDependency("session service"));
     handlers.set("xtctx_session_detail", missingDependency("session service"));
+    handlers.set("xtctx_last_session_brief", missingDependency("session service"));
   }
 
   if (dependencies.knowledge) {

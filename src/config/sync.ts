@@ -13,6 +13,11 @@ import {
   type ToolContinuityPolicy,
 } from "./policy.js";
 import { hasNativeSkillSupport, type SkillDefinition } from "./skills.js";
+import {
+  generateHandoffBrief,
+  sessionSummaryToHandoff,
+} from "../handoff/brief.js";
+import type { SessionSummary } from "../mcp/tools/sessions.js";
 
 const MARKERS = {
   markdown: {
@@ -65,6 +70,15 @@ interface SyncContext {
   projectRoot: string;
   policy: EffectiveContinuityPolicy;
   inventory: ContinuityInventory;
+  /**
+   * Recent session summaries used to render the handoff brief into
+   * each tool's managed block. Optional: when omitted (e.g. from a
+   * standalone `xtctx sync` CLI invocation without a running ingest
+   * daemon), the brief degrades to empty and the section is skipped.
+   * `xtctx serve` provides this list each sync tick from
+   * `IndexedSessionService.listRecentSessions`.
+   */
+  sessions: SessionSummary[];
 }
 
 export interface ContinuityInventory {
@@ -190,8 +204,19 @@ const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
   },
 };
 
-export async function syncToolConfigs(projectPath?: string): Promise<SyncToolConfigResult> {
-  const context = await loadSyncContext(projectPath);
+/**
+ * Run sync across every registered tool.
+ *
+ * `sessions` is optional and propagates into the handoff-brief section
+ * of each rendered managed block. The standalone `xtctx sync` CLI
+ * leaves it undefined (brief renders empty, section skipped); `xtctx
+ * serve` provides recent sessions on every tick so briefs stay fresh.
+ */
+export async function syncToolConfigs(
+  projectPath?: string,
+  sessions?: SessionSummary[],
+): Promise<SyncToolConfigResult> {
+  const context = await loadSyncContext(projectPath, sessions);
   const toolNames = dedupeStrings([
     ...DEFAULT_REGISTERED_TOOLS,
     ...Object.keys(context.policy.tools),
@@ -232,15 +257,17 @@ export async function syncToolConfigs(projectPath?: string): Promise<SyncToolCon
 export async function syncToolConfigByName(
   tool: string,
   projectPath?: string,
+  sessions?: SessionSummary[],
 ): Promise<SyncResult> {
-  const context = await loadSyncContext(projectPath);
+  const context = await loadSyncContext(projectPath, sessions);
   return syncSingleTool(context, tool);
 }
 
 export async function getToolContinuityStatuses(
   projectPath?: string,
+  sessions?: SessionSummary[],
 ): Promise<ToolContinuityStatus[]> {
-  const context = await loadSyncContext(projectPath);
+  const context = await loadSyncContext(projectPath, sessions);
   const tools = dedupeStrings([
     ...DEFAULT_REGISTERED_TOOLS,
     ...Object.keys(context.policy.tools),
@@ -257,12 +284,13 @@ export async function getToolContinuityStatuses(
 export async function previewToolContinuity(
   tool: string,
   projectPath?: string,
+  sessions?: SessionSummary[],
 ): Promise<ToolRenderPreview> {
-  const context = await loadSyncContext(projectPath);
+  const context = await loadSyncContext(projectPath, sessions);
   const policy = resolveToolFromPolicy(context.policy, tool);
   const targets = resolveToolTargets(context.projectRoot, tool, policy.scope);
   const categories = categoriesFromPolicy(policy);
-  const content = renderToolContent(tool, policy, context.inventory, context.policy, context.projectRoot);
+  const content = renderToolContent(tool, policy, context.inventory, context.policy, context.projectRoot, context.sessions);
 
   const targetPreviews = await Promise.all(targets.map(async (target) => {
     const existing = await readUtf8IfExists(target.path);
@@ -291,11 +319,14 @@ export async function previewToolContinuity(
   };
 }
 
-async function loadSyncContext(projectPath?: string): Promise<SyncContext> {
+async function loadSyncContext(
+  projectPath?: string,
+  sessions?: SessionSummary[],
+): Promise<SyncContext> {
   const projectRoot = resolve(projectPath ?? process.cwd());
   const policy = await loadEffectiveContinuityPolicy(projectRoot);
   const inventory = await loadContinuityInventory(join(projectRoot, ".xtctx", "tool-config"));
-  return { projectRoot, policy, inventory };
+  return { projectRoot, policy, inventory, sessions: sessions ?? [] };
 }
 
 async function syncSingleTool(context: SyncContext, tool: string): Promise<SyncResult> {
@@ -329,7 +360,7 @@ async function syncSingleTool(context: SyncContext, tool: string): Promise<SyncR
     };
   }
 
-  const content = renderToolContent(tool, toolPolicy, context.inventory, context.policy, context.projectRoot);
+  const content = renderToolContent(tool, toolPolicy, context.inventory, context.policy, context.projectRoot, context.sessions);
   const targetStatuses: ToolTargetStatus[] = [];
 
   for (const target of targets) {
@@ -378,7 +409,7 @@ async function inspectSingleTool(context: SyncContext, tool: string): Promise<To
     };
   }
 
-  const content = renderToolContent(tool, toolPolicy, context.inventory, context.policy, context.projectRoot);
+  const content = renderToolContent(tool, toolPolicy, context.inventory, context.policy, context.projectRoot, context.sessions);
   const statuses = await Promise.all(targets.map((target) => inspectTarget(target, content)));
   const warnings = statuses
     .map((status) => status.warning)
@@ -565,6 +596,7 @@ function renderToolContent(
   inventory: ContinuityInventory,
   policy: EffectiveContinuityPolicy,
   projectRoot: string,
+  sessions: SessionSummary[] = [],
 ): string {
   const enabled = enabledCategories(toolPolicy);
   const lines: string[] = [
@@ -576,6 +608,17 @@ function renderToolContent(
     "This block is generated by xtctx sync from .xtctx/tool-config/shared.yaml.",
     "Do not edit lines inside this managed block.",
   ];
+
+  // Handoff brief: render BEFORE category sections so it's the first
+  // content the agent reads after the metadata header. Empty string
+  // when there's no qualifying recent session in another tool.
+  const brief = generateHandoffBrief(
+    sessions.map(sessionSummaryToHandoff),
+    tool,
+  );
+  if (brief.length > 0) {
+    lines.push("", brief);
+  }
 
   if (enabled.length === 0) {
     lines.push("", "No continuity categories enabled for this tool.");

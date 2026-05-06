@@ -2,6 +2,14 @@ export interface SessionSummary {
   session_ref: string;
   tool: string;
   started_at: string;
+  /**
+   * ISO timestamp of the most-recent message in the session. Distinct
+   * from `started_at` because long sessions with bursty activity look
+   * very different to a "minutes ago" formatter depending on which
+   * timestamp you read. The handoff brief generator uses this to
+   * compute "X minutes ago" honestly.
+   */
+  last_activity_at?: string;
   summary?: string;
   message_count?: number;
 }
@@ -30,6 +38,19 @@ interface SessionDetailParams {
   format?: "markdown" | "json";
 }
 
+interface LastSessionBriefParams {
+  /**
+   * The tool the agent considers itself to be running in. The brief
+   * is filtered to skip same-tool sessions because the agent already
+   * has its own immediate context. Defaults to undefined → first
+   * non-stale session regardless of tool.
+   */
+  current_tool?: string;
+  format?: "markdown" | "json";
+  /** Override the default 7-day staleness threshold. */
+  stale_threshold_days?: number;
+}
+
 export function createRecentSessionsHandler(service: SessionService) {
   return async (raw: Record<string, unknown> = {}) => {
     const params = raw as unknown as RecentSessionsParams;
@@ -42,6 +63,59 @@ export function createRecentSessionsHandler(service: SessionService) {
     }
 
     return formatRecentSessionsMarkdown(sessions);
+  };
+}
+
+/**
+ * Returns the same handoff brief that gets injected into each tool's
+ * memory file by `xtctx serve`'s sync ticks, but as a programmatic
+ * MCP response. Useful for agents that prefer not to parse the
+ * managed block out of `CLAUDE.md` / `AGENTS.md` / etc.
+ *
+ * The default brief is identical to what's in the memory file at the
+ * last sync tick. Tools can request it explicitly to:
+ *   - Confirm freshness (the brief in the memory file might be stale
+ *     if the agent ran before the next sync tick)
+ *   - Get the brief in JSON form for programmatic processing
+ *   - Adjust the staleness threshold per-call
+ */
+export function createLastSessionBriefHandler(service: SessionService) {
+  return async (raw: Record<string, unknown> = {}) => {
+    // Lazy require to keep this module's import graph independent of the
+    // handoff feature being shipped. Avoids cycles if brief.ts ever
+    // grows to depend on session types beyond `HandoffSession`.
+    const { generateHandoffBrief, sessionSummaryToHandoff, pickHandoffSession } =
+      await import("../../handoff/brief.js");
+
+    const params = raw as unknown as LastSessionBriefParams;
+    const format = params.format ?? "markdown";
+    const currentTool = params.current_tool ?? "__no_filter__";
+    const staleThresholdMs =
+      params.stale_threshold_days !== undefined
+        ? params.stale_threshold_days * 24 * 60 * 60 * 1000
+        : undefined;
+
+    // Pull a generous window so the brief generator can pick the most-
+    // recent qualifying session even if a few same-tool entries top the
+    // list.
+    const sessions = await service.listRecentSessions(20);
+    const handoffSessions = sessions.map(sessionSummaryToHandoff);
+
+    const briefOptions =
+      staleThresholdMs !== undefined ? { staleThresholdMs } : {};
+    const brief = generateHandoffBrief(handoffSessions, currentTool, briefOptions);
+    const session = pickHandoffSession(handoffSessions, currentTool, briefOptions);
+
+    if (format === "json") {
+      return {
+        brief: brief.length > 0 ? brief : null,
+        session: session ?? null,
+      };
+    }
+
+    return brief.length > 0
+      ? brief
+      : "No qualifying recent session in another tool (within staleness window).";
   };
 }
 
