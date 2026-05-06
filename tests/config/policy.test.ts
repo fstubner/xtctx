@@ -38,7 +38,7 @@ describe("continuity policy schema and merge", () => {
             commands: false,
           },
           preferences: {
-            beforeStart: "xtctx_search",
+            beforeStart: "xtctx_recent_sessions",
             verbosity: "normal",
           },
         },
@@ -92,7 +92,7 @@ describe("continuity policy schema and merge", () => {
     expect(codex.categories.agents).toBe(true);
     expect(codex.categories.mcp_servers).toBe(false);
     expect(codex.preferences).toEqual({
-      beforeStart: "xtctx_search",
+      beforeStart: "xtctx_recent_sessions",
       verbosity: "low",
     });
 
