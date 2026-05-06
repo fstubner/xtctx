@@ -32,7 +32,12 @@ describe("runInit", () => {
     expect(shared).toContain("context_feed");
     expect(shared).toContain("tools:");
     expect(shared).toContain("whitelist:");
-    expect(skill).toContain("xtctx_search");
+    // Post-pivot: the default skill points at the surviving handoff-trio
+    // tools rather than the dropped `xtctx_search` / `xtctx_save_*`.
+    expect(skill).toContain("xtctx_recent_sessions");
+    expect(skill).toContain("xtctx_last_session_brief");
+    expect(skill).not.toContain("xtctx_search");
+    expect(skill).not.toContain("xtctx_save_decision");
     await expect(access(commandsDir)).resolves.toBeUndefined();
     await expect(access(agentsDir)).resolves.toBeUndefined();
     await expect(access(mcpServersDir)).resolves.toBeUndefined();

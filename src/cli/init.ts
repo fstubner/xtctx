@@ -92,29 +92,39 @@ Use this workflow when xtctx tools are available through MCP.
 
 ## Session Start
 
-1. Call \`xtctx_search\` with a summary query of the active task before making changes.
-2. Call \`xtctx_project_knowledge\` with \`type: all\` for prior decisions, fixes, and insights.
-3. Optionally call \`xtctx_recent_sessions\` and \`xtctx_session_detail\` when session data is available.
+1. Read the managed block in this file (between \`<!-- xtctx:begin -->\` and
+   \`<!-- xtctx:end -->\` markers, or per-tool variants). It already contains
+   a brief of the most-recent session in another tool when one exists.
+2. If you need more than the brief, call \`xtctx_recent_sessions\` to list
+   recent work across all supported AI coding tools.
+3. Call \`xtctx_session_detail\` to drill into the full transcript of any
+   session listed by step 2.
+4. Use \`xtctx_last_session_brief\` if you want the brief programmatically
+   (same content as the managed block) — useful for confirming freshness
+   or pulling JSON.
 
 ## During Implementation
 
-1. Use \`xtctx_search\` first at \`depth: summary\`, then drill into \`detail\` only as needed.
-2. Use \`xtctx_list_configs\` and \`xtctx_get_config\` to load shared project rules.
-3. Use \`xtctx_tool_preferences\` for tool-specific behavior before acting.
+1. Use \`xtctx_list_configs\` and \`xtctx_get_config\` to load shared project
+   rules (skills, commands, agents).
+2. Use \`xtctx_tool_preferences\` to pick up tool-specific behavior before
+   acting.
+3. Use \`xtctx_continuity_status\` and \`xtctx_effective_policy\` if you need
+   to inspect or troubleshoot the per-tool sync state.
 
-## Writeback Rules
+## Durable knowledge (out of scope for xtctx)
 
-1. Save major architecture choices with \`xtctx_save_decision\`.
-2. Save recurring failures and verified fixes with \`xtctx_save_error_solution\`.
-3. Save durable learnings with \`xtctx_save_insight\`.
-4. Save recurring project Q&A with \`xtctx_save_faq\`.
-5. Keep records short, concrete, and tied to files, commands, and rationale.
+xtctx is **handoff-scope only** — it remembers the last few days of project
+context to make tool-switching seamless. For project-lifetime knowledge
+(architectural decisions that should outlive the hot-state window, durable
+fix archives, multi-agent shared memory), use \`construct\` if it's installed,
+or hand-edit \`AGENTS.md\` / \`CLAUDE.md\` outside the managed block — anything
+outside the fences is preserved verbatim.
 `;
 
 export async function runInit(options: InitOptions = {}): Promise<void> {
   const projectRoot = resolve(options.projectPath ?? process.cwd());
   const xtctxDir = join(projectRoot, ".xtctx");
-  const knowledgeDir = join(xtctxDir, "knowledge");
   const configFile = join(xtctxDir, "config.yaml");
   const toolConfigDir = join(xtctxDir, "tool-config");
   const toolSkillsDir = join(toolConfigDir, "skills");
@@ -126,14 +136,11 @@ export async function runInit(options: InitOptions = {}): Promise<void> {
   const xtctxUsageSkillFile = join(toolSkillsDir, "xtctx-usage.md");
   const stateDir = join(xtctxDir, "state");
 
+  // Knowledge folder mkdirs are gone with the handoff-scope pivot — xtctx
+  // no longer stores durable structured records. The handoff brief lives
+  // inside each tool's managed memory block, not in `.xtctx/knowledge/`.
+  // For project-lifetime knowledge, see `construct`.
   await mkdir(xtctxDir, { recursive: true });
-  await mkdir(knowledgeDir, { recursive: true });
-  await mkdir(join(knowledgeDir, "decisions"), { recursive: true });
-  await mkdir(join(knowledgeDir, "errors"), { recursive: true });
-  await mkdir(join(knowledgeDir, "insights"), { recursive: true });
-  await mkdir(join(knowledgeDir, "conventions"), { recursive: true });
-  await mkdir(join(knowledgeDir, "gotchas"), { recursive: true });
-  await mkdir(join(knowledgeDir, "faqs"), { recursive: true });
   await mkdir(toolConfigDir, { recursive: true });
   await mkdir(toolSkillsDir, { recursive: true });
   await mkdir(toolCommandsDir, { recursive: true });

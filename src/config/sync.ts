@@ -632,8 +632,9 @@ function renderToolContent(
     lines.push(
       "",
       "## Context feed",
-      "- Session opener: xtctx_search -> xtctx_project_knowledge",
-      "- Writeback tools: xtctx_save_decision, xtctx_save_error_solution, xtctx_save_faq",
+      "- Session opener: read the handoff brief above (when present); call xtctx_recent_sessions if you need more",
+      "- Drill into a session: xtctx_session_detail",
+      "- Programmatic brief: xtctx_last_session_brief",
       `- Project root: ${projectRoot}`,
     );
   }
