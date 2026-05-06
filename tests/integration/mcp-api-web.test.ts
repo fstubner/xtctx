@@ -73,20 +73,20 @@ describe("Integration: MCP + API + Web data paths", () => {
   });
 
   it("keeps MCP tool handlers aligned with API data responses", async () => {
+    // Post-pivot tool surface: the durable-knowledge tools are gone.
+    // Operational tools (continuity, effective policy, tool prefs) and
+    // the session/handoff trio (recent_sessions, session_detail,
+    // last_session_brief) are the alignment surface now.
     const tools = buildToolDefinitions();
-    expect(tools.some((tool) => tool.name === "xtctx_search")).toBe(true);
     expect(tools.some((tool) => tool.name === "xtctx_tool_preferences")).toBe(true);
     expect(tools.some((tool) => tool.name === "xtctx_continuity_status")).toBe(true);
     expect(tools.some((tool) => tool.name === "xtctx_effective_policy")).toBe(true);
+    expect(tools.some((tool) => tool.name === "xtctx_recent_sessions")).toBe(true);
+    expect(tools.some((tool) => tool.name === "xtctx_last_session_brief")).toBe(true);
 
     const services = await createProjectServices(projectDir);
     const handlers = createToolHandlers({
-      search: {
-        search: async () => [],
-      },
       sessions: services.sessions,
-      knowledge: services.knowledge,
-      writer: services.knowledge,
       configs: services.configs,
       continuity: {
         effectivePolicy: async () => ({
@@ -118,32 +118,12 @@ describe("Integration: MCP + API + Web data paths", () => {
       },
     });
 
-    const projectKnowledge = handlers.get("xtctx_project_knowledge");
     const toolPreferences = handlers.get("xtctx_tool_preferences");
     const effectivePolicy = handlers.get("xtctx_effective_policy");
-    expect(projectKnowledge).toBeDefined();
+    const lastSessionBrief = handlers.get("xtctx_last_session_brief");
     expect(toolPreferences).toBeDefined();
     expect(effectivePolicy).toBeDefined();
-
-    const mcpKnowledge = (await projectKnowledge!({
-      type: "all",
-      format: "json",
-    })) as {
-      count: number;
-      records: Array<{ id: string; title: string }>;
-    };
-
-    const apiKnowledge = (await fetchJson(
-      `${apiBaseUrl}/api/knowledge?type=all&format=json`,
-    )) as {
-      count: number;
-      records: Array<{ id: string; title: string }>;
-    };
-
-    expect(apiKnowledge.count).toBe(mcpKnowledge.count);
-    expect(apiKnowledge.records.map((record) => record.id)).toEqual(
-      mcpKnowledge.records.map((record) => record.id),
-    );
+    expect(lastSessionBrief).toBeDefined();
 
     const mcpPreferences = (await toolPreferences!({
       tool: "claude-code",
@@ -160,23 +140,20 @@ describe("Integration: MCP + API + Web data paths", () => {
     expect(apiPreferences.preferences).toEqual(mcpPreferences.preferences);
   });
 
-  it("serves dashboard and search data paths consumed by the web UI", async () => {
+  it("serves dashboard data paths consumed by the web UI", async () => {
+    // Post-pivot: there's no `/api/search` or `/api/knowledge` route,
+    // and `/api/sources/status` no longer reports a knowledgeRecords
+    // count. Health + sources status + scrapers list are the surviving
+    // surfaces.
     const health = (await fetchJson(`${apiBaseUrl}/health`)) as { ok: boolean };
     const status = (await fetchJson(`${apiBaseUrl}/api/sources/status`)) as {
       ok: boolean;
-      knowledgeRecords: number;
-    };
-    const search = (await fetchJson(
-      `${apiBaseUrl}/api/search?query=retry&mode=keyword&limit=5`,
-    )) as {
-      results: Array<{ id: string }>;
+      scrapers: Array<{ tool: string; enabled: boolean; detected: boolean }>;
     };
 
     expect(health.ok).toBe(true);
     expect(status.ok).toBe(true);
-    expect(status.knowledgeRecords).toBeGreaterThan(0);
-    expect(Array.isArray(search.results)).toBe(true);
-    expect(search.results.length).toBeGreaterThan(0);
+    expect(Array.isArray(status.scrapers)).toBe(true);
   });
 });
 

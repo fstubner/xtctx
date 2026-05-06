@@ -8,26 +8,13 @@ import rateLimit from "express-rate-limit";
 import helmet from "helmet";
 import { createContinuityRouter } from "./routes/continuity.js";
 import { createConfigRouter } from "./routes/config.js";
-import { createKnowledgeRouter } from "./routes/knowledge.js";
-import { createSearchRouter } from "./routes/search.js";
 import { createSourcesRouter } from "./routes/sources.js";
-import type { SearchRunner } from "../mcp/tools/search.js";
 import { createProjectServices } from "../runtime/services.js";
-import { EmbeddingService } from "../store/embeddings.js";
-import { LanceStore } from "../store/lance.js";
-import { HybridSearch } from "../store/search.js";
 import { errorMessage } from "../utils/errors.js";
 
 export interface ApiServerOptions {
   projectPath?: string;
   port?: number;
-  /**
-   * Optional pre-built search runner (e.g. from the ingestion runtime in
-   * `serve` mode). When omitted, `createApiApp` constructs its own
-   * `HybridSearch` backed by the project's LanceDB store so the API can also
-   * run standalone via `npm run api`.
-   */
-  searchRunner?: SearchRunner;
   security?: Partial<ApiSecurityOptions>;
 }
 
@@ -45,38 +32,9 @@ export interface ApiServerHandle {
   port: number;
 }
 
-/**
- * Lazily initialises the embedding model on first use so the standalone API
- * server doesn't pay the model-load cost at startup if search is never called.
- */
-class LazyEmbeddingService extends EmbeddingService {
-  private initPromise: Promise<void> | null = null;
-
-  override async initialize(): Promise<void> {
-    await this.ensureInitialized();
-  }
-
-  override async embed(text: string): Promise<number[]> {
-    await this.ensureInitialized();
-    return super.embed(text);
-  }
-
-  override async embedBatch(texts: string[]): Promise<number[][]> {
-    await this.ensureInitialized();
-    return super.embedBatch(texts);
-  }
-
-  private async ensureInitialized(): Promise<void> {
-    if (!this.initPromise) {
-      this.initPromise = super.initialize();
-    }
-    await this.initPromise;
-  }
-}
-
 export async function createApiApp(
   projectPath?: string,
-  options: Pick<ApiServerOptions, "security" | "searchRunner"> = {},
+  options: Pick<ApiServerOptions, "security"> = {},
 ): Promise<{
   app: express.Express;
   port: number;
@@ -88,17 +46,6 @@ export async function createApiApp(
     ...(options.security ?? {}),
   });
 
-  // Use the caller-supplied search runner (from ingestion runtime in serve mode)
-  // or build a standalone HybridSearch from the project's own LanceDB store.
-  let searchRunner: SearchRunner;
-  if (options.searchRunner) {
-    searchRunner = options.searchRunner;
-  } else {
-    const store = new LanceStore(join(services.storeDir, "lancedb"));
-    await store.initialize();
-    const embeddings = new LazyEmbeddingService();
-    searchRunner = new HybridSearch(store, embeddings);
-  }
   const app = express();
 
   app.disable("x-powered-by");
@@ -146,19 +93,13 @@ export async function createApiApp(
     });
   });
 
-  const knowledgeRecords = async () => services.knowledge.listAll();
-
-  app.use("/api/search", createSearchRouter({ search: searchRunner }));
-  app.use("/api/knowledge", createKnowledgeRouter(services.knowledge));
   app.use(
     "/api/sources",
     createSourcesRouter({
       projectRoot: services.projectRoot,
-      knowledgeDir: services.knowledgeDir,
       stateDir: services.stateDir,
       ingestion: services.ingestion,
       sessions: services.sessions,
-      knowledgeRecords,
     }),
   );
   app.use("/api/continuity", createContinuityRouter({ projectRoot: services.projectRoot }));
@@ -190,7 +131,6 @@ export async function createApiApp(
 export async function startApiServer(options: ApiServerOptions = {}): Promise<ApiServerHandle> {
   const { app, port: defaultPort } = await createApiApp(options.projectPath, {
     security: options.security,
-    searchRunner: options.searchRunner,
   });
   const port = options.port ?? defaultPort;
   const server = createServer(app);

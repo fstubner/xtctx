@@ -4,13 +4,9 @@ import { syncToolHooks } from "../config/hooks.js";
 import { loadEffectiveContinuityPolicy } from "../config/policy.js";
 import { syncToolConfigs } from "../config/sync.js";
 import { getToolContinuityStatuses } from "../config/sync.js";
-import { KnowledgeRepository } from "../knowledge/repository.js";
-import { ProjectAutoTagger } from "../knowledge/tagger.js";
-import type { KnowledgeWriter } from "../mcp/tools/write.js";
 import { startMcpServer, type McpToolDependencies } from "../mcp/server.js";
-import { createIngestionRuntime, type IngestionRuntime } from "../runtime/ingestion.js";
+import { createIngestionRuntime } from "../runtime/ingestion.js";
 import { createProjectServices } from "../runtime/services.js";
-import type { ContextRecord } from "../types/context.js";
 import { errorMessage } from "../utils/errors.js";
 import { withRetry } from "../utils/retry.js";
 import {
@@ -24,68 +20,13 @@ interface ServeOptions {
   mcpOnly?: boolean;
 }
 
-/**
- * Wraps KnowledgeWriter to also index each saved record into LanceDB so that
- * findSimilar can use ANN vector search instead of brute-force in-memory cosine.
- */
-class VectorIndexedKnowledgeWriter implements KnowledgeWriter {
-  constructor(
-    private readonly inner: KnowledgeWriter,
-    private readonly runtime: IngestionRuntime,
-  ) {}
-
-  async save(record: ContextRecord): Promise<void> {
-    await this.inner.save(record);
-    const text = `${record.title}\n${record.body}`;
-    const vector = await this.runtime.embeddings.embed(text);
-    await this.runtime.store.upsert("knowledge", [{
-      id: record.id,
-      text,
-      vector,
-      source_type: record.type,
-      metadata: JSON.stringify({ type: record.type, source_tool: record.source_tool }),
-    }]);
-  }
-
-  async supersede(oldId: string, newId: string): Promise<void> {
-    return this.inner.supersede?.(oldId, newId);
-  }
-}
-
-/**
- * On first startup (no "knowledge" table in LanceDB yet), embed and index all
- * existing YAML knowledge records so the vector store is consistent.
- * Subsequent startups skip this — VectorIndexedKnowledgeWriter keeps it in sync.
- */
-async function indexExistingKnowledge(
-  knowledge: KnowledgeRepository,
-  runtime: IngestionRuntime,
-): Promise<void> {
-  if (await runtime.store.tableExists("knowledge")) {
-    return;
-  }
-  const records = await knowledge.listAll();
-  if (records.length === 0) {
-    return;
-  }
-  const texts = records.map((r) => `${r.title}\n${r.body}`);
-  const vectors = await runtime.embeddings.embedBatch(texts);
-  await runtime.store.upsert("knowledge", records.map((r, i) => ({
-    id: r.id,
-    text: texts[i]!,
-    vector: vectors[i] ?? [],
-    source_type: r.type,
-    metadata: JSON.stringify({ type: r.type, source_tool: r.source_tool }),
-  })));
-}
-
 export async function runServe(options: ServeOptions = {}): Promise<void> {
   const services = await createProjectServices(options.projectPath);
   await runAutoSync(services.projectRoot, "startup");
   const runtime = await createIngestionRuntime(services);
-  await indexExistingKnowledge(services.knowledge, runtime);
-
-  const writer = new VectorIndexedKnowledgeWriter(services.knowledge, runtime);
+  // Capture a stable handle to the session service so the periodic
+  // reconcile tick can pull fresh recent sessions for handoff briefs.
+  const fetchRecentSessions = () => services.sessions.listRecentSessions(20);
 
   let apiHandle: Awaited<ReturnType<typeof startApiServer>> | null = null;
   let syncInterval: NodeJS.Timeout | null = null;
@@ -116,37 +57,19 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
     });
   });
 
-  const autoTagger = new ProjectAutoTagger(services.projectRoot, services.domainTags);
-
   const dependencies: McpToolDependencies = {
-    search: runtime.search,
-    knowledge: services.knowledge,
-    writer,
-    autoTagger,
     sessions: services.sessions,
     configs: services.configs,
     continuity: {
       effectivePolicy: async () => loadEffectiveContinuityPolicy(services.projectRoot),
       toolStatuses: async () => getToolContinuityStatuses(services.projectRoot),
     },
-    findSimilar: async (type, candidateText) => {
-      const vector = await runtime.embeddings.embed(candidateText);
-      const results = await runtime.store.vectorSearch(
-        "knowledge",
-        vector,
-        1,
-        { where: `source_type = '${type}'`, metric: "cosine" },
-      );
-      if (results.length === 0) return null;
-      const top = results[0]!;
-      return { id: top.id, similarity: top.score };
-    },
   };
 
   try {
     if (!options.mcpOnly) {
       syncInterval = setInterval(() => {
-        void runAutoSync(services.projectRoot, "reconcile");
+        void runAutoSync(services.projectRoot, "reconcile", fetchRecentSessions);
       }, Math.max(15_000, services.ingestion.pollIntervalMs));
 
       await withRetry(
@@ -170,9 +93,6 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
           startApiServer({
             projectPath: services.projectRoot,
             port: services.webPort,
-            // Pass the ingestion runtime's search so HTTP API and MCP tools
-            // both use the same LanceDB hybrid-search pipeline (fixes C1).
-            searchRunner: runtime.search,
           }),
         {
           attempts: 3,
@@ -232,9 +152,20 @@ function reportShutdownErrors(errors: ShutdownError[]): void {
   }
 }
 
-async function runAutoSync(projectRoot: string, reason: "startup" | "reconcile"): Promise<void> {
+async function runAutoSync(
+  projectRoot: string,
+  reason: "startup" | "reconcile",
+  sessionsProvider?: () => Promise<import("../mcp/tools/sessions.js").SessionSummary[]>,
+): Promise<void> {
   try {
-    const result = await syncToolConfigs(projectRoot);
+    // Fetch recent sessions on each tick so the handoff brief in every
+    // tool's managed memory file is fresh. Empty list at startup (the
+    // ingestion daemon hasn't started yet) → brief renders as nothing
+    // → section is skipped → managed block is unchanged from when no
+    // sessions existed. The reconcile tick passes the live session
+    // service so briefs update as new conversations are scraped.
+    const sessions = sessionsProvider ? await sessionsProvider() : [];
+    const result = await syncToolConfigs(projectRoot, sessions);
     const updates = result.updated + result.created;
     if (updates > 0 || result.warnings.length > 0 || reason === "startup") {
       console.error(

@@ -1,7 +1,6 @@
 import { readdir, readFile } from "node:fs/promises";
 import { extname, join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { KnowledgeRepository } from "../knowledge/repository.js";
 import type { ConfigStore, ConfigType, NamedConfig } from "../mcp/tools/config.js";
 import type { SessionService } from "../mcp/tools/sessions.js";
 import { errorMessage } from "../utils/errors.js";
@@ -99,7 +98,6 @@ export interface ProjectServices {
   projectRoot: string;
   xtctxDir: string;
   storeDir: string;
-  knowledgeDir: string;
   configRoot: string;
   stateDir: string;
   webPort: number;
@@ -117,7 +115,6 @@ export interface ProjectServices {
     excludePatterns: string[];
   };
   domainTags: Record<string, string[]>;
-  knowledge: KnowledgeRepository;
   sessions: SessionService;
   configs: FileConfigStore;
 }
@@ -126,7 +123,6 @@ export async function createProjectServices(projectPath?: string): Promise<Proje
   const projectRoot = resolve(projectPath ?? process.cwd());
   const xtctxDir = join(projectRoot, ".xtctx");
   const storeDir = join(xtctxDir, ".store");
-  const knowledgeDir = join(xtctxDir, "knowledge");
   const configRoot = join(xtctxDir, "tool-config");
   const stateDir = join(xtctxDir, "state");
   const config = await loadProjectConfig(xtctxDir);
@@ -135,22 +131,18 @@ export async function createProjectServices(projectPath?: string): Promise<Proje
   const ingestion = parseIngestionConfig(config, projectRoot);
   const domainTags = parseDomainTags(config);
 
-  const knowledge = new KnowledgeRepository(knowledgeDir);
-  await knowledge.initialize();
   const sessions = await createSessionService(storeDir);
 
   return {
     projectRoot,
     xtctxDir,
     storeDir,
-    knowledgeDir,
     configRoot,
     stateDir,
     webPort,
     apiSecurity,
     ingestion,
     domainTags,
-    knowledge,
     sessions,
     configs: new FileConfigStore(configRoot),
   };

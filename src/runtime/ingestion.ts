@@ -13,7 +13,6 @@ import { OpenCodeScraper } from "../scrapers/opencode.js";
 import { ScraperRegistry } from "../scrapers/registry.js";
 import { EmbeddingService } from "../store/embeddings.js";
 import { LanceStore } from "../store/lance.js";
-import { HybridSearch } from "../store/search.js";
 import type { ConversationScraper } from "../types/scraper.js";
 import type { ProjectServices } from "./services.js";
 import type { IndexedSessionService } from "./sessions.js";
@@ -74,7 +73,6 @@ async function loadExternalScrapers(projectRoot: string): Promise<ConversationSc
 export interface IngestionRuntime {
   store: LanceStore;
   embeddings: EmbeddingService;
-  search: HybridSearch;
   registry: ScraperRegistry;
   coordinator: IngestionCoordinator;
   daemon: IngestionDaemon;
@@ -144,7 +142,6 @@ export async function createIngestionRuntime(
   await store.initialize();
 
   const embeddings = new LazyEmbeddingService();
-  const search = new HybridSearch(store, embeddings);
   const registry = new ScraperRegistry();
   const scraperConfigByTool = new Map(
     services.ingestion.scrapers.map((scraper) => [scraper.tool, scraper]),
@@ -306,7 +303,6 @@ export async function createIngestionRuntime(
   return {
     store,
     embeddings,
-    search,
     registry,
     coordinator,
     daemon,

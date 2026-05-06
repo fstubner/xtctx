@@ -17,22 +17,11 @@ import {
   type ContinuityReader,
 } from "./tools/continuity.js";
 import {
-  createProjectKnowledgeHandler,
-  type KnowledgeStore,
-} from "./tools/knowledge.js";
-import { createSearchHandler, type SearchRunner } from "./tools/search.js";
-import {
   createLastSessionBriefHandler,
   createRecentSessionsHandler,
   createSessionDetailHandler,
   type SessionService,
 } from "./tools/sessions.js";
-import type { AutoTagger } from "../knowledge/tagger.js";
-import {
-  createWriteHandlers,
-  type KnowledgeWriter,
-  type SimilarityLookup,
-} from "./tools/write.js";
 import { errorMessage } from "../utils/errors.js";
 import { readXtctxPackage } from "../utils/package-info.js";
 
@@ -42,69 +31,13 @@ type ToolParams = Record<string, unknown>;
 type ToolHandler = (params: ToolParams) => Promise<unknown>;
 
 export interface McpToolDependencies {
-  search?: SearchRunner;
   sessions?: SessionService;
-  knowledge?: KnowledgeStore;
-  writer?: KnowledgeWriter;
-  findSimilar?: SimilarityLookup;
-  autoTagger?: AutoTagger;
   configs?: ConfigStore;
   continuity?: ContinuityReader;
 }
 
 export function buildToolDefinitions(): Tool[] {
   return [
-    {
-      name: "xtctx_search",
-      description:
-        "Search across all indexed context (conversations, code changes, knowledge). " +
-        "Supports hybrid (semantic + keyword), semantic-only, or keyword-only modes. " +
-        "Start with depth 'summary' and drill deeper if needed.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          query: { type: "string", description: "Natural language search query" },
-          mode: {
-            type: "string",
-            enum: ["hybrid", "semantic", "keyword"],
-            description: "Search mode. Default: hybrid",
-          },
-          depth: {
-            type: "string",
-            enum: ["summary", "detail", "raw"],
-            description: "Result depth. Start with summary. Default: summary",
-          },
-          source_filter: {
-            type: "array",
-            items: { type: "string" },
-            description: "Filter by source tool, e.g. ['claude-code', 'cursor']",
-          },
-          type_filter: {
-            type: "array",
-            items: { type: "string" },
-            description:
-              "Filter by type: decision, error_solution, insight, convention, gotcha, faq",
-          },
-          time_range: {
-            type: "object",
-            properties: {
-              after: { type: "string", description: "ISO 8601 date" },
-              before: { type: "string", description: "ISO 8601 date" },
-            },
-          },
-          format: {
-            type: "string",
-            enum: ["markdown", "json"],
-            description: "Response format. Default: markdown",
-          },
-          limit: {
-            type: "number",
-            description: "Max results. Default: 10",
-          },
-        },
-        required: ["query"],
-      },
-    },
     {
       name: "xtctx_recent_sessions",
       description:
@@ -167,22 +100,6 @@ export function buildToolDefinitions(): Tool[] {
       },
     },
     {
-      name: "xtctx_project_knowledge",
-      description:
-        "Get shared project knowledge (decisions, error solutions, insights, conventions, gotchas, FAQs).",
-      inputSchema: {
-        type: "object",
-        properties: {
-          type: {
-            type: "string",
-            enum: ["decision", "error_solution", "insight", "convention", "gotcha", "faq", "all"],
-            description: "Filter by type. Default: all",
-          },
-          query: { type: "string", description: "Optional semantic filter" },
-        },
-      },
-    },
-    {
       name: "xtctx_continuity_status",
       description:
         "Get continuity orchestration posture per tool (state, scope, enabled categories, and warnings).",
@@ -215,70 +132,6 @@ export function buildToolDefinitions(): Tool[] {
             description: "Response format. Default: markdown",
           },
         },
-      },
-    },
-    {
-      name: "xtctx_save_decision",
-      description:
-        "Record an architectural or design decision with rationale. " +
-        "Auto-enriched with file refs, domain tags, and version context. " +
-        "Deduplication prevents near-duplicate entries.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          title: { type: "string", description: "Short decision title" },
-          rationale: { type: "string", description: "Why this was decided" },
-          context: { type: "string", description: "What led to this decision" },
-          alternatives_considered: {
-            type: "array",
-            items: { type: "string" },
-            description: "Other options that were considered",
-          },
-        },
-        required: ["title", "rationale"],
-      },
-    },
-    {
-      name: "xtctx_save_error_solution",
-      description:
-        "Record an error and its solution for future reference. " +
-        "Auto-enriched with environment versions and domain tags.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          error: { type: "string", description: "The error message or pattern" },
-          solution: { type: "string", description: "What fixed it" },
-          context: { type: "string", description: "When/why this occurs" },
-        },
-        required: ["error", "solution"],
-      },
-    },
-    {
-      name: "xtctx_save_insight",
-      description:
-        "Record a project insight, convention, or gotcha. " +
-        "Use for things a future session should know.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          insight: { type: "string", description: "The insight" },
-          context: { type: "string", description: "Supporting context" },
-        },
-        required: ["insight"],
-      },
-    },
-    {
-      name: "xtctx_save_faq",
-      description:
-        "Record a frequently asked project question and its answer for future sessions.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          question: { type: "string", description: "Question text" },
-          answer: { type: "string", description: "Answer text" },
-          context: { type: "string", description: "Optional supporting context" },
-        },
-        required: ["question", "answer"],
       },
     },
     {
@@ -326,12 +179,6 @@ export function createToolHandlers(
 ): Map<string, ToolHandler> {
   const handlers = new Map<string, ToolHandler>();
 
-  if (dependencies.search) {
-    handlers.set("xtctx_search", createSearchHandler(dependencies.search));
-  } else {
-    handlers.set("xtctx_search", missingDependency("search index"));
-  }
-
   if (dependencies.sessions) {
     handlers.set("xtctx_recent_sessions", createRecentSessionsHandler(dependencies.sessions));
     handlers.set("xtctx_session_detail", createSessionDetailHandler(dependencies.sessions));
@@ -342,31 +189,12 @@ export function createToolHandlers(
     handlers.set("xtctx_last_session_brief", missingDependency("session service"));
   }
 
-  if (dependencies.knowledge) {
-    handlers.set("xtctx_project_knowledge", createProjectKnowledgeHandler(dependencies.knowledge));
-  } else {
-    handlers.set("xtctx_project_knowledge", missingDependency("knowledge store"));
-  }
-
   if (dependencies.continuity) {
     handlers.set("xtctx_continuity_status", createContinuityStatusHandler(dependencies.continuity));
     handlers.set("xtctx_effective_policy", createEffectivePolicyHandler(dependencies.continuity));
   } else {
     handlers.set("xtctx_continuity_status", missingDependency("continuity service"));
     handlers.set("xtctx_effective_policy", missingDependency("continuity service"));
-  }
-
-  if (dependencies.writer) {
-    const writeHandlers = createWriteHandlers(dependencies.writer, dependencies.findSimilar, dependencies.autoTagger);
-    handlers.set("xtctx_save_decision", writeHandlers.saveDecision);
-    handlers.set("xtctx_save_error_solution", writeHandlers.saveErrorSolution);
-    handlers.set("xtctx_save_insight", writeHandlers.saveInsight);
-    handlers.set("xtctx_save_faq", writeHandlers.saveFaq);
-  } else {
-    handlers.set("xtctx_save_decision", missingDependency("knowledge writer"));
-    handlers.set("xtctx_save_error_solution", missingDependency("knowledge writer"));
-    handlers.set("xtctx_save_insight", missingDependency("knowledge writer"));
-    handlers.set("xtctx_save_faq", missingDependency("knowledge writer"));
   }
 
   if (dependencies.configs) {

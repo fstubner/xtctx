@@ -4,7 +4,6 @@ import { runCompact } from "./compact.js";
 import { runContext, runContextRecent } from "./context.js";
 import { runIngest } from "./ingest.js";
 import { runInit } from "./init.js";
-import { runKnowledgeLs } from "./knowledge.js";
 import { runOnboard } from "./onboard.js";
 import { runServe } from "./serve.js";
 import { runStatus } from "./status.js";
@@ -78,7 +77,7 @@ export async function main(argv = process.argv): Promise<void> {
     .command("context")
     .option("-p, --project <path>", "Project root (defaults to cwd)")
     .option("-t, --tool <name>", "Filter context for a specific tool")
-    .option("-s, --sections <list>", "Comma-separated sections: sessions,knowledge,nudge", (v) =>
+    .option("-s, --sections <list>", "Comma-separated sections: sessions,nudge", (v) =>
       v.split(",").map((s) => s.trim()),
     )
     .description("Output session context for hook injection (stdout)")
@@ -103,30 +102,6 @@ export async function main(argv = process.argv): Promise<void> {
         tool: options.tool,
         limit: options.limit,
         watch: options.watch,
-      });
-    });
-
-  const knowledgeCmd = program
-    .command("knowledge")
-    .description("Inspect saved project knowledge");
-
-  knowledgeCmd
-    .command("ls")
-    .option("-p, --project <path>", "Project root (defaults to cwd)")
-    .option(
-      "--type <type>",
-      "Filter by type: decision|error_solution|insight|convention|gotcha|faq|all",
-      "all",
-    )
-    .option("--query <substring>", "Substring filter against record title")
-    .option("-l, --limit <n>", "Max records to show", (v) => Number(v), 50)
-    .description("List structured knowledge records")
-    .action(async (options: { project?: string; type: string; query?: string; limit: number }) => {
-      await runKnowledgeLs({
-        projectPath: options.project,
-        type: options.type,
-        query: options.query,
-        limit: options.limit,
       });
     });
 

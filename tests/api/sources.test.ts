@@ -58,12 +58,10 @@ describe("Sources API routes", () => {
     const status = (await fetchJson(`${baseUrl}/api/sources/status`)) as {
       ok: boolean;
       scrapers: Array<{ tool: string; enabled: boolean; detected: boolean }>;
-      knowledgeRecords: number;
     };
 
     expect(status.ok).toBe(true);
     expect(Array.isArray(status.scrapers)).toBe(true);
-    expect(typeof status.knowledgeRecords).toBe("number");
   });
 });
 

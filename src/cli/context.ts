@@ -1,5 +1,4 @@
 import { resolve } from "node:path";
-import { KnowledgeRepository } from "../knowledge/repository.js";
 import type { SessionSummary } from "../mcp/tools/sessions.js";
 import { createProjectServices } from "../runtime/services.js";
 
@@ -19,7 +18,13 @@ export interface RecentContextOptions {
   limit?: number;
 }
 
-const DEFAULT_SECTIONS = ["sessions", "knowledge", "nudge"] as const;
+// "knowledge" was a section here before the handoff-scope pivot dropped
+// the durable-knowledge surface. Sections are now: sessions (recent
+// chats across tools) + nudge (pointer to the handoff brief and the
+// surviving MCP tools). The sessions section already conveys "what was
+// just being worked on"; the brief in the managed memory block covers
+// the same ground in more detail.
+const DEFAULT_SECTIONS = ["sessions", "nudge"] as const;
 type ContextSection = (typeof DEFAULT_SECTIONS)[number];
 
 export async function runContext(options: ContextOptions = {}): Promise<void> {
@@ -32,13 +37,6 @@ export async function runContext(options: ContextOptions = {}): Promise<void> {
     const sessionBlock = await renderSessions(services.sessions, options.tool);
     if (sessionBlock) {
       parts.push(sessionBlock);
-    }
-  }
-
-  if (sections.has("knowledge")) {
-    const knowledgeBlock = await renderKnowledge(services.knowledge);
-    if (knowledgeBlock) {
-      parts.push(knowledgeBlock);
     }
   }
 
@@ -85,35 +83,6 @@ async function renderSessions(
     lines.push(`\n### ${ref} (${tool}, ${date})`);
     if (summary) {
       lines.push(summary);
-    }
-  }
-
-  return lines.join("\n");
-}
-
-async function renderKnowledge(knowledge: KnowledgeRepository): Promise<string | null> {
-  const records = await knowledge.listAll();
-  if (records.length === 0) {
-    return null;
-  }
-
-  const lines = ["## Project knowledge"];
-  const grouped = new Map<string, typeof records>();
-  for (const record of records) {
-    const type = record.type;
-    if (!grouped.has(type)) {
-      grouped.set(type, []);
-    }
-    grouped.get(type)!.push(record);
-  }
-
-  for (const [type, items] of grouped) {
-    lines.push(`\n### ${type} (${items.length})`);
-    for (const item of items.slice(0, 5)) {
-      lines.push(`- **${item.title}**: ${item.body.slice(0, 120)}`);
-    }
-    if (items.length > 5) {
-      lines.push(`- ...and ${items.length - 5} more`);
     }
   }
 
@@ -208,10 +177,11 @@ function truncate(value: string, max: number): string {
 function renderNudge(): string {
   return [
     "## xtctx continuity",
-    "This project uses xtctx for cross-tool context. Use the xtctx MCP tools to:",
-    "- Search past sessions and knowledge with `xtctx_search`",
-    "- Save decisions with `xtctx_save_decision`",
-    "- Save error solutions with `xtctx_save_error_solution`",
-    "- Save insights with `xtctx_save_insight`",
+    "This project uses xtctx for cross-tool handoff. The managed block in",
+    "this file already contains a brief of the most-recent session in another",
+    "tool. To dig deeper, use the xtctx MCP tools:",
+    "- `xtctx_recent_sessions` — list recent sessions across all tools",
+    "- `xtctx_session_detail` — drill into one session's full transcript",
+    "- `xtctx_last_session_brief` — re-fetch the handoff brief programmatically",
   ].join("\n");
 }

@@ -2,11 +2,9 @@ import { Router } from "express";
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { SessionService } from "../../mcp/tools/sessions.js";
-import type { ContextRecord } from "../../types/context.js";
 
 export interface SourcesRouteDependencies {
   projectRoot: string;
-  knowledgeDir: string;
   stateDir: string;
   ingestion: {
     scrapers: Array<{ tool: string; enabled: boolean; customStorePath?: string }>;
@@ -15,7 +13,6 @@ export interface SourcesRouteDependencies {
     excludePatterns: string[];
   };
   sessions: SessionService;
-  knowledgeRecords: () => Promise<ContextRecord[]>;
 }
 
 interface ScraperStatus {
@@ -30,19 +27,12 @@ export function createSourcesRouter(deps: SourcesRouteDependencies): Router {
 
   router.get("/", async (_req, res, next) => {
     try {
-      const knowledge = await deps.knowledgeRecords();
       const scraperStatuses = await buildScraperStatuses(deps.ingestion.scrapers);
       const recentSessions = await deps.sessions.listRecentSessions(5);
 
       res.json({
         projectRoot: deps.projectRoot,
         sources: [
-          {
-            name: "knowledge",
-            kind: "filesystem",
-            path: deps.knowledgeDir,
-            records: knowledge.length,
-          },
           {
             name: "conversation-scrapers",
             kind: "scraper-group",
@@ -64,14 +54,12 @@ export function createSourcesRouter(deps: SourcesRouteDependencies): Router {
   router.get("/status", async (_req, res, next) => {
     try {
       const scraperStatuses = await buildScraperStatuses(deps.ingestion.scrapers);
-      const records = await deps.knowledgeRecords();
 
       res.json({
         ok: true,
         scrapers: scraperStatuses,
         toolPortabilityReady: scraperStatuses.some((scraper) => scraper.enabled && scraper.detected),
         connectedSources: scraperStatuses.filter((scraper) => scraper.enabled).length,
-        knowledgeRecords: records.length,
       });
     } catch (error) {
       next(error);
