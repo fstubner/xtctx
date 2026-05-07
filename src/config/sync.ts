@@ -173,7 +173,10 @@ const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
     globalPath: ".cursor/rules/xtctx-managed.mdc",
     markerKind: "markdown",
     filePrelude:
-      "---\ndescription: xtctx cross-tool continuity rules\nglobs: *\nalwaysApply: true\n---\n\n",
+      // Quote the glob: bare `*` is a YAML alias-reference token (not a string),
+      // which makes the frontmatter invalid and Cursor's Agent mode silently
+      // ignores the rule file (C5). The single-character glob must be quoted.
+      "---\ndescription: xtctx cross-tool continuity rules\nglobs: \"*\"\nalwaysApply: true\n---\n\n",
   },
   codex: {
     projectPath: "AGENTS.md",
