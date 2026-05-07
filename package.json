@@ -1,6 +1,6 @@
 {
   "name": "xtctx",
-  "version": "0.9.1",
+  "version": "0.10.0",
   "description": "Cross-tool context for AI coding agents",
   "type": "module",
   "bin": {

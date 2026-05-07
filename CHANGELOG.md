@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.10.0](https://github.com/fstubner/xtctx/compare/xtctx-v0.9.1...xtctx-v0.10.0) (2026-05-07)
+
+
+### Features
+
+* **cli:** add `xtctx onboard` interactive first-run wizard ([#68](https://github.com/fstubner/xtctx/issues/68)) ([0ecae34](https://github.com/fstubner/xtctx/commit/0ecae343803df86dd98c8ecf76e6bc8d33836d9c))
+
 ## [0.9.1](https://github.com/fstubner/xtctx/compare/xtctx-v0.9.0...xtctx-v0.9.1) (2026-05-02)
 
 
