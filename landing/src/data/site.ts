@@ -156,23 +156,28 @@ export const site: SiteData = {
     author: { name: 'Felix Stubner', url: 'https://github.com/fstubner' },
     ogImage: 'https://xtctx.com/favicon.svg',
     faviconPath: '/favicon.svg',
-    themeColor: '#111',
+    themeColor: '#0a0c10',
   },
 
   branding: {
     wordmarkAlt: 'xtctx',
-    accentGradient: 'linear-gradient(90deg,#7c5cff,#22b8cf 50%,#0aae7a)',
-    bg: '#111',
-    fg: '#d4d4d4',
+    // Single-color accent matching the global teal-300 (#5eead4). Kept as a
+    // "gradient" string so existing components that consume it as a CSS value
+    // still render correctly — solid color renders fine in `background:` too.
+    accentGradient: '#5eead4',
+    bg: '#0a0c10',
+    fg: '#d6dbe1',
   },
 
   hero: {
-    badge: 'Open source · MIT · Node ≥20 · Local-first',
-    heading: 'Your AI coding history, indexed across every tool',
+    badge: 'Local-first · MIT · Node ≥20',
+    // <em> styles to the teal accent via global.css. Keeps the verb in-color
+    // so the headline reads "ACTION your project across tools."
+    heading: 'Pick up your project in <em>any</em> AI coding tool.',
     subhead:
-      'xtctx ingests conversations from Claude Code, Cursor, Copilot, Codex, and Gemini, indexes them locally with hybrid search (BM25 + embeddings), and exposes recall and writeback over MCP. Switch tools mid-project without re-briefing the model.',
+      'xtctx syncs project memory — decisions, error solutions, conventions, recent sessions — across Claude Code, Cursor, Copilot, Codex, and Gemini. Switch tools mid-task; resume where you left off without re-briefing the model.',
     quickInstall: 'npm install -g xtctx && xtctx init && xtctx serve',
-    installLinkLabel: 'More install options ↓',
+    installLinkLabel: 'See install options',
     sourceUrl: REPO_URL,
   },
 
@@ -180,22 +185,22 @@ export const site: SiteData = {
     surfaces: {
       heading: 'What it actually does',
       leadHtml:
-        'Five tools, one local index, one continuity policy. <a href="https://github.com/fstubner/xtctx#readme">Full README →</a>',
+        'Five tools, one project memory, one continuity policy. <a href="https://github.com/fstubner/xtctx#readme">Full README</a>',
     },
     install: {
       heading: 'Get started',
       leadHtml:
-        'Install, init, then serve. <a href="https://github.com/fstubner/xtctx#quick-start">Quick start →</a>',
+        'Install, init, serve — three commands. <a href="https://github.com/fstubner/xtctx#quick-start">Quick start</a>',
     },
     faq: {
       heading: 'FAQ',
-      leadHtml: 'The questions people actually ask before installing.',
+      leadHtml: 'What people ask before installing.',
     },
   },
 
   surfaces: [
     {
-      title: 'Cross-tool recall via MCP',
+      title: 'Resume — recall across tools via MCP',
       body:
         'xtctx serve runs an MCP server over stdio. Your assistant calls <code>xtctx_search</code> and <code>xtctx_project_knowledge</code> at session start to recall what you already decided, debugged, and shipped — regardless of which tool you used last week.',
       codeHtml: `<span style="color:#888">// session opener</span>
@@ -207,9 +212,9 @@ export const site: SiteData = {
 <span style="color:#7c9fc7">xtctx_save_error_solution</span>({ error, solution, context })`,
     },
     {
-      title: 'Hybrid search (BM25 + vector)',
+      title: 'Search — hybrid (BM25 + vector) over your own history',
       body:
-        'Conversations and structured knowledge land in LanceDB. Queries fuse full-text and embedding similarity via Reciprocal Rank Fusion, with <code>hybrid</code>, <code>semantic</code>, and <code>keyword</code> modes selectable per call. The same pipeline backs the MCP recall tools and the runtime web UI search bar.',
+        'Conversations and structured knowledge land in LanceDB. Queries fuse full-text and embedding similarity via Reciprocal Rank Fusion, with <code>hybrid</code>, <code>semantic</code>, and <code>keyword</code> modes selectable per call. The same pipeline backs the MCP recall tools and the <code>xtctx search</code> CLI.',
       flip: true,
       codeHtml: `<span style="color:#888">$</span> curl -s localhost:3232/api/search?q=lancedb+routing&mode=hybrid | jq '.[0]'
 <span style="color:#555">{</span>
@@ -221,7 +226,7 @@ export const site: SiteData = {
 <span style="color:#555">}</span>`,
     },
     {
-      title: 'Continuity policy across five tools',
+      title: 'Sync — one continuity policy, rendered into every tool',
       body:
         'One <code>shared.yaml</code> declares the context feed, skills, commands, agents, MCP servers, slash commands, and whitelist policy you want present in every tool. <code>xtctx sync</code> renders that into Claude Code, Cursor, Copilot, Codex, and Gemini in their native formats. <code>xtctx serve</code> auto-reconciles drift on a timer.',
       codeHtml: `<span style="color:#888"># .xtctx/tool-config/shared.yaml</span>
@@ -234,7 +239,7 @@ export const site: SiteData = {
   advisory_level: warn`,
     },
     {
-      title: 'Local-first, no SaaS',
+      title: 'Run — local-first, no SaaS, no telemetry',
       body:
         'Everything lives under <code>.xtctx/</code> in your repo and <code>~/.xtctx/</code> for the global baseline. Embeddings run in-process via <code>@xenova/transformers</code>; the index is LanceDB on disk. No telemetry, no cloud calls, no account. Your conversation history never leaves your machine.',
       flip: true,
@@ -244,7 +249,7 @@ config.yaml      knowledge/       lancedb/         tool-config/
 <span style="color:#888">$</span> xtctx serve
 <span style="color:#888">→</span> MCP   stdio
 <span style="color:#888">→</span> API   http://127.0.0.1:3232/api
-<span style="color:#888">→</span> UI    http://127.0.0.1:3232/
+<span style="color:#888">→</span> Store .xtctx/lancedb/ (12,847 chunks, 4 tools)
 <span style="color:#888">→</span> No outbound network calls.</span>`,
     },
   ],
@@ -295,6 +300,10 @@ config.yaml      knowledge/       lancedb/         tool-config/
 
   faq: [
     {
+      q: 'How is this different from a long context window?',
+      a: 'A long context window is per-session and per-tool. xtctx is persistent and cross-tool. When you start a Cursor session tomorrow, the recall tools surface decisions you made in Claude Code last week, error solutions you saved from Codex two months ago, and the project conventions you wrote up once and never want to re-derive. The context window holds the current conversation; xtctx holds the project memory you carry between conversations.',
+    },
+    {
       q: 'Does it call out to any cloud service?',
       a: 'No. xtctx is local-first. Embeddings are computed in-process via @xenova/transformers, the search index is LanceDB on disk, and conversation history is read from the AI tools\' own local storage. There is no telemetry, no account, and no outbound network calls during normal operation. The only network access is the GitHub stars/downloads counter on this landing page itself.',
       aHtml:
@@ -317,10 +326,6 @@ config.yaml      knowledge/       lancedb/         tool-config/
       a: 'Right, which is why the live CLI canary only covers three of the five tools. For the GUI tools we rely on the mutation suite — fixtures captured from real Cursor and Copilot installs, replayed against the parser on every CI run. If Cursor changes its conversation storage format, fixtures stop matching and the test fails before it ships.',
       aHtml:
         'Right, which is why the live CLI canary only covers three of the five tools. For the GUI tools we rely on the <strong>mutation suite</strong> — fixtures captured from real Cursor and Copilot installs, replayed against the parser on every CI run. If Cursor changes its conversation storage format, fixtures stop matching and the test fails before it ships.',
-    },
-    {
-      q: 'How is xtctx different from just having a long context window?',
-      a: 'A long context window is per-session and per-tool. xtctx is persistent and cross-tool. When you start a Cursor session tomorrow morning, the recall tools surface decisions you made in Claude Code last week, error solutions you saved from Codex two months ago, and the project conventions you wrote up once and never want to re-derive. The context window holds the current conversation; xtctx holds project memory.',
     },
     {
       q: 'What does the MCP integration look like in practice?',

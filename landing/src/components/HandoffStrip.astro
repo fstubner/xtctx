@@ -1,0 +1,26 @@
+---
+/**
+ * Visual proof of the cross-tool claim. Five tool pills threaded by chevrons,
+ * with one marked "active" to suggest you're working in it right now, plus a
+ * "project memory" thread underneath that ties them all together.
+ *
+ * Static SVG-free — pure HTML+CSS so it ships in the zero-JS Astro bundle.
+ */
+---
+<div class="handoff" aria-label="Cross-tool handoff: project memory persists across Claude Code, Cursor, Copilot, Codex, and Gemini.">
+  <div class="handoff-label">Resume in any tool</div>
+  <div class="handoff-row">
+    <span class="handoff-tool">Claude</span>
+    <span class="handoff-arrow">›</span>
+    <span class="handoff-tool active">Cursor</span>
+    <span class="handoff-arrow">›</span>
+    <span class="handoff-tool">Codex</span>
+    <span class="handoff-arrow">›</span>
+    <span class="handoff-tool">Gemini</span>
+    <span class="handoff-arrow">›</span>
+    <span class="handoff-tool">Copilot</span>
+  </div>
+  <div class="handoff-thread">
+    <span>One <strong>project memory</strong> threaded through all five.</span>
+  </div>
+</div>
