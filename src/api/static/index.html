@@ -49,15 +49,12 @@
     <h2>CLI cheat sheet</h2>
     <div class="row"><code>xtctx status</code><span>one-screen runtime summary</span></div>
     <div class="row"><code>xtctx context recent --watch</code><span>live tail of recent sessions</span></div>
-    <div class="row"><code>xtctx knowledge ls</code><span>list saved decisions, gotchas, FAQs</span></div>
     <div class="row"><code>xtctx sync --diff</code><span>preview tool-config writes</span></div>
     <div class="row"><code>xtctx ingest --full</code><span>full re-scrape across tools</span></div>
     <div class="row"><code>xtctx serve</code><span>run API + MCP server (this process)</span></div>
 
     <h2>API endpoints</h2>
     <pre><code>GET  /health
-GET  /api/search
-GET  /api/knowledge
 GET  /api/sources
 GET  /api/continuity/...
 GET  /api/config/...</code></pre>
@@ -65,11 +62,20 @@ GET  /api/config/...</code></pre>
     <h2>MCP tools</h2>
     <p>
       AI assistants connect to xtctx via the MCP server (stdio transport)
-      started by <code>xtctx serve</code>. The recall surface
-      (<code>xtctx_search</code>, <code>xtctx_project_knowledge</code>) and the
-      writeback surface (<code>xtctx_save_decision</code>,
-      <code>xtctx_save_error_solution</code>, <code>xtctx_save_faq</code>) are
-      available there.
+      started by <code>xtctx serve</code>. The handoff surface — three
+      tools — is the primary user-facing API:
+      <code>xtctx_recent_sessions</code>,
+      <code>xtctx_session_detail</code>, and
+      <code>xtctx_last_session_brief</code>. Operational tools
+      (<code>xtctx_continuity_status</code>,
+      <code>xtctx_effective_policy</code>,
+      <code>xtctx_list_configs</code>, <code>xtctx_get_config</code>,
+      <code>xtctx_tool_preferences</code>) are also available.
+    </p>
+    <p>
+      For project-lifetime knowledge (durable decisions, multi-agent shared
+      memory, cross-domain knowledge graphs), pair xtctx with
+      <a href="https://github.com/fstubner/construct">construct</a>.
     </p>
 
     <footer>
