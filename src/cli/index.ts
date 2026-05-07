@@ -5,6 +5,7 @@ import { runContext, runContextRecent } from "./context.js";
 import { runIngest } from "./ingest.js";
 import { runInit } from "./init.js";
 import { runKnowledgeLs } from "./knowledge.js";
+import { runOnboard } from "./onboard.js";
 import { runServe } from "./serve.js";
 import { runStatus } from "./status.js";
 import { runSync } from "./sync.js";
@@ -27,6 +28,21 @@ export async function main(argv = process.argv): Promise<void> {
     .description("Scaffold .xtctx in the target project")
     .action(async (projectPath: string | undefined, options: { force: boolean }) => {
       await runInit({ projectPath, force: options.force });
+    });
+
+  program
+    .command("onboard")
+    .argument("[projectPath]", "Project root (defaults to cwd)")
+    .option("-y, --yes", "Accept all defaults non-interactively (CI / scripted setup)", false)
+    .option("--no-detect", "Skip tool auto-detection, enable all 7 tools instead")
+    .description("Interactive first-run wizard: detect tools, choose scope, write shared.yaml")
+    .action(async (projectPath: string | undefined, options: { yes: boolean; detect: boolean }) => {
+      // commander turns `--no-detect` into `options.detect = false`.
+      await runOnboard({
+        projectPath,
+        yes: options.yes,
+        noDetect: options.detect === false,
+      });
     });
 
   program

@@ -315,12 +315,12 @@ export async function createIngestionRuntime(
   };
 }
 
-function defaultClaudeProjectsDir(): string {
+export function defaultClaudeProjectsDir(): string {
   const home = process.env.USERPROFILE ?? process.env.HOME ?? "";
   return join(home, ".claude", "projects");
 }
 
-function defaultCursorStorePath(): string {
+export function defaultCursorStorePath(): string {
   const appData = process.env.APPDATA;
   if (appData) {
     return join(appData, "Cursor", "User", "workspaceStorage");
@@ -330,12 +330,12 @@ function defaultCursorStorePath(): string {
   return join(home, ".cursor", "workspaceStorage");
 }
 
-function defaultCodexSessionsPath(): string {
+export function defaultCodexSessionsPath(): string {
   const home = process.env.USERPROFILE ?? process.env.HOME ?? "";
   return join(home, ".codex", "sessions");
 }
 
-function defaultCopilotHistoryPath(): string {
+export function defaultCopilotHistoryPath(): string {
   // VS Code stores Copilot Chat history in workspaceStorage SQLite files.
   // Gate on process.platform explicitly — APPDATA can leak into Linux/macOS
   // shells (e.g. Wine, cross-compilation envs) and mis-route to a Windows
@@ -355,13 +355,13 @@ function defaultCopilotHistoryPath(): string {
   return join(home, "Library", "Application Support", "Code", "User", "workspaceStorage");
 }
 
-function defaultGeminiHistoryPath(): string {
+export function defaultGeminiHistoryPath(): string {
   const home = process.env.USERPROFILE ?? process.env.HOME ?? "";
   // Gemini CLI stores session files under ~/.gemini/tmp/<project>/chats/session-*.json
   return join(home, ".gemini", "tmp");
 }
 
-function defaultOpenCodeStorePath(): string {
+export function defaultOpenCodeStorePath(): string {
   // opencode stores conversations in a single SQLite file under a per-platform
   // application-data directory. Branch on process.platform explicitly so a
   // stray APPDATA env var (Wine, cross-compile shells) doesn't mis-route.
@@ -381,7 +381,7 @@ function defaultOpenCodeStorePath(): string {
   return join(home, "Library", "Application Support", "opencode", "opencode.db");
 }
 
-function defaultCopilotCliSessionPath(): string {
+export function defaultCopilotCliSessionPath(): string {
   // GitHub Copilot CLI stores per-session directories under ~/.copilot/session-state/.
   // Path is identical across all platforms.
   const home = process.env.USERPROFILE ?? process.env.HOME ?? "";

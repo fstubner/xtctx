@@ -80,7 +80,10 @@ export class IndexedSessionService implements SessionService {
       // time, so active sessions always appear first (m3).
       .sort((a, b) => b.lastActivity.localeCompare(a.lastActivity))
       .slice(0, clamp(limit, 1, 50))
-      .map(({ earliest: _ignored, lastActivity: _la, ...summary }) => summary);
+      .map(({ earliest: _ignored, lastActivity, ...rest }) => ({
+        ...rest,
+        last_activity_at: lastActivity,
+      }));
   }
 
   async getSessionDetail(

@@ -4,6 +4,12 @@ import { join, resolve } from "node:path";
 export interface InitOptions {
   projectPath?: string;
   force?: boolean;
+  /**
+   * Suppress the "Initialized xtctx in <path>" stdout line.  Set when
+   * runInit is being driven from a richer UI (e.g. the onboard wizard's
+   * spinner) so it doesn't leak a raw console.log mid-render.
+   */
+  silent?: boolean;
 }
 
 const DEFAULT_CONFIG_YAML = `version: "1"
@@ -140,7 +146,9 @@ export async function runInit(options: InitOptions = {}): Promise<void> {
   await writeIfMissing(toolConfigFile, DEFAULT_TOOL_CONFIG_YAML, options.force ?? false);
   await writeIfMissing(xtctxUsageSkillFile, DEFAULT_XTCTX_USAGE_SKILL, options.force ?? false);
 
-  console.log(`Initialized xtctx in ${xtctxDir}`);
+  if (!options.silent) {
+    console.log(`Initialized xtctx in ${xtctxDir}`);
+  }
 }
 
 async function writeIfMissing(

@@ -13,6 +13,11 @@ import {
   type ToolContinuityPolicy,
 } from "./policy.js";
 import { hasNativeSkillSupport, type SkillDefinition } from "./skills.js";
+import {
+  generateHandoffBrief,
+  sessionSummaryToHandoff,
+} from "../handoff/brief.js";
+import type { SessionSummary } from "../mcp/tools/sessions.js";
 
 const MARKERS = {
   markdown: {
@@ -45,17 +50,35 @@ interface ToolDefinition {
    * leave undefined for the default `xtctx:begin/end` markers.
    */
   markerSuffix?: string;
+  /**
+   * Optional content seeded at the top of a newly-created file, before the
+   * managed block. Used for Cursor's `.mdc` rules format, which requires YAML
+   * frontmatter (`alwaysApply: true`) at the top of the file or the rule is
+   * silently ignored in Agent mode. On subsequent syncs, the prelude is
+   * preserved by `upsertManagedSection`'s in-place block replacement.
+   */
+  filePrelude?: string;
 }
 
 interface ToolTarget {
   path: string;
   markers: { begin: string; end: string };
+  filePrelude?: string;
 }
 
 interface SyncContext {
   projectRoot: string;
   policy: EffectiveContinuityPolicy;
   inventory: ContinuityInventory;
+  /**
+   * Recent session summaries used to render the handoff brief into
+   * each tool's managed block. Optional: when omitted (e.g. from a
+   * standalone `xtctx sync` CLI invocation without a running ingest
+   * daemon), the brief degrades to empty and the section is skipped.
+   * `xtctx serve` provides this list each sync tick from
+   * `IndexedSessionService.listRecentSessions`.
+   */
+  sessions: SessionSummary[];
 }
 
 export interface ContinuityInventory {
@@ -141,9 +164,19 @@ const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
     markerKind: "markdown",
   },
   cursor: {
-    projectPath: ".cursorrules",
-    globalPath: ".cursor/rules/.cursorrules",
-    markerKind: "text",
+    // Cursor's `.cursorrules` (single-file, text) was deprecated in favor of
+    // `.cursor/rules/*.mdc` (markdown with YAML frontmatter). Agent mode in
+    // current Cursor releases silently ignores `.cursorrules`, so xtctx writes
+    // to the new format with `alwaysApply: true` so the rule fires on every
+    // Agent invocation.
+    projectPath: ".cursor/rules/xtctx-managed.mdc",
+    globalPath: ".cursor/rules/xtctx-managed.mdc",
+    markerKind: "markdown",
+    filePrelude:
+      // Quote the glob: bare `*` is a YAML alias-reference token (not a string),
+      // which makes the frontmatter invalid and Cursor's Agent mode silently
+      // ignores the rule file (C5). The single-character glob must be quoted.
+      "---\ndescription: xtctx cross-tool continuity rules\nglobs: \"*\"\nalwaysApply: true\n---\n\n",
   },
   codex: {
     projectPath: "AGENTS.md",
@@ -174,8 +207,19 @@ const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
   },
 };
 
-export async function syncToolConfigs(projectPath?: string): Promise<SyncToolConfigResult> {
-  const context = await loadSyncContext(projectPath);
+/**
+ * Run sync across every registered tool.
+ *
+ * `sessions` is optional and propagates into the handoff-brief section
+ * of each rendered managed block. The standalone `xtctx sync` CLI
+ * leaves it undefined (brief renders empty, section skipped); `xtctx
+ * serve` provides recent sessions on every tick so briefs stay fresh.
+ */
+export async function syncToolConfigs(
+  projectPath?: string,
+  sessions?: SessionSummary[],
+): Promise<SyncToolConfigResult> {
+  const context = await loadSyncContext(projectPath, sessions);
   const toolNames = dedupeStrings([
     ...DEFAULT_REGISTERED_TOOLS,
     ...Object.keys(context.policy.tools),
@@ -216,15 +260,17 @@ export async function syncToolConfigs(projectPath?: string): Promise<SyncToolCon
 export async function syncToolConfigByName(
   tool: string,
   projectPath?: string,
+  sessions?: SessionSummary[],
 ): Promise<SyncResult> {
-  const context = await loadSyncContext(projectPath);
+  const context = await loadSyncContext(projectPath, sessions);
   return syncSingleTool(context, tool);
 }
 
 export async function getToolContinuityStatuses(
   projectPath?: string,
+  sessions?: SessionSummary[],
 ): Promise<ToolContinuityStatus[]> {
-  const context = await loadSyncContext(projectPath);
+  const context = await loadSyncContext(projectPath, sessions);
   const tools = dedupeStrings([
     ...DEFAULT_REGISTERED_TOOLS,
     ...Object.keys(context.policy.tools),
@@ -241,12 +287,13 @@ export async function getToolContinuityStatuses(
 export async function previewToolContinuity(
   tool: string,
   projectPath?: string,
+  sessions?: SessionSummary[],
 ): Promise<ToolRenderPreview> {
-  const context = await loadSyncContext(projectPath);
+  const context = await loadSyncContext(projectPath, sessions);
   const policy = resolveToolFromPolicy(context.policy, tool);
   const targets = resolveToolTargets(context.projectRoot, tool, policy.scope);
   const categories = categoriesFromPolicy(policy);
-  const content = renderToolContent(tool, policy, context.inventory, context.policy, context.projectRoot);
+  const content = renderToolContent(tool, policy, context.inventory, context.policy, context.projectRoot, context.sessions);
 
   const targetPreviews = await Promise.all(targets.map(async (target) => {
     const existing = await readUtf8IfExists(target.path);
@@ -275,11 +322,14 @@ export async function previewToolContinuity(
   };
 }
 
-async function loadSyncContext(projectPath?: string): Promise<SyncContext> {
+async function loadSyncContext(
+  projectPath?: string,
+  sessions?: SessionSummary[],
+): Promise<SyncContext> {
   const projectRoot = resolve(projectPath ?? process.cwd());
   const policy = await loadEffectiveContinuityPolicy(projectRoot);
   const inventory = await loadContinuityInventory(join(projectRoot, ".xtctx", "tool-config"));
-  return { projectRoot, policy, inventory };
+  return { projectRoot, policy, inventory, sessions: sessions ?? [] };
 }
 
 async function syncSingleTool(context: SyncContext, tool: string): Promise<SyncResult> {
@@ -313,7 +363,7 @@ async function syncSingleTool(context: SyncContext, tool: string): Promise<SyncR
     };
   }
 
-  const content = renderToolContent(tool, toolPolicy, context.inventory, context.policy, context.projectRoot);
+  const content = renderToolContent(tool, toolPolicy, context.inventory, context.policy, context.projectRoot, context.sessions);
   const targetStatuses: ToolTargetStatus[] = [];
 
   for (const target of targets) {
@@ -362,7 +412,7 @@ async function inspectSingleTool(context: SyncContext, tool: string): Promise<To
     };
   }
 
-  const content = renderToolContent(tool, toolPolicy, context.inventory, context.policy, context.projectRoot);
+  const content = renderToolContent(tool, toolPolicy, context.inventory, context.policy, context.projectRoot, context.sessions);
   const statuses = await Promise.all(targets.map((target) => inspectTarget(target, content)));
   const warnings = statuses
     .map((status) => status.warning)
@@ -400,9 +450,10 @@ async function syncTarget(target: ToolTarget, content: string): Promise<ToolTarg
   const expectedBlock = renderManagedSection(content, target.markers);
   const inspected = inspectContent(existing, expectedBlock, target.path, target.markers);
 
+  const newFileBody = `${target.filePrelude ?? ""}${renderManagedSection(content, target.markers)}`;
   const next = existing
     ? upsertManagedSection(existing, content, target.markers)
-    : renderManagedSection(content, target.markers);
+    : newFileBody;
   const shouldWrite = !existing || normalizeNewlines(existing) !== normalizeNewlines(next);
 
   if (!shouldWrite) {
@@ -488,6 +539,7 @@ function resolveToolTargets(projectRoot: string, tool: string, scope: Continuity
   const projectTarget: ToolTarget = {
     path: join(projectRoot, definition.projectPath),
     markers,
+    filePrelude: definition.filePrelude,
   };
 
   const home = resolveHomeDir();
@@ -495,6 +547,7 @@ function resolveToolTargets(projectRoot: string, tool: string, scope: Continuity
     ? {
         path: join(home, definition.globalPath),
         markers,
+        filePrelude: definition.filePrelude,
       }
     : null;
 
@@ -546,6 +599,7 @@ function renderToolContent(
   inventory: ContinuityInventory,
   policy: EffectiveContinuityPolicy,
   projectRoot: string,
+  sessions: SessionSummary[] = [],
 ): string {
   const enabled = enabledCategories(toolPolicy);
   const lines: string[] = [
@@ -557,6 +611,17 @@ function renderToolContent(
     "This block is generated by xtctx sync from .xtctx/tool-config/shared.yaml.",
     "Do not edit lines inside this managed block.",
   ];
+
+  // Handoff brief: render BEFORE category sections so it's the first
+  // content the agent reads after the metadata header. Empty string
+  // when there's no qualifying recent session in another tool.
+  const brief = generateHandoffBrief(
+    sessions.map(sessionSummaryToHandoff),
+    tool,
+  );
+  if (brief.length > 0) {
+    lines.push("", brief);
+  }
 
   if (enabled.length === 0) {
     lines.push("", "No continuity categories enabled for this tool.");
