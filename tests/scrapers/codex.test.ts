@@ -22,11 +22,11 @@ import type { CodexChunk } from "@xtctx/types/scraper";
 
 const SESSION_UUID = "test-codex-session-uuid";
 
-function sessionMeta(id: string, timestamp: string) {
+function sessionMeta(id: string, timestamp: string, cwd = "/some/project") {
   return JSON.stringify({
     timestamp,
     type: "session_meta",
-    payload: { id, timestamp, cwd: "/some/project", originator: "codex_cli_rs" },
+    payload: { id, timestamp, cwd, originator: "codex_cli_rs" },
   });
 }
 
@@ -171,6 +171,26 @@ describe("CodexCliScraper", () => {
     expect(nested?.sessionId).toBe("nested-session");
     expect(nested?.metadata.approvalMode).toBe("full-auto");
     expect(nested?.metadata.sandboxed).toBe(false); // sandbox_policy.type === "none"
+  });
+
+  it("limits project-scoped scrapers to matching Codex session cwd values", async () => {
+    await writeFile(
+      join(tempDir, "session-other-project.jsonl"),
+      [
+        sessionMeta("other-session", "2026-02-25T00:00:00Z", "/other/project"),
+        userMessage("other project", "2026-02-25T00:00:01Z"),
+      ].join("\n") + "\n",
+      "utf-8",
+    );
+
+    const scoped = new CodexCliScraper(tempDir, stateDir, "/some/project");
+    const chunks: CodexChunk[] = [];
+    for await (const chunk of scoped.fullSync()) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks.map((chunk) => chunk.content)).toContain("codex first");
+    expect(chunks.map((chunk) => chunk.content)).not.toContain("other project");
   });
 
   it("filters incremental results by timestamp", async () => {

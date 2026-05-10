@@ -87,6 +87,7 @@ const MAX_LIMIT = 100;
 const DEFAULT_WINDOW_SIZE = 8;
 const DEFAULT_WINDOW_STRIDE = 4;
 const MAX_MATCHES_PER_SESSION = 3;
+const SOURCE_CURSOR_OVERLAP_MS = 1_000;
 
 export class SqliteHandoffIndex implements SessionService {
   private db: DatabaseHandle | null = null;
@@ -242,12 +243,16 @@ export class SqliteHandoffIndex implements SessionService {
     this.db = null;
   }
 
-  private async refresh(_reason: {
+  private async refresh(reason: {
     toolFilter?: string[];
     sessionRef?: string;
     statusOnly?: boolean;
   }): Promise<void> {
     await this.initialized;
+    if (reason.statusOnly) {
+      return;
+    }
+
     if (Date.now() - this.lastRefreshMs < this.refreshTtlMs) {
       return;
     }
@@ -271,11 +276,29 @@ export class SqliteHandoffIndex implements SessionService {
         continue;
       }
 
-      for await (const chunk of scraper.fullSync()) {
-        const sessionRef = this.upsertChunk(chunk);
-        if (sessionRef) {
-          touchedSessions.add(sessionRef);
+      try {
+        let latestTimestamp: Date | null = null;
+        for await (const chunk of scraper.scrape()) {
+          const sessionRef = this.upsertChunk(chunk);
+          if (sessionRef) {
+            touchedSessions.add(sessionRef);
+          }
+          if (!latestTimestamp || chunk.timestamp > latestTimestamp) {
+            latestTimestamp = chunk.timestamp;
+          }
         }
+
+        if (latestTimestamp) {
+          await scraper.saveScrapedPosition({
+            lastTimestamp: overlapTimestamp(latestTimestamp),
+          });
+        }
+      } catch (error) {
+        setSetting(
+          db,
+          `last_error:${scraper.tool}`,
+          error instanceof Error ? error.message : String(error),
+        );
       }
     }
 
@@ -975,6 +998,10 @@ function setSetting(db: DatabaseHandle, key: string, value: string): void {
      VALUES (?, ?)
      ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
   ).run(key, value);
+}
+
+function overlapTimestamp(value: Date): Date {
+  return new Date(Math.max(0, value.getTime() - SOURCE_CURSOR_OVERLAP_MS));
 }
 
 function hashParts(parts: string[]): string {

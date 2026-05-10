@@ -1,9 +1,11 @@
-import { stat } from "node:fs/promises";
-import { join } from "node:path";
+import { readFile, stat } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { glob } from "glob";
 import type { CursorChunk } from "../types/scraper.js";
 import { AbstractScraper, estimateTokens, toDate } from "./base.js";
+import { pathMatchesProject } from "../utils/project-scope.js";
 
 // Bubble type constants from Cursor's internal format.
 const BUBBLE_TYPE_USER = 1;
@@ -70,6 +72,7 @@ export class CursorScraper extends AbstractScraper<CursorChunk> {
   constructor(
     private readonly cursorStorePath: string,
     stateDir: string,
+    private readonly projectRoot?: string,
   ) {
     super(stateDir);
   }
@@ -337,18 +340,40 @@ export class CursorScraper extends AbstractScraper<CursorChunk> {
       return [];
     }
 
-    const patterns = ["**/*.sqlite", "**/*.sqlite3", "**/*.db", "**/*.vscdb"];
-    const resolved = await Promise.all(
-      patterns.map((pattern) =>
-        glob(pattern, {
-          cwd: this.cursorStorePath,
-          absolute: true,
-          nodir: true,
-        }),
-      ),
-    );
+    const paths = await glob("**/state.vscdb", {
+      cwd: this.cursorStorePath,
+      absolute: true,
+      nodir: true,
+    });
+    if (!this.projectRoot) {
+      return paths;
+    }
 
-    return [...new Set(resolved.flat())];
+    const filtered: string[] = [];
+    for (const path of paths) {
+      if (await workspaceMatchesProject(path, this.projectRoot)) {
+        filtered.push(path);
+      }
+    }
+    return filtered;
+  }
+}
+
+async function workspaceMatchesProject(
+  workspaceDbPath: string,
+  projectRoot: string,
+): Promise<boolean> {
+  try {
+    const raw = await readFile(join(dirname(workspaceDbPath), "workspace.json"), "utf-8");
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const folder = typeof parsed.folder === "string" ? parsed.folder : undefined;
+    if (!folder) {
+      return false;
+    }
+    const folderPath = folder.startsWith("file:") ? fileURLToPath(folder) : folder;
+    return pathMatchesProject(folderPath, projectRoot);
+  } catch {
+    return false;
   }
 }
 

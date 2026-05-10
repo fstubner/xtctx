@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -56,6 +56,14 @@ describe("setupProject", () => {
   });
 
   it("repairs duplicated stale managed blocks idempotently", async () => {
+    await mkdir(join(projectRoot, ".xtctx", "state"), { recursive: true });
+    await mkdir(join(projectRoot, ".xtctx", ".store", "lancedb"), { recursive: true });
+    await writeFile(join(projectRoot, ".xtctx", "state", "xtctx.db"), "legacy", "utf-8");
+    await writeFile(
+      join(projectRoot, ".xtctx", ".store", "lancedb", "legacy"),
+      "legacy",
+      "utf-8",
+    );
     await writeFile(
       join(projectRoot, "AGENTS.md"),
       [
@@ -83,5 +91,9 @@ describe("setupProject", () => {
     expect(agents).not.toContain("xtctx_project_knowledge");
     expect(agents).not.toContain("xtctx_save_decision");
     expect(agents).not.toContain("xtctx serve");
+    await expect(readFile(join(projectRoot, ".xtctx", "state", "xtctx.db"), "utf-8")).rejects.toThrow();
+    await expect(
+      readFile(join(projectRoot, ".xtctx", ".store", "lancedb", "legacy"), "utf-8"),
+    ).rejects.toThrow();
   });
 });

@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -152,6 +152,36 @@ describe("CursorScraper", () => {
 
     expect(chunks).toHaveLength(1);
     expect(chunks[0].content).toBe("cursor second");
+  });
+
+  it("limits project-scoped scrapers to matching Cursor workspace folders", async () => {
+    await writeFile(
+      join(workspaceDir, "workspace.json"),
+      JSON.stringify({ folder: "file:///c%3A/some/project" }),
+      "utf-8",
+    );
+
+    const otherWorkspaceDir = join(rootDir, "workspaceStorage", "other");
+    await mkdir(otherWorkspaceDir, { recursive: true });
+    createWorkspaceDb(join(otherWorkspaceDir, "state.vscdb"), [COMPOSER_ID]);
+    await writeFile(
+      join(otherWorkspaceDir, "workspace.json"),
+      JSON.stringify({ folder: "file:///other/project" }),
+      "utf-8",
+    );
+
+    const scoped = new CursorScraper(
+      join(rootDir, "workspaceStorage"),
+      stateDir,
+      "c:\\some\\project",
+    );
+    const chunks: CursorChunk[] = [];
+    for await (const chunk of scoped.fullSync()) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks).toHaveLength(2);
+    expect(chunks.map((chunk) => chunk.content)).toEqual(["cursor first", "cursor second"]);
   });
 
   it("returns no chunks when workspace has no composer data", async () => {

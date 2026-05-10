@@ -65,6 +65,7 @@ export class GeminiCliScraper extends AbstractScraper<GeminiChunk> {
   constructor(
     private readonly geminiHistoryPath: string,
     stateDir: string,
+    private readonly projectRoot?: string,
   ) {
     super(stateDir);
   }
@@ -166,6 +167,15 @@ export class GeminiCliScraper extends AbstractScraper<GeminiChunk> {
       }
 
       // Primary: Gemini CLI stores sessions under <project>/chats/session-*.json
+      if (this.projectRoot) {
+        const projectName = basename(this.projectRoot);
+        return glob(`${projectName}/chats/session-*.json`, {
+          cwd: this.geminiHistoryPath,
+          absolute: true,
+          nodir: true,
+        });
+      }
+
       const sessionFiles = await glob("**/chats/session-*.json", {
         cwd: this.geminiHistoryPath,
         absolute: true,

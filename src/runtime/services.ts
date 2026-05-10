@@ -31,7 +31,7 @@ export async function createProjectServices(projectPath?: string): Promise<Proje
       .filter(([, value]) => value.enabled !== false)
       .map(([tool, value]) => [tool, value.storePath]),
   );
-  const scrapers = createDefaultScrapers(stateDir, overrides).filter((scraper) => {
+  const scrapers = createDefaultScrapers(stateDir, overrides, projectRoot).filter((scraper) => {
     const toolConfig = config.tools[scraper.tool];
     return toolConfig?.enabled !== false;
   });

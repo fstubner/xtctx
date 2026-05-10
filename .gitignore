@@ -2,11 +2,15 @@ node_modules/
 dist/
 landing/dist/
 .xtctx/.store/
+.xtctx/config.yaml
 .xtctx/state/
 .claude/
 .codex/
 .cursor/
+.gemini/
+.vscode/mcp.json
 .mcp.json
+opencode.json
 *.tsbuildinfo
 coverage/
 .env

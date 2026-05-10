@@ -60,4 +60,95 @@ describe("ClaudeCodeScraper", () => {
     expect(chunks[0].role).toBe("user");
     expect(chunks[1].role).toBe("assistant");
   });
+
+  it("parses current Claude message records and ignores non-message events", async () => {
+    const projectDir = join(tempDir, "current-format");
+    await mkdir(projectDir, { recursive: true });
+    await writeFile(
+      join(projectDir, "session-002.jsonl"),
+      [
+        JSON.stringify({
+          type: "queue-operation",
+          timestamp: "2026-02-24T10:00:00Z",
+        }),
+        JSON.stringify({
+          type: "user",
+          timestamp: "2026-02-24T10:00:01Z",
+          message: {
+            role: "user",
+            content: "Continue the handoff refactor",
+          },
+        }),
+        JSON.stringify({
+          type: "assistant",
+          timestamp: "2026-02-24T10:00:02Z",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "Updated the setup flow" }],
+          },
+        }),
+        JSON.stringify({
+          type: "attachment",
+          timestamp: "2026-02-24T10:00:03Z",
+        }),
+      ].join("\n") + "\n",
+    );
+
+    const chunks: ClaudeCodeChunk[] = [];
+    for await (const chunk of scraper.fullSync()) {
+      if (chunk.sessionId === "session-002") {
+        chunks.push(chunk);
+      }
+    }
+
+    expect(chunks.map((chunk) => [chunk.role, chunk.content])).toEqual([
+      ["user", "Continue the handoff refactor"],
+      ["assistant", "Updated the setup flow"],
+    ]);
+  });
+
+  it("limits project-scoped scrapers to matching Claude project directories", async () => {
+    await writeClaudeSession(
+      join(tempDir, "H--projects-private-needs-work-xtctx"),
+      "session-xtctx",
+      "xtctx handoff",
+    );
+    await writeClaudeSession(
+      join(tempDir, "H--projects-private-other"),
+      "session-other",
+      "unrelated project",
+    );
+
+    const scoped = new ClaudeCodeScraper(
+      tempDir,
+      stateDir,
+      "H:\\projects\\private\\needs-work\\xtctx",
+    );
+    const chunks: ClaudeCodeChunk[] = [];
+    for await (const chunk of scoped.fullSync()) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks.map((chunk) => chunk.sessionId)).toEqual(["session-xtctx"]);
+    expect(chunks[0].content).toBe("xtctx handoff");
+  });
 });
+
+async function writeClaudeSession(
+  projectDir: string,
+  sessionId: string,
+  content: string,
+): Promise<void> {
+  await mkdir(projectDir, { recursive: true });
+  await writeFile(
+    join(projectDir, `${sessionId}.jsonl`),
+    JSON.stringify({
+      type: "user",
+      timestamp: "2026-02-24T10:00:01Z",
+      message: {
+        role: "user",
+        content,
+      },
+    }) + "\n",
+  );
+}

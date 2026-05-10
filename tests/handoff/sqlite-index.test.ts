@@ -105,6 +105,24 @@ describe("SqliteHandoffIndex", () => {
     await index.close();
   });
 
+  it("keeps status bounded and does not trigger transcript indexing", async () => {
+    const scraper = new FixtureScraper([
+      chunk("status-session", 0, "user", "this should not be indexed by status"),
+    ]);
+    const index = new SqliteHandoffIndex(join(tempDir, "xtctx.db"), tempDir, [
+      { tool: "codex", scraper },
+    ]);
+
+    const status = await index.getStatus();
+
+    expect(scraper.detectCalls).toBe(1);
+    expect(scraper.fullSyncCalls).toBe(0);
+    expect(status.sessions).toBe(0);
+    expect(status.messages).toBe(0);
+
+    await index.close();
+  });
+
   it("semantic search embeds chronological transcript windows", async () => {
     const scraper = new FixtureScraper([
       chunk("semantic-session", 0, "user", "initial idea: use an external vector store"),

@@ -23,7 +23,11 @@ export interface ToolSourceDefinition {
   id: ToolId;
   label: string;
   defaultStorePath: () => string;
-  createScraper: (storePath: string, stateDir: string) => ConversationScraper;
+  createScraper: (
+    storePath: string,
+    stateDir: string,
+    projectRoot?: string,
+  ) => ConversationScraper;
   memoryTargets: string[];
   hookMode: HookMode;
 }
@@ -33,7 +37,8 @@ export const SUPPORTED_TOOLS: ToolSourceDefinition[] = [
     id: "claude-code",
     label: "Claude Code",
     defaultStorePath: defaultClaudeProjectsDir,
-    createScraper: (storePath, stateDir) => new ClaudeCodeScraper(storePath, stateDir),
+    createScraper: (storePath, stateDir, projectRoot) =>
+      new ClaudeCodeScraper(storePath, stateDir, projectRoot),
     memoryTargets: ["CLAUDE.md"],
     hookMode: "executable",
   },
@@ -41,7 +46,8 @@ export const SUPPORTED_TOOLS: ToolSourceDefinition[] = [
     id: "cursor",
     label: "Cursor",
     defaultStorePath: defaultCursorStorePath,
-    createScraper: (storePath, stateDir) => new CursorScraper(storePath, stateDir),
+    createScraper: (storePath, stateDir, projectRoot) =>
+      new CursorScraper(storePath, stateDir, projectRoot),
     memoryTargets: [join(".cursor", "rules", "xtctx.mdc")],
     hookMode: "instruction-only",
   },
@@ -49,7 +55,8 @@ export const SUPPORTED_TOOLS: ToolSourceDefinition[] = [
     id: "codex",
     label: "Codex",
     defaultStorePath: defaultCodexSessionsPath,
-    createScraper: (storePath, stateDir) => new CodexCliScraper(storePath, stateDir),
+    createScraper: (storePath, stateDir, projectRoot) =>
+      new CodexCliScraper(storePath, stateDir, projectRoot),
     memoryTargets: ["AGENTS.md"],
     hookMode: "instruction-only",
   },
@@ -57,7 +64,8 @@ export const SUPPORTED_TOOLS: ToolSourceDefinition[] = [
     id: "copilot",
     label: "GitHub Copilot",
     defaultStorePath: defaultCopilotHistoryPath,
-    createScraper: (storePath, stateDir) => new CopilotScraper(storePath, stateDir),
+    createScraper: (storePath, stateDir, projectRoot) =>
+      new CopilotScraper(storePath, stateDir, projectRoot),
     memoryTargets: [join(".github", "copilot-instructions.md")],
     hookMode: "instruction-only",
   },
@@ -65,7 +73,8 @@ export const SUPPORTED_TOOLS: ToolSourceDefinition[] = [
     id: "gemini",
     label: "Gemini CLI",
     defaultStorePath: defaultGeminiHistoryPath,
-    createScraper: (storePath, stateDir) => new GeminiCliScraper(storePath, stateDir),
+    createScraper: (storePath, stateDir, projectRoot) =>
+      new GeminiCliScraper(storePath, stateDir, projectRoot),
     memoryTargets: ["GEMINI.md"],
     hookMode: "instruction-only",
   },
@@ -90,9 +99,10 @@ export const SUPPORTED_TOOLS: ToolSourceDefinition[] = [
 export function createDefaultScrapers(
   stateDir: string,
   overrides: Record<string, string | undefined> = {},
+  projectRoot?: string,
 ): ConversationScraper[] {
   return SUPPORTED_TOOLS.map((tool) =>
-    tool.createScraper(overrides[tool.id] ?? tool.defaultStorePath(), stateDir),
+    tool.createScraper(overrides[tool.id] ?? tool.defaultStorePath(), stateDir, projectRoot),
   );
 }
 

@@ -137,6 +137,32 @@ describe("GeminiCliScraper", () => {
     expect(chunks[0].content).toBe("gemini answer");
   });
 
+  it("limits project-scoped scrapers to the matching Gemini project directory", async () => {
+    const otherChatDir = join(tmpBase, "other-project", "chats");
+    await mkdir(otherChatDir, { recursive: true });
+    await writeFile(
+      join(otherChatDir, "session-other.json"),
+      makeSession([
+        {
+          id: "other",
+          type: "user",
+          timestamp: "2026-02-25T09:00:00Z",
+          content: [{ text: "other project" }],
+        },
+      ]),
+      "utf-8",
+    );
+
+    const scoped = new GeminiCliScraper(tmpBase, stateDir, "/repos/my-project");
+    const chunks: GeminiChunk[] = [];
+    for await (const chunk of scoped.fullSync()) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks.map((chunk) => chunk.content)).toContain("gemini first");
+    expect(chunks.map((chunk) => chunk.content)).not.toContain("other project");
+  });
+
   it("returns no chunks for empty or missing session dirs", async () => {
     const emptyScraper = new GeminiCliScraper(join(tmpBase, "nonexistent"), stateDir);
     const chunks: GeminiChunk[] = [];

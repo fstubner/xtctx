@@ -49,12 +49,14 @@ export async function setupProject(options: SetupOptions = {}): Promise<SetupRes
   const writes: SetupResult["writes"] = [];
   const warnings: string[] = [];
 
-  await mkdir(stateDir, { recursive: true });
-
   if (options.repair) {
+    await rm(join(xtctxDir, ".store"), { recursive: true, force: true });
+    await rm(stateDir, { recursive: true, force: true });
     await rm(join(xtctxDir, "tool-config"), { recursive: true, force: true });
     await rm(join(xtctxDir, "skills"), { recursive: true, force: true });
   }
+
+  await mkdir(stateDir, { recursive: true });
 
   writes.push({
     path: configPath,

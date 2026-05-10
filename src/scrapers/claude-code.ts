@@ -4,6 +4,7 @@ import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import type { ChunkMetadata, ClaudeCodeChunk } from "../types/scraper.js";
 import { AbstractScraper, estimateTokens } from "./base.js";
+import { encodePathForToolDirectory } from "../utils/project-scope.js";
 
 const SCRAPER_NAME = "claude-code";
 
@@ -24,11 +25,21 @@ export const ACCEPTED_DEGRADATIONS = {
 
 const ROLE_MAP: Record<string, ClaudeCodeChunk["role"]> = {
   human: "user",
+  user: "user",
   assistant: "assistant",
   system: "system",
   tool_use: "tool",
   tool_result: "tool",
 };
+
+const NON_MESSAGE_TYPES = new Set([
+  "attachment",
+  "custom-title",
+  "last-prompt",
+  "pr-link",
+  "progress",
+  "queue-operation",
+]);
 
 function warnDrift(sourcePath: string, surprise: string, recordsAffected: number): void {
   console.warn(
@@ -43,6 +54,7 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
   constructor(
     private readonly claudeProjectsDir: string,
     stateDir: string,
+    private readonly projectRoot?: string,
   ) {
     super(stateDir);
   }
@@ -72,15 +84,16 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
 
   parseRaw(raw: unknown): ClaudeCodeChunk {
     const obj = raw as Record<string, unknown>;
-    const timestamp = new Date((obj.timestamp as string) || Date.now());
-    const content = (obj.content as string) || "";
+    const timestamp = new Date((obj.timestamp as string) || 0);
+    const content = extractContent(obj);
     const type = (obj.type as string) || "unknown";
+    const role = extractRole(obj, type);
 
     return {
       tool: "claude-code",
       sessionId: (obj.sessionId as string) || "unknown",
       timestamp,
-      role: ROLE_MAP[type] || "system",
+      role,
       content,
       metadata: {
         messageIndex: (obj.messageIndex as number) || 0,
@@ -103,7 +116,7 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
       return;
     }
 
-    for (const projectHash of projectDirs) {
+    for (const projectHash of this.filterProjectDirs(projectDirs)) {
       const projectDir = join(this.claudeProjectsDir, projectHash);
       let files: string[];
 
@@ -147,6 +160,10 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
             continue;
           }
 
+          if (NON_MESSAGE_TYPES.has(String(obj.type))) {
+            continue;
+          }
+
           // Strict-mode schema check: warn (but still emit) on shape surprise.
           if (!("type" in obj)) {
             warnDrift(
@@ -162,7 +179,11 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
             );
           }
 
-          if ("content" in obj && obj.content !== undefined && typeof obj.content !== "string") {
+          if (
+            "content" in obj &&
+            obj.content !== undefined &&
+            typeof obj.content !== "string"
+          ) {
             warnDrift(
               `${filePath}:${lineNo}`,
               `expected 'content' to be a string, got ${describeType(obj.content)}`,
@@ -193,16 +214,88 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
 
           obj.sessionId = sessionId;
           obj.messageIndex = messageIndex;
+          const chunk = this.parseRaw(obj);
+          if (!chunk.content.trim()) {
+            continue;
+          }
+
           messageIndex += 1;
-          yield this.parseRaw(obj);
+          yield chunk;
         }
       }
     }
   }
+
+  private filterProjectDirs(projectDirs: string[]): string[] {
+    if (!this.projectRoot) {
+      return projectDirs;
+    }
+
+    const encodedProject = encodePathForToolDirectory(this.projectRoot).toLowerCase();
+    return projectDirs.filter((projectDir) => {
+      const normalized = projectDir.toLowerCase();
+      return normalized === encodedProject || normalized.startsWith(`${encodedProject}--`);
+    });
+  }
+}
+
+function extractRole(
+  obj: Record<string, unknown>,
+  type: string,
+): ClaudeCodeChunk["role"] {
+  const message = isRecord(obj.message) ? obj.message : {};
+  const role = typeof message.role === "string" ? message.role : type;
+  return ROLE_MAP[role] ?? ROLE_MAP[type] ?? "system";
+}
+
+function extractContent(obj: Record<string, unknown>): string {
+  if (typeof obj.content === "string") {
+    return obj.content;
+  }
+
+  const message = isRecord(obj.message) ? obj.message : undefined;
+  if (!message) {
+    return "";
+  }
+
+  return stringifyContent(message.content);
+}
+
+function stringifyContent(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (!Array.isArray(value)) {
+    return "";
+  }
+
+  return value
+    .map((item) => {
+      if (typeof item === "string") {
+        return item;
+      }
+      if (!isRecord(item)) {
+        return "";
+      }
+      if (typeof item.text === "string") {
+        return item.text;
+      }
+      if (typeof item.content === "string") {
+        return item.content;
+      }
+      return "";
+    })
+    .filter((item) => item.length > 0)
+    .join("\n");
 }
 
 function describeType(value: unknown): string {
   if (value === null) return "null";
   if (Array.isArray(value)) return "array";
   return typeof value;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

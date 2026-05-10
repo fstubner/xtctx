@@ -39,7 +39,7 @@ npx -y xtctx status
 
 - Use conventional commits (`feat:`, `fix:`, `docs:`, `chore:`, `test:`).
 - Add or update tests for behavior changes.
-- Do not commit local runtime state (`.xtctx/state`, `.claude`, `.codex`, `.cursor`, `.mcp.json`).
+- Do not commit local runtime state or generated local wiring (`.xtctx/config.yaml`, `.xtctx/state`, `.claude`, `.codex`, `.cursor`, `.gemini`, `.mcp.json`, `.vscode/mcp.json`, `opencode.json`).
 
 ## Release Notes
 
