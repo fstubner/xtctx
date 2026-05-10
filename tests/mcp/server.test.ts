@@ -1,40 +1,33 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { buildToolDefinitions } from "@xtctx/mcp/server";
 
 describe("MCP Server", () => {
-  it("exposes the post-pivot handoff-scope tool surface", () => {
-    const tools = buildToolDefinitions();
-    const toolNames = tools.map((tool) => tool.name);
+  it("exposes only the handoff-scope tool surface", () => {
+    const toolNames = buildToolDefinitions().map((tool) => tool.name);
 
-    // Session/handoff trio — the user-facing surface for cross-tool pickup.
-    expect(toolNames).toContain("xtctx_recent_sessions");
-    expect(toolNames).toContain("xtctx_session_detail");
-    expect(toolNames).toContain("xtctx_last_session_brief");
+    expect(toolNames).toEqual([
+      "xtctx_recent_sessions",
+      "xtctx_session_detail",
+      "xtctx_search_sessions",
+      "xtctx_continuity_status",
+    ]);
 
-    // Operational surface — continuity introspection + config queries.
-    expect(toolNames).toContain("xtctx_continuity_status");
-    expect(toolNames).toContain("xtctx_effective_policy");
-    expect(toolNames).toContain("xtctx_list_configs");
-    expect(toolNames).toContain("xtctx_get_config");
-    expect(toolNames).toContain("xtctx_tool_preferences");
-
-    // Negative assertions: durable-knowledge surface is gone.
-    // (Handoff-scope only — durable knowledge belongs in construct.)
+    expect(toolNames).not.toContain("xtctx_last_session_brief");
+    expect(toolNames).not.toContain("xtctx_effective_policy");
+    expect(toolNames).not.toContain("xtctx_list_configs");
+    expect(toolNames).not.toContain("xtctx_get_config");
+    expect(toolNames).not.toContain("xtctx_tool_preferences");
     expect(toolNames).not.toContain("xtctx_search");
     expect(toolNames).not.toContain("xtctx_project_knowledge");
     expect(toolNames).not.toContain("xtctx_save_decision");
-    expect(toolNames).not.toContain("xtctx_save_error_solution");
-    expect(toolNames).not.toContain("xtctx_save_insight");
-    expect(toolNames).not.toContain("xtctx_save_faq");
   });
 
-  it("xtctx_last_session_brief has the expected parameter schema", () => {
+  it("requires session_ref for session detail and query for search", () => {
     const tools = buildToolDefinitions();
-    const brief = tools.find((tool) => tool.name === "xtctx_last_session_brief");
-    const props = brief?.inputSchema.properties as Record<string, unknown>;
+    const detail = tools.find((tool) => tool.name === "xtctx_session_detail");
+    const search = tools.find((tool) => tool.name === "xtctx_search_sessions");
 
-    expect(props).toHaveProperty("current_tool");
-    expect(props).toHaveProperty("format");
-    expect(props).toHaveProperty("stale_threshold_days");
+    expect(detail?.inputSchema.required).toEqual(["session_ref"]);
+    expect(search?.inputSchema.required).toEqual(["query"]);
   });
 });

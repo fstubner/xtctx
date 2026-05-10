@@ -5,20 +5,10 @@ import {
   ListToolsRequestSchema,
   type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
+import { createContinuityStatusHandler } from "./tools/continuity.js";
 import {
-  createGetConfigHandler,
-  createListConfigsHandler,
-  createToolPreferencesHandler,
-  type ConfigStore,
-} from "./tools/config.js";
-import {
-  createContinuityStatusHandler,
-  createEffectivePolicyHandler,
-  type ContinuityReader,
-} from "./tools/continuity.js";
-import {
-  createLastSessionBriefHandler,
   createRecentSessionsHandler,
+  createSearchSessionsHandler,
   createSessionDetailHandler,
   type SessionService,
 } from "./tools/sessions.js";
@@ -32,8 +22,6 @@ type ToolHandler = (params: ToolParams) => Promise<unknown>;
 
 export interface McpToolDependencies {
   sessions?: SessionService;
-  configs?: ConfigStore;
-  continuity?: ContinuityReader;
 }
 
 export function buildToolDefinitions(): Tool[] {
@@ -41,88 +29,73 @@ export function buildToolDefinitions(): Tool[] {
     {
       name: "xtctx_recent_sessions",
       description:
-        "CALL THIS FIRST when starting any session. Returns recent work " +
-        "across all AI tools so you can continue where the last session left off.",
+        "List recent local transcript sessions for this project. Call this first when you need cross-tool handoff context.",
       inputSchema: {
         type: "object",
         properties: {
-          limit: { type: "number", description: "Max sessions. Default: 3" },
+          limit: { type: "number", description: "Max sessions. Default: 5" },
           tool_filter: {
             type: "array",
             items: { type: "string" },
-            description: "Filter by tool name",
+            description: "Optional tool ids to include",
+          },
+          format: {
+            type: "string",
+            enum: ["markdown", "json"],
+            description: "Response format. Default: markdown",
           },
         },
       },
     },
     {
       name: "xtctx_session_detail",
-      description: "Drill into a specific session's raw conversation data.",
+      description: "Return raw messages from a session_ref returned by xtctx_recent_sessions or xtctx_search_sessions.",
       inputSchema: {
         type: "object",
         properties: {
-          session_ref: { type: "string", description: "Session reference from search results" },
+          session_ref: { type: "string", description: "Session reference, e.g. codex:abc123" },
           offset: { type: "number", description: "Message offset for pagination" },
-          limit: { type: "number", description: "Max messages to return" },
+          limit: { type: "number", description: "Max messages to return. Default: 50" },
+          format: {
+            type: "string",
+            enum: ["markdown", "json"],
+            description: "Response format. Default: markdown",
+          },
         },
         required: ["session_ref"],
       },
     },
     {
-      name: "xtctx_last_session_brief",
+      name: "xtctx_search_sessions",
       description:
-        "Programmatic version of the handoff brief that xtctx injects into " +
-        "each tool's memory file. Returns a short markdown summary of the " +
-        "most-recent session in another tool (skipping the agent's own " +
-        "tool when current_tool is set), with a pointer to the source " +
-        "transcript.",
+        "Hybrid semantic/keyword search over chronological transcript windows and return matching sessions.",
       inputSchema: {
         type: "object",
         properties: {
-          current_tool: {
+          query: { type: "string", description: "Natural-language or keyword query" },
+          limit: { type: "number", description: "Max sessions. Default: 5" },
+          tool_filter: {
+            type: "array",
+            items: { type: "string" },
+            description: "Optional tool ids to include",
+          },
+          mode: {
             type: "string",
-            description:
-              "Tool slug the calling agent runs in (e.g. 'claude', " +
-              "'cursor'). Sessions in this tool are skipped. Omit to get " +
-              "the most-recent session regardless of tool.",
+            enum: ["hybrid", "keyword", "vector"],
+            description: "Retrieval mode. Default: hybrid",
           },
           format: {
             type: "string",
             enum: ["markdown", "json"],
             description: "Response format. Default: markdown",
           },
-          stale_threshold_days: {
-            type: "number",
-            description:
-              "Sessions older than this are skipped. Default: 7 days.",
-          },
         },
+        required: ["query"],
       },
     },
     {
       name: "xtctx_continuity_status",
-      description:
-        "Get continuity orchestration posture per tool (state, scope, enabled categories, and warnings).",
-      inputSchema: {
-        type: "object",
-        properties: {
-          tool_filter: {
-            type: "array",
-            items: { type: "string" },
-            description: "Optional filter for tool ids (e.g. codex, claude, cursor).",
-          },
-          format: {
-            type: "string",
-            enum: ["markdown", "json"],
-            description: "Response format. Default: markdown",
-          },
-        },
-      },
-    },
-    {
-      name: "xtctx_effective_policy",
-      description:
-        "Read the merged continuity policy from global baseline + repo policy with resolved tool settings.",
+      description: "Return xtctx handoff wiring and local index diagnostics.",
       inputSchema: {
         type: "object",
         properties: {
@@ -132,43 +105,6 @@ export function buildToolDefinitions(): Tool[] {
             description: "Response format. Default: markdown",
           },
         },
-      },
-    },
-    {
-      name: "xtctx_list_configs",
-      description: "List available portable skills, commands, and agent definitions.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          type: {
-            type: "string",
-            enum: ["skill", "command", "agent", "all"],
-            description: "Filter by config type. Default: all",
-          },
-        },
-      },
-    },
-    {
-      name: "xtctx_get_config",
-      description: "Get a specific skill, command, or agent definition.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          type: { type: "string", enum: ["skill", "command", "agent"] },
-          name: { type: "string", description: "Config name" },
-        },
-        required: ["type", "name"],
-      },
-    },
-    {
-      name: "xtctx_tool_preferences",
-      description: "Get tool-specific preferences and settings from cross-tool config.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          tool: { type: "string", description: "Tool name, e.g. claude-code" },
-        },
-        required: ["tool"],
       },
     },
   ];
@@ -182,37 +118,20 @@ export function createToolHandlers(
   if (dependencies.sessions) {
     handlers.set("xtctx_recent_sessions", createRecentSessionsHandler(dependencies.sessions));
     handlers.set("xtctx_session_detail", createSessionDetailHandler(dependencies.sessions));
-    handlers.set("xtctx_last_session_brief", createLastSessionBriefHandler(dependencies.sessions));
+    handlers.set("xtctx_search_sessions", createSearchSessionsHandler(dependencies.sessions));
+    handlers.set("xtctx_continuity_status", createContinuityStatusHandler(dependencies.sessions));
   } else {
-    handlers.set("xtctx_recent_sessions", missingDependency("session service"));
-    handlers.set("xtctx_session_detail", missingDependency("session service"));
-    handlers.set("xtctx_last_session_brief", missingDependency("session service"));
-  }
-
-  if (dependencies.continuity) {
-    handlers.set("xtctx_continuity_status", createContinuityStatusHandler(dependencies.continuity));
-    handlers.set("xtctx_effective_policy", createEffectivePolicyHandler(dependencies.continuity));
-  } else {
-    handlers.set("xtctx_continuity_status", missingDependency("continuity service"));
-    handlers.set("xtctx_effective_policy", missingDependency("continuity service"));
-  }
-
-  if (dependencies.configs) {
-    handlers.set("xtctx_list_configs", createListConfigsHandler(dependencies.configs));
-    handlers.set("xtctx_get_config", createGetConfigHandler(dependencies.configs));
-    handlers.set("xtctx_tool_preferences", createToolPreferencesHandler(dependencies.configs));
-  } else {
-    handlers.set("xtctx_list_configs", missingDependency("config store"));
-    handlers.set("xtctx_get_config", missingDependency("config store"));
-    handlers.set("xtctx_tool_preferences", missingDependency("config store"));
+    const missing = missingDependency("session service");
+    handlers.set("xtctx_recent_sessions", missing);
+    handlers.set("xtctx_session_detail", missing);
+    handlers.set("xtctx_search_sessions", missing);
+    handlers.set("xtctx_continuity_status", missing);
   }
 
   return handlers;
 }
 
-export function createMcpServer(
-  dependencies: McpToolDependencies = {},
-): Server {
+export function createMcpServer(dependencies: McpToolDependencies = {}): Server {
   const server = new Server(
     { name: "xtctx", version: SERVER_VERSION },
     { capabilities: { tools: {} } },
@@ -249,9 +168,7 @@ export function createMcpServer(
   return server;
 }
 
-export async function startMcpServer(
-  dependencies: McpToolDependencies = {},
-): Promise<void> {
+export async function startMcpServer(dependencies: McpToolDependencies = {}): Promise<void> {
   const server = createMcpServer(dependencies);
   const transport = new StdioServerTransport();
   await server.connect(transport);
@@ -293,4 +210,3 @@ function formatCallToolResult(result: unknown): {
 
   return response;
 }
-

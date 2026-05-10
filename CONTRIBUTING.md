@@ -7,23 +7,22 @@ Thanks for contributing.
 1. Install Node.js 20+.
 2. Install dependencies:
    - `npm ci`
-   - `npm --prefix web ci`
    - `npm --prefix landing ci`
 3. Build:
    - `npm run build`
-   - `npm --prefix web run build`
    - `npm --prefix landing run build`
 
 ## Local Validation
 
 Before opening a PR, run:
 
+- `npm run lint`
 - `npm test`
 - `npm run test:security`
 - `npm run security:checklist`
 - `npm run test:integration`
+- `npm run test:drift`
 - `npm run build`
-- `npm --prefix web run build`
 - `npm --prefix landing run build`
 - `npm run smoke:cli`
 
@@ -33,17 +32,16 @@ Or run everything with:
 
 ## Project Layout
 
-- `src/`: core runtime, CLI, MCP, scrapers, API (incl. static landing page at `src/api/static/`)
-- `tests/`: unit + integration tests
-- `landing/`: Astro public landing site (GitHub Pages)
-- `.xtctx/`: project-local configs, skills, and knowledge conventions
-- `docs/plans/`: design + implementation docs
+- `src/`: CLI, MCP, setup/status, local handoff index, and transcript scrapers
+- `tests/`: scraper, setup, MCP, security, integration, and drift tests
+- `landing/`: Astro public landing site
+- `docs/`: security docs and historical design notes
 
 ## Pull Request Guidelines
 
 1. Keep changes focused and atomic.
 2. Add tests for behavior changes.
-3. Update docs when CLI/API behavior changes.
+3. Update docs when CLI or MCP behavior changes.
 4. Use conventional commits for release automation:
    - `feat: ...`
    - `fix: ...`
@@ -55,10 +53,10 @@ Or run everything with:
 ## Coding Expectations
 
 - TypeScript strictness is expected.
-- Prefer explicit error handling for runtime services.
-- Preserve CLI backward compatibility unless a breaking change is explicitly documented.
+- Prefer explicit error handling for local file and transcript parsing.
+- Breaking changes are allowed while the project is pre-1.0, but they must be reflected in README, setup/status behavior, and tests.
 - Keep MCP tool responses stable and test-covered.
-- Keep UI changes accessible (focus-visible, readable contrast, clear empty/error states).
+- Keep landing changes accessible.
 
 ## Reporting Bugs
 

@@ -35,6 +35,7 @@ jobs:
 
       - name: Unit and integration tests
         run: |
+          npm run lint
           npm test
           npm run test:integration
 
@@ -42,6 +43,8 @@ jobs:
         run: |
           npm run test:security
           npm run security:checklist
+          npm audit --omit=dev
+          npm --prefix landing audit --omit=dev
 
       - name: Drift canary
         run: npm run test:drift

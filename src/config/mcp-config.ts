@@ -1,14 +1,13 @@
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, extname, join } from "node:path";
+import { dirname, join } from "node:path";
 import { parse as parseToml, stringify as stringifyToml } from "@iarna/toml";
-import { parse as parseYaml } from "yaml";
 import { errorMessage } from "../utils/errors.js";
 
 /**
- * Canonical MCP server definition stored under `.xtctx/tool-config/mcp-servers/`.
- * The same definition is rendered into each tool's native config format via
- * the renderer registry below.
+ * MCP server definition rendered into each tool's native config format.
+ * setup owns the xtctx definition directly so the project has one config path:
+ * `.xtctx/config.yaml`.
  */
 export interface McpServerDefinition {
   name: string;
@@ -79,8 +78,8 @@ export interface McpRenderer {
  */
 const NATIVE_MCP_TOOLS: Record<string, McpRenderer> = {
   // Claude Code — `.mcp.json` at project root, `mcpServers` key, stdio entries.
-  // The "claude" alias matches DEFAULT_REGISTERED_TOOLS in policy.ts; the
-  // "claude-code" alias matches the scraper registry name in ingestion.ts.
+  // Keep both aliases because older local setup files may refer to `claude`,
+  // while the current scraper/tool id is `claude-code`.
   claude: {
     projectPath: (root) => join(root, ".mcp.json"),
   },
@@ -149,41 +148,7 @@ export function hasNativeMcpSupport(tool: string): boolean {
 }
 
 /**
- * Load all MCP server definitions from `.xtctx/tool-config/mcp-servers/`.
- */
-export async function loadMcpServerDefinitions(configRoot: string): Promise<McpServerDefinition[]> {
-  const serversDir = join(configRoot, "mcp-servers");
-  let files: string[];
-  try {
-    files = await readdir(serversDir);
-  } catch {
-    return [];
-  }
-
-  const servers: McpServerDefinition[] = [];
-  for (const file of files) {
-    const ext = extname(file);
-    if (![".json", ".yaml", ".yml"].includes(ext)) continue;
-
-    const name = file.slice(0, file.length - ext.length);
-    if (!name) continue;
-
-    try {
-      const raw = await readFile(join(serversDir, file), "utf-8");
-      const parsed = ext === ".json" ? JSON.parse(raw) : parseYaml(raw);
-      const server = normalizeMcpServer(name, parsed);
-      if (server) servers.push(server);
-    } catch {
-      // Skip unparseable files
-    }
-  }
-
-  return servers;
-}
-
-/**
  * Sync MCP server configs into native formats for tools that support them.
- * Called as Phase 4 of the sync pipeline.
  *
  * For each enabled tool with a renderer:
  *  - Prefer the project-scoped path if the renderer provides one
@@ -240,47 +205,6 @@ export async function syncToolMcpConfigs(
   }
 
   return { results, servers_loaded: servers.length };
-}
-
-/**
- * Render MCP server details as markdown for embedding in managed instruction
- * blocks. Used by tools without native MCP config (e.g. instructions-only
- * fallbacks for any tool not in `NATIVE_MCP_TOOLS`).
- */
-export function renderMcpServersMarkdown(servers: McpServerDefinition[]): string[] {
-  if (servers.length === 0) return [];
-
-  const lines: string[] = [
-    "",
-    "## MCP server connection details",
-    "",
-    "Connect these MCP servers to enable xtctx continuity:",
-    "",
-  ];
-
-  for (const server of servers) {
-    lines.push(`### ${server.name}`);
-    lines.push(`- Transport: ${server.transport ?? "stdio"}`);
-    if (server.command) {
-      lines.push(
-        `- Command: \`${server.command}${
-          server.args?.length ? " " + server.args.join(" ") : ""
-        }\``,
-      );
-    }
-    if (server.url) {
-      lines.push(`- URL: ${server.url}`);
-    }
-    if (server.env && Object.keys(server.env).length > 0) {
-      lines.push("- Environment variables:");
-      for (const [key, value] of Object.entries(server.env)) {
-        lines.push(`  - \`${key}=${value}\``);
-      }
-    }
-    lines.push("");
-  }
-
-  return lines;
 }
 
 // ---------------------------------------------------------------------------
@@ -431,7 +355,7 @@ function defaultBuildEntry(server: McpServerDefinition): Record<string, unknown>
  *
  *   [mcp_servers.xtctx]
  *   command = "npx"
- *   args = ["xtctx", "serve", "--mcp-only"]
+ *   args = ["-y", "xtctx"]
  */
 function buildCodexEntry(server: McpServerDefinition): Record<string, unknown> {
   const entry: Record<string, unknown> = {};
@@ -467,7 +391,7 @@ function buildGeminiEntry(server: McpServerDefinition): Record<string, unknown> 
  *   "mcp": {
  *     "xtctx": {
  *       "type": "local",
- *       "command": ["npx", "xtctx", "serve", "--mcp-only"],
+ *       "command": ["npx", "-y", "xtctx"],
  *       "enabled": true
  *     }
  *   }
@@ -508,7 +432,7 @@ function buildOpencodeEntry(server: McpServerDefinition): Record<string, unknown
  *     "xtctx": {
  *       "type": "local",
  *       "command": "npx",
- *       "args": ["xtctx", "serve", "--mcp-only"],
+ *       "args": ["-y", "xtctx"],
  *       "tools": ["*"]
  *     }
  *   }
@@ -545,36 +469,6 @@ function buildCopilotCliEntry(server: McpServerDefinition): Record<string, unkno
 // ---------------------------------------------------------------------------
 // Misc helpers
 // ---------------------------------------------------------------------------
-
-function normalizeMcpServer(name: string, raw: unknown): McpServerDefinition | null {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
-
-  const obj = raw as Record<string, unknown>;
-  const command = typeof obj.command === "string" ? obj.command : "";
-  const url = typeof obj.url === "string" ? obj.url : undefined;
-
-  if (!command && !url) return null;
-
-  return {
-    name: typeof obj.name === "string" ? obj.name : name,
-    command,
-    args: Array.isArray(obj.args)
-      ? obj.args.filter((a): a is string => typeof a === "string")
-      : undefined,
-    env: isStringRecord(obj.env) ? obj.env : undefined,
-    transport: isTransport(obj.transport) ? obj.transport : "stdio",
-    url,
-  };
-}
-
-function isStringRecord(value: unknown): value is Record<string, string> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  return Object.values(value as Record<string, unknown>).every((v) => typeof v === "string");
-}
-
-function isTransport(value: unknown): value is "stdio" | "sse" | "streamable-http" {
-  return value === "stdio" || value === "sse" || value === "streamable-http";
-}
 
 function normalizeNewlines(input: string): string {
   return input.replace(/\r\n/g, "\n");

@@ -79,7 +79,7 @@ export function toDate(value: unknown): Date {
  *
  *   - `tool`           — unique string identifier (e.g. `"zed"`, `"aider"`)
  *   - `detect()`       — returns true when the data source is present on disk
- *   - `getStorePaths()` — paths the daemon should watch for changes
+ *   - `getStorePaths()` — transcript source paths used for detection and status
  *   - `scrape(since?)` — yield chunks newer than the given date (incremental)
  *   - `fullSync()`     — yield all chunks from the beginning of time
  *

@@ -1,47 +1,21 @@
-import type { CompactionConfig } from "./compaction.js";
-
 export interface XtctxConfig {
-  version: string;
-  project: {
-    name: string;
-    root: string;
+  project?: {
+    root?: string;
   };
-  ingestion: {
-    scrapers: ScraperConfig[];
-    watchPaths: string[];
-    pollIntervalMs: number;
-    excludePatterns: string[];
+  handoff?: {
+    mode?: "raw-transcript-pointer";
+    indexing?: "on-demand";
+    summaries?: false;
   };
-  compaction: CompactionConfig;
-  search: {
-    defaultMode: "hybrid" | "semantic" | "keyword";
-    defaultDepth: "summary" | "detail" | "raw";
-    defaultLimit: number;
+  mcp?: {
+    command?: string;
+    args?: string[];
   };
-  domainTags: Record<string, string[]>;
-  web: {
-    port: number;
-  };
-  api: {
-    security: {
-      token: string | null;
-      allowedOrigins: string[];
-      allowLocalhostOrigins: boolean;
-      rateLimitWindowMs: number;
-      rateLimitMax: number;
-    };
-  };
+  tools?: Record<string, ToolConfig>;
 }
 
-export interface ScraperConfig {
-  tool: string;
-  enabled: boolean;
-  customStorePath?: string;
-}
-
-export interface ToolSyncConfig {
-  skills: string[];
-  commands: string[];
-  agents: string[];
-  preferences: Record<string, unknown>;
+export interface ToolConfig {
+  enabled?: boolean;
+  storePath?: string;
+  hook?: "executable" | "instruction-only" | "mcp-only";
 }

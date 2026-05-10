@@ -4,6 +4,9 @@ landing/dist/
 .xtctx/.store/
 .xtctx/state/
 .claude/
+.codex/
+.cursor/
+.mcp.json
 *.tsbuildinfo
 coverage/
 .env

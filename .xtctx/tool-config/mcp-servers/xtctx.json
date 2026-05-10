@@ -1,7 +1,0 @@
-{
-  "name": "xtctx",
-  "command": "npx",
-  "args": ["xtctx", "serve", "--mcp"],
-  "transport": "stdio",
-  "env": {}
-}
