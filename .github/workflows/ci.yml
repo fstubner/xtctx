@@ -9,10 +9,6 @@ on:
 jobs:
   test-and-build:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        node-version: [20, 22, 24]
 
     steps:
       - name: Checkout
@@ -21,7 +17,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: 24
           cache: npm
           cache-dependency-path: |
             package-lock.json
@@ -31,7 +27,6 @@ jobs:
         run: npm ci
 
       - name: Install landing dependencies
-        if: ${{ matrix.node-version != 20 }}
         run: npm --prefix landing ci
 
       - name: Unit and integration tests
@@ -47,7 +42,6 @@ jobs:
           npm audit --omit=dev
 
       - name: Landing dependency audit
-        if: ${{ matrix.node-version != 20 }}
         run: npm --prefix landing audit --omit=dev
 
       - name: Drift canary
@@ -57,7 +51,6 @@ jobs:
         run: npm run build
 
       - name: Build landing
-        if: ${{ matrix.node-version != 20 }}
         run: npm --prefix landing run build
 
       - name: CLI smoke check

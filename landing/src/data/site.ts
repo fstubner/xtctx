@@ -128,7 +128,7 @@ export const site: SiteData = {
   },
 
   hero: {
-    badge: 'Open source · MIT · Node ≥20 · Local-first',
+    badge: 'Open source · MIT · Node >=24 · Local-first',
     heading: 'Switch AI coding tools without losing the thread',
     subhead:
       'xtctx wires MCP, hooks, and managed instructions so the next agent can list recent local sessions and open the raw transcript detail it needs.',
