@@ -853,6 +853,12 @@ function runtimeConversationMatchesProject(
       ].join("\n"),
       projectRoot,
     ),
+  ) || runtimeTextMentionsProjectName(
+    [
+      conversation.title ?? "",
+      ...conversation.messages.map((message) => message.content),
+    ].join("\n"),
+    projectRoot,
   );
 }
 
@@ -862,6 +868,16 @@ function textMentionsProject(value: string, projectRoot: string): boolean {
   const projectName = normalizeSearchText(basename(projectRoot));
   return text.includes(root) || text.includes(`/playground/${projectName}/`) ||
     text.endsWith(`/playground/${projectName}`);
+}
+
+function runtimeTextMentionsProjectName(value: string, projectRoot: string): boolean {
+  const projectName = normalizeSearchText(basename(projectRoot));
+  if (projectName.length < 4) {
+    return false;
+  }
+
+  const escaped = projectName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|[^a-z0-9_-])${escaped}([^a-z0-9_-]|$)`, "i").test(value);
 }
 
 function extractWorkspaceUris(summary: Record<string, unknown>): string[] {

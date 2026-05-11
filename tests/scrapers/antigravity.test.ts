@@ -220,6 +220,34 @@ describe("AntigravityScraper", () => {
     expect(chunks.map((chunk) => chunk.sessionId)).not.toContain("artifact-fallback");
   });
 
+  it("matches runtime conversations by project name when Antigravity omits workspace paths", async () => {
+    const chunks = await collect(new AntigravityScraper(
+      rootDir,
+      stateDir,
+      projectRoot,
+      runtimeClient([
+        {
+          sessionId: "cascade-summary-only",
+          title: "Does xtctx support Antigravity?",
+          workspaces: [],
+          messages: [
+            {
+              sessionId: "cascade-summary-only",
+              timestamp: new Date("2026-05-10T12:00:00.000Z"),
+              role: "user",
+              content: "Does xtctx support Antigravity?",
+              referencedFiles: [],
+              stepType: "CORTEX_STEP_TYPE_USER_INPUT",
+            },
+          ],
+        },
+      ]),
+    ));
+
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0].sessionId).toBe("cascade-summary-only");
+  });
+
   it("parses raw Antigravity language-server steps into user, assistant, and tool messages", () => {
     const messages = parseAntigravityRuntimeSteps(
       "cascade-raw",
