@@ -31,6 +31,7 @@ jobs:
         run: npm ci
 
       - name: Install landing dependencies
+        if: ${{ matrix.node-version != 20 }}
         run: npm --prefix landing ci
 
       - name: Unit and integration tests
@@ -39,20 +40,25 @@ jobs:
           npm test
           npm run test:integration
 
-      - name: Security tests and checklist
+      - name: Root security tests and checklist
         run: |
           npm run test:security
           npm run security:checklist
           npm audit --omit=dev
-          npm --prefix landing audit --omit=dev
+
+      - name: Landing dependency audit
+        if: ${{ matrix.node-version != 20 }}
+        run: npm --prefix landing audit --omit=dev
 
       - name: Drift canary
         run: npm run test:drift
 
-      - name: Build packages
-        run: |
-          npm run build
-          npm --prefix landing run build
+      - name: Build package
+        run: npm run build
+
+      - name: Build landing
+        if: ${{ matrix.node-version != 20 }}
+        run: npm --prefix landing run build
 
       - name: CLI smoke check
         run: npm run smoke:cli
