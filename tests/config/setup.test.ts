@@ -32,6 +32,13 @@ describe("setupProject", () => {
     await expect(readFile(join(projectRoot, ".codex", "config.toml"), "utf-8")).resolves.toContain(
       'args = [ "-y", "xtctx" ]',
     );
+    const antigravityConfig = JSON.parse(
+      await readFile(join(homeDir, ".gemini", "antigravity", "mcp_config.json"), "utf-8"),
+    ) as { mcpServers: { xtctx: { command: string; args: string[] } } };
+    expect(antigravityConfig.mcpServers.xtctx).toMatchObject({
+      command: "npx",
+      args: ["-y", "xtctx"],
+    });
 
     const agents = await readFile(join(projectRoot, "AGENTS.md"), "utf-8");
     expect(agents).toContain("xtctx Handoff");
@@ -49,6 +56,7 @@ describe("setupProject", () => {
       expect.arrayContaining([
         "config",
         "mcp:codex",
+        "mcp:antigravity",
         "memory:codex/opencode",
         "hook:claude-code",
       ]),

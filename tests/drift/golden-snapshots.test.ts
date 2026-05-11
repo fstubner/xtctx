@@ -16,6 +16,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { AntigravityScraper } from "@xtctx/scrapers/antigravity";
 import { ClaudeCodeScraper } from "@xtctx/scrapers/claude-code";
 import { CodexCliScraper } from "@xtctx/scrapers/codex";
 import { CopilotScraper } from "@xtctx/scrapers/copilot";
@@ -30,20 +31,30 @@ const SNAPSHOT_DIR = resolve(__dirname, "snapshots");
 
 function normalise(chunks: ConversationChunk[]): unknown {
   return chunks
-    .map((chunk) => ({
-      tool: chunk.tool,
-      sessionId: chunk.sessionId,
-      role: chunk.role,
-      content: chunk.content,
-      timestamp: chunk.timestamp.toISOString(),
-      messageIndex: chunk.metadata.messageIndex,
-      tokenEstimate: chunk.metadata.tokenEstimate,
-    }))
+    .map((chunk) => {
+      const content = normalizeContent(chunk);
+      return {
+        tool: chunk.tool,
+        sessionId: chunk.sessionId,
+        role: chunk.role,
+        content,
+        timestamp: chunk.timestamp.toISOString(),
+        messageIndex: chunk.metadata.messageIndex,
+        tokenEstimate: Math.ceil(content.length / 4),
+      };
+    })
     .sort((a, b) => {
       if (a.sessionId !== b.sessionId) return a.sessionId.localeCompare(b.sessionId);
       if (a.timestamp !== b.timestamp) return a.timestamp.localeCompare(b.timestamp);
       return a.messageIndex - b.messageIndex;
     });
+}
+
+function normalizeContent(chunk: ConversationChunk): string {
+  if (chunk.tool === "antigravity") {
+    return chunk.content.replace(/^Source: .*$/m, "Source: <source>");
+  }
+  return chunk.content;
 }
 
 async function collectChunks(scraper: ConversationScraper): Promise<ConversationChunk[]> {
@@ -372,5 +383,39 @@ describe("Golden snapshots", () => {
     const scraper = new GeminiCliScraper(tempDir, stateDir);
     const chunks = await collectChunks(scraper);
     await assertSnapshot("gemini", normalise(chunks));
+  });
+
+  it("antigravity", async () => {
+    const tempDir = await mkTemp("xtctx-snap-antigravity-");
+    const stateDir = await mkTemp("xtctx-snap-state-");
+    const sessionDir = join(tempDir, "brain", "snap-antigravity-session");
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      join(sessionDir, "task.md"),
+      [
+        "# Task",
+        "",
+        "Inspect [README.md](file:///h%3A/projects/private/needs-work/xtctx/README.md).",
+      ].join("\n"),
+      "utf-8",
+    );
+    await writeFile(
+      join(sessionDir, "task.md.metadata.json"),
+      JSON.stringify({
+        artifactType: "ARTIFACT_TYPE_TASK",
+        summary: "Snap task summary.",
+        updatedAt: "2026-02-24T10:00:00Z",
+        version: "1",
+      }),
+      "utf-8",
+    );
+
+    const scraper = new AntigravityScraper(
+      tempDir,
+      stateDir,
+      join("H:", "projects", "private", "needs-work", "xtctx"),
+    );
+    const chunks = await collectChunks(scraper);
+    await assertSnapshot("antigravity", normalise(chunks));
   });
 });

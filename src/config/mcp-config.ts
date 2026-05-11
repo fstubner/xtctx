@@ -56,7 +56,7 @@ export interface McpRenderer {
   globalPath?: (homeDir: string) => string;
   /**
    * Top-level key under which MCP server entries live.
-   *  - "mcpServers" for Claude Code / Cursor / Gemini / Copilot CLI
+   *  - "mcpServers" for Claude Code / Cursor / Gemini / Antigravity / Copilot CLI
    *  - "servers" for VS Code Copilot's `.vscode/mcp.json`
    *  - "mcp" for opencode's `opencode.json`
    *  - "mcp_servers" for Codex's `~/.codex/config.toml`
@@ -117,6 +117,14 @@ const NATIVE_MCP_TOOLS: Record<string, McpRenderer> = {
   gemini: {
     projectPath: (root) => join(root, ".gemini", "settings.json"),
     globalPath: (home) => join(home, ".gemini", "settings.json"),
+    buildEntry: buildGeminiEntry,
+  },
+
+  // Google Antigravity — JSON at `~/.gemini/antigravity/mcp_config.json`.
+  // Antigravity keeps this app-level config under Gemini state and uses the
+  // same command/args entry shape as Gemini MCP config.
+  antigravity: {
+    globalPath: (home) => join(home, ".gemini", "antigravity", "mcp_config.json"),
     buildEntry: buildGeminiEntry,
   },
 

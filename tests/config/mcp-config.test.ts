@@ -85,7 +85,7 @@ describe("syncToolMcpConfigs", () => {
 
   // ---------------------------------------------------------------------
   // New native MCP renderers (Phase 1: Copilot VS Code, Codex, Gemini,
-  // opencode, Copilot CLI)
+  // Antigravity, opencode, Copilot CLI)
   // ---------------------------------------------------------------------
 
   it("writes .vscode/mcp.json for VS Code Copilot under the `servers` root key (not mcpServers)", async () => {
@@ -181,6 +181,28 @@ describe("syncToolMcpConfigs", () => {
     expect(parsed.mcpServers.xtctx.type).toBeUndefined();
   });
 
+  it("writes Antigravity MCP config at the user-level app path", async () => {
+    const fakeHome = await mkdtemp(join(tmpdir(), "xtctx-antigravity-home-"));
+    try {
+      const servers = [
+        { name: "xtctx", command: "npx", args: ["-y", "xtctx"], transport: "stdio" as const },
+      ];
+      const result = await syncToolMcpConfigs(projectDir, servers, ["antigravity"], { homeDir: fakeHome });
+
+      expect(result.results).toHaveLength(1);
+      expect(result.results[0].scope).toBe("global");
+      expect(result.results[0].path).toBe(join(fakeHome, ".gemini", "antigravity", "mcp_config.json"));
+
+      const raw = await readFile(result.results[0].path, "utf-8");
+      const parsed = JSON.parse(raw) as { mcpServers: Record<string, Record<string, unknown>> };
+      expect(parsed.mcpServers.xtctx.command).toBe("npx");
+      expect(parsed.mcpServers.xtctx.args).toEqual(["-y", "xtctx"]);
+      expect(parsed.mcpServers.xtctx.type).toBeUndefined();
+    } finally {
+      await rm(fakeHome, { recursive: true, force: true });
+    }
+  });
+
   it("writes opencode.json with the nested `mcp` root key and array-style command", async () => {
     const servers = [
       {
@@ -257,7 +279,7 @@ describe("syncToolMcpConfigs", () => {
     }
   });
 
-  it("writes seven distinct files for all 7 native-MCP tools in a single call", async () => {
+  it("writes eight distinct files for all native-MCP tools in a single call", async () => {
     const fakeHome = await mkdtemp(join(tmpdir(), "xtctx-mcp-all-"));
     try {
       const servers = [
@@ -266,14 +288,24 @@ describe("syncToolMcpConfigs", () => {
       const result = await syncToolMcpConfigs(
         projectDir,
         servers,
-        ["claude", "claude-code", "cursor", "copilot", "codex", "gemini", "opencode", "copilot-cli"],
+        [
+          "claude",
+          "claude-code",
+          "cursor",
+          "copilot",
+          "codex",
+          "gemini",
+          "antigravity",
+          "opencode",
+          "copilot-cli",
+        ],
         { homeDir: fakeHome },
       );
 
-      // 8 enabled tools; claude/claude-code share .mcp.json (one is skipped), so
-      // 7 unique files actually get written.
+      // 9 enabled tools; claude/claude-code share .mcp.json (one is skipped), so
+      // 8 unique files actually get written.
       const written = result.results.filter((r) => !r.skipped);
-      expect(written).toHaveLength(7);
+      expect(written).toHaveLength(8);
       const skipped = result.results.filter((r) => r.skipped);
       expect(skipped).toHaveLength(1);
 
@@ -284,6 +316,7 @@ describe("syncToolMcpConfigs", () => {
         join(projectDir, ".vscode", "mcp.json"),
         join(projectDir, ".codex", "config.toml"),
         join(projectDir, ".gemini", "settings.json"),
+        join(fakeHome, ".gemini", "antigravity", "mcp_config.json"),
         join(projectDir, "opencode.json"),
         join(fakeHome, ".copilot", "mcp-config.json"),
       ];

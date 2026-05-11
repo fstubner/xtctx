@@ -90,6 +90,16 @@ export interface GeminiChunk extends ConversationChunk {
   };
 }
 
+export interface AntigravityChunk extends ConversationChunk {
+  tool: "antigravity";
+  metadata: ChunkMetadata & {
+    artifactType?: string;
+    artifactName?: string;
+    summary?: string;
+    sourcePath?: string;
+  };
+}
+
 export interface OpenCodeChunk extends ConversationChunk {
   tool: "opencode";
   metadata: ChunkMetadata & {

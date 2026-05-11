@@ -129,6 +129,10 @@ export function describeSetupPlan(projectPath?: string): {
   const home = process.env.USERPROFILE ?? process.env.HOME;
   if (home) {
     writes.push({ path: join(home, ".copilot", "mcp-config.json"), kind: "mcp:copilot-cli" });
+    writes.push({
+      path: join(home, ".gemini", "antigravity", "mcp_config.json"),
+      kind: "mcp:antigravity",
+    });
   }
 
   return { projectRoot, writes };

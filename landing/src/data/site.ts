@@ -112,7 +112,7 @@ export const site: SiteData = {
     ogDescription:
       'Local cross-tool handoff for AI coding agents. Setup, status, MCP transcript retrieval.',
     keywords:
-      'mcp server, model context protocol, ai coding, claude code, cursor, github copilot, codex, gemini cli, opencode, local transcripts, cross-tool handoff',
+      'mcp server, model context protocol, ai coding, claude code, cursor, github copilot, codex, gemini cli, google antigravity, opencode, local transcripts, cross-tool handoff',
     siteName: 'xtctx',
     author: { name: 'Felix Stubner', url: 'https://github.com/fstubner' },
     ogImage: 'https://xtctx.com/favicon.svg',
@@ -243,7 +243,7 @@ messages_fts  sessions         settings`,
     },
     {
       q: 'Which tools are supported?',
-      a: 'Claude Code, Cursor, Codex, GitHub Copilot, Gemini CLI, opencode, and GitHub Copilot CLI.',
+      a: 'Claude Code, Cursor, Codex, GitHub Copilot, Gemini CLI, Google Antigravity, opencode, and GitHub Copilot CLI.',
     },
     {
       q: 'Where does the data live?',

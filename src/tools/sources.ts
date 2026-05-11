@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { AntigravityScraper } from "../scrapers/antigravity.js";
 import { ClaudeCodeScraper } from "../scrapers/claude-code.js";
 import { CodexCliScraper } from "../scrapers/codex.js";
 import { CopilotCliScraper } from "../scrapers/copilot-cli.js";
@@ -14,6 +15,7 @@ export type ToolId =
   | "codex"
   | "copilot"
   | "gemini"
+  | "antigravity"
   | "opencode"
   | "copilot-cli";
 
@@ -77,6 +79,15 @@ export const SUPPORTED_TOOLS: ToolSourceDefinition[] = [
       new GeminiCliScraper(storePath, stateDir, projectRoot),
     memoryTargets: ["GEMINI.md"],
     hookMode: "instruction-only",
+  },
+  {
+    id: "antigravity",
+    label: "Google Antigravity",
+    defaultStorePath: defaultAntigravityStorePath,
+    createScraper: (storePath, stateDir, projectRoot) =>
+      new AntigravityScraper(storePath, stateDir, projectRoot),
+    memoryTargets: [],
+    hookMode: "mcp-only",
   },
   {
     id: "opencode",
@@ -148,6 +159,11 @@ export function defaultCopilotHistoryPath(): string {
 export function defaultGeminiHistoryPath(): string {
   const home = process.env.USERPROFILE ?? process.env.HOME ?? "";
   return join(home, ".gemini", "tmp");
+}
+
+export function defaultAntigravityStorePath(): string {
+  const home = process.env.USERPROFILE ?? process.env.HOME ?? "";
+  return join(home, ".gemini", "antigravity");
 }
 
 export function defaultOpenCodeStorePath(): string {

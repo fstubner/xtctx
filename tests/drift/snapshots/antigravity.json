@@ -1,0 +1,11 @@
+[
+  {
+    "tool": "antigravity",
+    "sessionId": "snap-antigravity-session",
+    "role": "assistant",
+    "content": "Antigravity artifact: task.md\nSource: <source>\nType: ARTIFACT_TYPE_TASK\nSummary: Snap task summary.\n\n# Task\n\nInspect [README.md](file:///h%3A/projects/private/needs-work/xtctx/README.md).",
+    "timestamp": "2026-02-24T10:00:00.000Z",
+    "messageIndex": 0,
+    "tokenEstimate": 47
+  }
+]

@@ -330,12 +330,13 @@ export class SqliteHandoffIndex implements SessionService {
     const contentHash = hashParts([chunk.content]);
     const now = new Date().toISOString();
     const metadataJson = JSON.stringify(chunk.metadata ?? {});
+    const sourcePointer = sourcePathFromMetadata(chunk.metadata);
 
     db.prepare(
       `INSERT INTO sessions
        (session_ref, tool, source_session_id, project_root, started_at, last_activity_at,
         message_count, preview, source_path, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, 0, NULL, NULL, ?)
+       VALUES (?, ?, ?, ?, ?, ?, 0, NULL, ?, ?)
        ON CONFLICT(session_ref) DO UPDATE SET
          started_at = CASE
            WHEN excluded.started_at < started_at THEN excluded.started_at
@@ -345,6 +346,7 @@ export class SqliteHandoffIndex implements SessionService {
            WHEN excluded.last_activity_at > last_activity_at THEN excluded.last_activity_at
            ELSE last_activity_at
          END,
+         source_path = COALESCE(source_path, excluded.source_path),
          updated_at = excluded.updated_at`,
     ).run(
       sessionRef,
@@ -353,6 +355,7 @@ export class SqliteHandoffIndex implements SessionService {
       this.projectRoot,
       timestamp,
       timestamp,
+      sourcePointer,
       now,
     );
 
@@ -372,7 +375,7 @@ export class SqliteHandoffIndex implements SessionService {
       messageIndex,
       contentHash,
       metadataJson,
-      null,
+      sourcePointer,
       now,
     );
 
@@ -998,6 +1001,11 @@ function setSetting(db: DatabaseHandle, key: string, value: string): void {
      VALUES (?, ?)
      ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
   ).run(key, value);
+}
+
+function sourcePathFromMetadata(metadata: ConversationChunk["metadata"]): string | null {
+  const value = (metadata as { sourcePath?: unknown }).sourcePath;
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
 }
 
 function overlapTimestamp(value: Date): Date {

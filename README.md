@@ -68,12 +68,15 @@ message range for `xtctx_session_detail`.
 - Codex
 - GitHub Copilot
 - Gemini CLI
+- Google Antigravity
 - opencode
 - GitHub Copilot CLI
 
-Each tool has a scraper for local transcript storage. Some tools have native
-MCP config or executable startup hooks; others receive MCP config plus managed
-instructions only. `xtctx status` labels the real mode for each integration.
+Each tool has a scraper for local handoff storage. Antigravity support reads
+its readable `brain` artifacts because its conversation `.pb` files are not
+treated as a stable public transcript format. Some tools have native MCP config
+or executable startup hooks; others receive MCP config plus managed instructions
+only. `xtctx status` labels the real mode for each integration.
 
 ## Project Files
 

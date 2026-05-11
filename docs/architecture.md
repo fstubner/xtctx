@@ -3,22 +3,22 @@
 xtctx has one job: reliable local handoff between AI coding tools.
 
 Humans run `xtctx setup` and `xtctx status`. Agents use MCP tools to discover
-recent local transcript sessions and retrieve raw messages on demand. xtctx
-does not run a background service, web UI, generated-summary pipeline, or
-durable memory writeback layer.
+recent local transcript or handoff-artifact sessions and retrieve raw local
+detail on demand. xtctx does not run a background service, web UI,
+generated-summary pipeline, or durable memory writeback layer.
 
 ## Runtime Shape
 
 ```text
-tool transcript stores
+tool transcript/artifact stores
         |
         v
 scrapers -> .xtctx/state/xtctx.db -> MCP tools
                                    -> setup/status diagnostics
 ```
 
-`.xtctx/state/xtctx.db` is a rebuildable cache. Raw transcript files remain
-authoritative.
+`.xtctx/state/xtctx.db` is a rebuildable cache. Raw transcript files and
+tool-authored handoff artifacts remain authoritative.
 
 ## Setup
 
@@ -42,8 +42,8 @@ The MCP surface is intentionally small:
 - `xtctx_continuity_status`
 
 `xtctx_recent_sessions` and `xtctx_session_detail` lazily scan local transcript
-stores before returning. `xtctx_search_sessions` searches chronological
-transcript windows stored in SQLite.
+or artifact stores before returning. `xtctx_search_sessions` searches
+chronological transcript windows stored in SQLite.
 
 Semantic search uses local embeddings over sliding windows of raw transcript
 turns. Each embedded window includes the session reference, message range, turn
