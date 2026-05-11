@@ -247,7 +247,7 @@ messages_fts  sessions         settings`,
     },
     {
       q: 'Where does the data live?',
-      a: 'Project configuration lives in .xtctx/config.yaml. The rebuildable local cache lives in .xtctx/state/xtctx.db. Source transcripts stay in each tool\'s own local storage.',
+      a: 'Project configuration lives in .xtctx/config.yaml. The rebuildable local cache lives in .xtctx/state/xtctx.db. Source transcripts stay in each tool\'s own local storage; Antigravity transcript steps are read from its local language server when the app is running.',
     },
     {
       q: 'What does the MCP integration look like?',

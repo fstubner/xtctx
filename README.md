@@ -73,9 +73,10 @@ message range for `xtctx_session_detail`.
 - GitHub Copilot CLI
 
 Each tool has a scraper for local handoff storage. Antigravity support reads
-its readable `brain` artifacts because its conversation `.pb` files are not
-treated as a stable public transcript format. Some tools have native MCP config
-or executable startup hooks; others receive MCP config plus managed instructions
+full transcript steps from the running local Antigravity language server when
+it is available, and falls back to readable `brain` artifacts when the encrypted
+`.pb` conversation store cannot be queried. Some tools have native MCP config or
+executable startup hooks; others receive MCP config plus managed instructions
 only. `xtctx status` labels the real mode for each integration.
 
 ## Project Files

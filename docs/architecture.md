@@ -20,6 +20,11 @@ scrapers -> .xtctx/state/xtctx.db -> MCP tools
 `.xtctx/state/xtctx.db` is a rebuildable cache. Raw transcript files and
 tool-authored handoff artifacts remain authoritative.
 
+Antigravity is the exception to simple file parsing: its `.pb` conversation
+files are treated as encrypted/private implementation detail. When Antigravity
+is running, xtctx queries the local language-server API for full conversation
+steps; when it is not running, xtctx falls back to readable `brain` artifacts.
+
 ## Setup
 
 `xtctx setup` writes:

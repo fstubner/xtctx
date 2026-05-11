@@ -97,6 +97,8 @@ export interface AntigravityChunk extends ConversationChunk {
     artifactName?: string;
     summary?: string;
     sourcePath?: string;
+    toolName?: string;
+    model?: string;
   };
 }
 
