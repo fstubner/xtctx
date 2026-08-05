@@ -43,6 +43,7 @@ try {
     const toolNames = tools.tools.map((tool) => tool.name).sort();
     assertDeepEqual(toolNames, [
       "xtctx_continuity_status",
+      "xtctx_handoff_manifest",
       "xtctx_recent_sessions",
       "xtctx_search_sessions",
       "xtctx_session_detail",
