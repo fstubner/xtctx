@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -111,6 +111,28 @@ describe("CopilotScraper", () => {
     expect(chunks[1].role).toBe("assistant");
     expect(chunks[1].content).toBe("copilot second");
     expect(chunks[1].sessionId).toBe(SESSION_UUID);
+  });
+
+  it("limits project-scoped scrapers to matching VS Code workspace folders", async () => {
+    await writeFile(
+      join(workspaceStorageDir, "abc123hash", "workspace.json"),
+      JSON.stringify({ folder: "file:///c%3A/some/project" }),
+      "utf-8",
+    );
+    await createWorkspaceDb(workspaceStorageDir, "otherhash", baseSessions);
+    await writeFile(
+      join(workspaceStorageDir, "otherhash", "workspace.json"),
+      JSON.stringify({ folder: "file:///other/project" }),
+      "utf-8",
+    );
+
+    const scoped = new CopilotScraper(workspaceStorageDir, stateDir, "c:\\some\\project");
+    const chunks: CopilotChunk[] = [];
+    for await (const chunk of scoped.fullSync()) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks.map((chunk) => chunk.content)).toEqual(["copilot first", "copilot second"]);
   });
 
   it("skips canceled requests", async () => {

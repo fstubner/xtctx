@@ -9,19 +9,15 @@ on:
 jobs:
   test-and-build:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        node-version: [20, 22, 24]
 
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
       - name: Setup Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: 24
           cache: npm
           cache-dependency-path: |
             package-lock.json
@@ -35,29 +31,27 @@ jobs:
 
       - name: Unit and integration tests
         run: |
+          npm run lint
           npm test
           npm run test:integration
 
-      - name: Security tests and checklist
+      - name: Root security tests and checklist
         run: |
           npm run test:security
           npm run security:checklist
+          npm audit --omit=dev
 
-      - name: Ranking eval and drift tests
-        run: |
-          npm run test:eval
-          npm run test:drift
+      - name: Landing dependency audit
+        run: npm --prefix landing audit --omit=dev
 
-      - name: Build packages (for smoke)
+      - name: Drift canary
+        run: npm run test:drift
+
+      - name: Build package
         run: npm run build
 
-      - name: Cross-tool pickup smoke tests
-        run: npm run test:smoke
-
-      - name: Build packages
-        run: |
-          npm run build
-          npm --prefix landing run build
+      - name: Build landing
+        run: npm --prefix landing run build
 
       - name: CLI smoke check
         run: npm run smoke:cli

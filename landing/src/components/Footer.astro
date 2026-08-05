@@ -14,12 +14,7 @@ const npmName = meta.siteName;
   {builtWith.length > 0 && (
     <div class="built-with">
       Built with
-      {builtWith.map((b, i) => (
-        <>
-          {i === 0 ? ' ' : i === builtWith.length - 1 ? ', and ' : ', '}
-          <a href={b.url}>{b.name}</a>
-        </>
-      ))}.
+      {builtWith.map((b, i) => <>{i === 0 ? ' ' : i === builtWith.length - 1 ? ', and ' : ', '}<a href={b.url}>{b.name}</a></>)}.
     </div>
   )}
 </footer>

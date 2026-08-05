@@ -5,34 +5,14 @@ import {
   ListToolsRequestSchema,
   type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
+import { createContinuityStatusHandler } from "./tools/continuity.js";
+import { createHandoffManifestHandler } from "./tools/manifest.js";
 import {
-  createGetConfigHandler,
-  createListConfigsHandler,
-  createToolPreferencesHandler,
-  type ConfigStore,
-} from "./tools/config.js";
-import {
-  createContinuityStatusHandler,
-  createEffectivePolicyHandler,
-  type ContinuityReader,
-} from "./tools/continuity.js";
-import {
-  createProjectKnowledgeHandler,
-  type KnowledgeStore,
-} from "./tools/knowledge.js";
-import { createSearchHandler, type SearchRunner } from "./tools/search.js";
-import {
-  createLastSessionBriefHandler,
   createRecentSessionsHandler,
+  createSearchSessionsHandler,
   createSessionDetailHandler,
   type SessionService,
 } from "./tools/sessions.js";
-import type { AutoTagger } from "../knowledge/tagger.js";
-import {
-  createWriteHandlers,
-  type KnowledgeWriter,
-  type SimilarityLookup,
-} from "./tools/write.js";
 import { errorMessage } from "../utils/errors.js";
 import { readXtctxPackage } from "../utils/package-info.js";
 
@@ -42,280 +22,120 @@ type ToolParams = Record<string, unknown>;
 type ToolHandler = (params: ToolParams) => Promise<unknown>;
 
 export interface McpToolDependencies {
-  search?: SearchRunner;
   sessions?: SessionService;
-  knowledge?: KnowledgeStore;
-  writer?: KnowledgeWriter;
-  findSimilar?: SimilarityLookup;
-  autoTagger?: AutoTagger;
-  configs?: ConfigStore;
-  continuity?: ContinuityReader;
 }
 
 export function buildToolDefinitions(): Tool[] {
   return [
     {
-      name: "xtctx_search",
+      name: "xtctx_recent_sessions",
       description:
-        "Search across all indexed context (conversations, code changes, knowledge). " +
-        "Supports hybrid (semantic + keyword), semantic-only, or keyword-only modes. " +
-        "Start with depth 'summary' and drill deeper if needed.",
+        "List recent local transcript sessions for this project. Call this first when you need cross-tool handoff context.",
       inputSchema: {
         type: "object",
         properties: {
-          query: { type: "string", description: "Natural language search query" },
-          mode: {
-            type: "string",
-            enum: ["hybrid", "semantic", "keyword"],
-            description: "Search mode. Default: hybrid",
-          },
-          depth: {
-            type: "string",
-            enum: ["summary", "detail", "raw"],
-            description: "Result depth. Start with summary. Default: summary",
-          },
-          source_filter: {
+          limit: { type: "number", description: "Max sessions. Default: 5" },
+          tool_filter: {
             type: "array",
             items: { type: "string" },
-            description: "Filter by source tool, e.g. ['claude-code', 'cursor']",
-          },
-          type_filter: {
-            type: "array",
-            items: { type: "string" },
-            description:
-              "Filter by type: decision, error_solution, insight, convention, gotcha, faq",
-          },
-          time_range: {
-            type: "object",
-            properties: {
-              after: { type: "string", description: "ISO 8601 date" },
-              before: { type: "string", description: "ISO 8601 date" },
-            },
+            description: "Optional tool ids to include",
           },
           format: {
             type: "string",
             enum: ["markdown", "json"],
             description: "Response format. Default: markdown",
-          },
-          limit: {
-            type: "number",
-            description: "Max results. Default: 10",
-          },
-        },
-        required: ["query"],
-      },
-    },
-    {
-      name: "xtctx_recent_sessions",
-      description:
-        "CALL THIS FIRST when starting any session. Returns recent work " +
-        "across all AI tools so you can continue where the last session left off.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          limit: { type: "number", description: "Max sessions. Default: 3" },
-          tool_filter: {
-            type: "array",
-            items: { type: "string" },
-            description: "Filter by tool name",
           },
         },
       },
     },
     {
       name: "xtctx_session_detail",
-      description: "Drill into a specific session's raw conversation data.",
+      description: "Return raw messages from a session_ref returned by xtctx_recent_sessions or xtctx_search_sessions.",
       inputSchema: {
         type: "object",
         properties: {
-          session_ref: { type: "string", description: "Session reference from search results" },
+          session_ref: { type: "string", description: "Session reference, e.g. codex:abc123" },
           offset: { type: "number", description: "Message offset for pagination" },
-          limit: { type: "number", description: "Max messages to return" },
+          limit: { type: "number", description: "Max messages to return. Default: 50" },
+          format: {
+            type: "string",
+            enum: ["markdown", "json"],
+            description: "Response format. Default: markdown",
+          },
         },
         required: ["session_ref"],
       },
     },
     {
-      name: "xtctx_last_session_brief",
+      name: "xtctx_search_sessions",
       description:
-        "Programmatic version of the handoff brief that xtctx injects into " +
-        "each tool's memory file. Returns a short markdown summary of the " +
-        "most-recent session in another tool (skipping the agent's own " +
-        "tool when current_tool is set), with a pointer to the source " +
-        "transcript.",
+        "Hybrid semantic/keyword search over chronological transcript windows and return matching sessions.",
       inputSchema: {
         type: "object",
         properties: {
-          current_tool: {
+          query: { type: "string", description: "Natural-language or keyword query" },
+          limit: { type: "number", description: "Max sessions. Default: 5" },
+          tool_filter: {
+            type: "array",
+            items: { type: "string" },
+            description: "Optional tool ids to include",
+          },
+          mode: {
             type: "string",
-            description:
-              "Tool slug the calling agent runs in (e.g. 'claude', " +
-              "'cursor'). Sessions in this tool are skipped. Omit to get " +
-              "the most-recent session regardless of tool.",
+            enum: ["hybrid", "keyword", "vector"],
+            description: "Retrieval mode. Default: hybrid",
           },
           format: {
             type: "string",
             enum: ["markdown", "json"],
             description: "Response format. Default: markdown",
           },
-          stale_threshold_days: {
-            type: "number",
-            description:
-              "Sessions older than this are skipped. Default: 7 days.",
-          },
         },
-      },
-    },
-    {
-      name: "xtctx_project_knowledge",
-      description:
-        "Get shared project knowledge (decisions, error solutions, insights, conventions, gotchas, FAQs).",
-      inputSchema: {
-        type: "object",
-        properties: {
-          type: {
-            type: "string",
-            enum: ["decision", "error_solution", "insight", "convention", "gotcha", "faq", "all"],
-            description: "Filter by type. Default: all",
-          },
-          query: { type: "string", description: "Optional semantic filter" },
-        },
+        required: ["query"],
       },
     },
     {
       name: "xtctx_continuity_status",
-      description:
-        "Get continuity orchestration posture per tool (state, scope, enabled categories, and warnings).",
+      description: "Return xtctx handoff wiring and local index diagnostics.",
       inputSchema: {
         type: "object",
         properties: {
+          format: {
+            type: "string",
+            enum: ["markdown", "json"],
+            description: "Response format. Default: markdown",
+          },
+        },
+      },
+    },
+    {
+      name: "xtctx_handoff_manifest",
+      description:
+        "Return a read-only handoff manifest with stable session references and raw-detail retrieval pointers for an external orchestrator.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          session_refs: {
+            type: "array",
+            items: { type: "string" },
+            description: "Optional session refs to include. Defaults to recent sessions.",
+          },
           tool_filter: {
             type: "array",
             items: { type: "string" },
-            description: "Optional filter for tool ids (e.g. codex, claude, cursor).",
+            description: "Optional tool ids to include",
+          },
+          limit: { type: "number", description: "Max recent sessions. Default: 5" },
+          correlation_id: {
+            type: "string",
+            description: "Optional caller-owned ID echoed in the response and never persisted by xtctx.",
           },
           format: {
             type: "string",
             enum: ["markdown", "json"],
-            description: "Response format. Default: markdown",
+            description: "Response format. Default: json",
           },
         },
-      },
-    },
-    {
-      name: "xtctx_effective_policy",
-      description:
-        "Read the merged continuity policy from global baseline + repo policy with resolved tool settings.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          format: {
-            type: "string",
-            enum: ["markdown", "json"],
-            description: "Response format. Default: markdown",
-          },
-        },
-      },
-    },
-    {
-      name: "xtctx_save_decision",
-      description:
-        "Record an architectural or design decision with rationale. " +
-        "Auto-enriched with file refs, domain tags, and version context. " +
-        "Deduplication prevents near-duplicate entries.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          title: { type: "string", description: "Short decision title" },
-          rationale: { type: "string", description: "Why this was decided" },
-          context: { type: "string", description: "What led to this decision" },
-          alternatives_considered: {
-            type: "array",
-            items: { type: "string" },
-            description: "Other options that were considered",
-          },
-        },
-        required: ["title", "rationale"],
-      },
-    },
-    {
-      name: "xtctx_save_error_solution",
-      description:
-        "Record an error and its solution for future reference. " +
-        "Auto-enriched with environment versions and domain tags.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          error: { type: "string", description: "The error message or pattern" },
-          solution: { type: "string", description: "What fixed it" },
-          context: { type: "string", description: "When/why this occurs" },
-        },
-        required: ["error", "solution"],
-      },
-    },
-    {
-      name: "xtctx_save_insight",
-      description:
-        "Record a project insight, convention, or gotcha. " +
-        "Use for things a future session should know.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          insight: { type: "string", description: "The insight" },
-          context: { type: "string", description: "Supporting context" },
-        },
-        required: ["insight"],
-      },
-    },
-    {
-      name: "xtctx_save_faq",
-      description:
-        "Record a frequently asked project question and its answer for future sessions.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          question: { type: "string", description: "Question text" },
-          answer: { type: "string", description: "Answer text" },
-          context: { type: "string", description: "Optional supporting context" },
-        },
-        required: ["question", "answer"],
-      },
-    },
-    {
-      name: "xtctx_list_configs",
-      description: "List available portable skills, commands, and agent definitions.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          type: {
-            type: "string",
-            enum: ["skill", "command", "agent", "all"],
-            description: "Filter by config type. Default: all",
-          },
-        },
-      },
-    },
-    {
-      name: "xtctx_get_config",
-      description: "Get a specific skill, command, or agent definition.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          type: { type: "string", enum: ["skill", "command", "agent"] },
-          name: { type: "string", description: "Config name" },
-        },
-        required: ["type", "name"],
-      },
-    },
-    {
-      name: "xtctx_tool_preferences",
-      description: "Get tool-specific preferences and settings from cross-tool config.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          tool: { type: "string", description: "Tool name, e.g. claude-code" },
-        },
-        required: ["tool"],
       },
     },
   ];
@@ -326,65 +146,25 @@ export function createToolHandlers(
 ): Map<string, ToolHandler> {
   const handlers = new Map<string, ToolHandler>();
 
-  if (dependencies.search) {
-    handlers.set("xtctx_search", createSearchHandler(dependencies.search));
-  } else {
-    handlers.set("xtctx_search", missingDependency("search index"));
-  }
-
   if (dependencies.sessions) {
     handlers.set("xtctx_recent_sessions", createRecentSessionsHandler(dependencies.sessions));
     handlers.set("xtctx_session_detail", createSessionDetailHandler(dependencies.sessions));
-    handlers.set("xtctx_last_session_brief", createLastSessionBriefHandler(dependencies.sessions));
+    handlers.set("xtctx_search_sessions", createSearchSessionsHandler(dependencies.sessions));
+    handlers.set("xtctx_continuity_status", createContinuityStatusHandler(dependencies.sessions));
+    handlers.set("xtctx_handoff_manifest", createHandoffManifestHandler(dependencies.sessions));
   } else {
-    handlers.set("xtctx_recent_sessions", missingDependency("session service"));
-    handlers.set("xtctx_session_detail", missingDependency("session service"));
-    handlers.set("xtctx_last_session_brief", missingDependency("session service"));
-  }
-
-  if (dependencies.knowledge) {
-    handlers.set("xtctx_project_knowledge", createProjectKnowledgeHandler(dependencies.knowledge));
-  } else {
-    handlers.set("xtctx_project_knowledge", missingDependency("knowledge store"));
-  }
-
-  if (dependencies.continuity) {
-    handlers.set("xtctx_continuity_status", createContinuityStatusHandler(dependencies.continuity));
-    handlers.set("xtctx_effective_policy", createEffectivePolicyHandler(dependencies.continuity));
-  } else {
-    handlers.set("xtctx_continuity_status", missingDependency("continuity service"));
-    handlers.set("xtctx_effective_policy", missingDependency("continuity service"));
-  }
-
-  if (dependencies.writer) {
-    const writeHandlers = createWriteHandlers(dependencies.writer, dependencies.findSimilar, dependencies.autoTagger);
-    handlers.set("xtctx_save_decision", writeHandlers.saveDecision);
-    handlers.set("xtctx_save_error_solution", writeHandlers.saveErrorSolution);
-    handlers.set("xtctx_save_insight", writeHandlers.saveInsight);
-    handlers.set("xtctx_save_faq", writeHandlers.saveFaq);
-  } else {
-    handlers.set("xtctx_save_decision", missingDependency("knowledge writer"));
-    handlers.set("xtctx_save_error_solution", missingDependency("knowledge writer"));
-    handlers.set("xtctx_save_insight", missingDependency("knowledge writer"));
-    handlers.set("xtctx_save_faq", missingDependency("knowledge writer"));
-  }
-
-  if (dependencies.configs) {
-    handlers.set("xtctx_list_configs", createListConfigsHandler(dependencies.configs));
-    handlers.set("xtctx_get_config", createGetConfigHandler(dependencies.configs));
-    handlers.set("xtctx_tool_preferences", createToolPreferencesHandler(dependencies.configs));
-  } else {
-    handlers.set("xtctx_list_configs", missingDependency("config store"));
-    handlers.set("xtctx_get_config", missingDependency("config store"));
-    handlers.set("xtctx_tool_preferences", missingDependency("config store"));
+    const missing = missingDependency("session service");
+    handlers.set("xtctx_recent_sessions", missing);
+    handlers.set("xtctx_session_detail", missing);
+    handlers.set("xtctx_search_sessions", missing);
+    handlers.set("xtctx_continuity_status", missing);
+    handlers.set("xtctx_handoff_manifest", missing);
   }
 
   return handlers;
 }
 
-export function createMcpServer(
-  dependencies: McpToolDependencies = {},
-): Server {
+export function createMcpServer(dependencies: McpToolDependencies = {}): Server {
   const server = new Server(
     { name: "xtctx", version: SERVER_VERSION },
     { capabilities: { tools: {} } },
@@ -421,9 +201,7 @@ export function createMcpServer(
   return server;
 }
 
-export async function startMcpServer(
-  dependencies: McpToolDependencies = {},
-): Promise<void> {
+export async function startMcpServer(dependencies: McpToolDependencies = {}): Promise<void> {
   const server = createMcpServer(dependencies);
   const transport = new StdioServerTransport();
   await server.connect(transport);
@@ -465,4 +243,3 @@ function formatCallToolResult(result: unknown): {
 
   return response;
 }
-

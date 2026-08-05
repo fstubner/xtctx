@@ -36,7 +36,18 @@ export class ScraperStateManager {
 }
 
 export function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 4);
+  if (!text) return 0;
+
+  const charCount = text.length;
+  // Match programming syntax delimiters
+  const symbolMatches = text.match(/[{}[\]();=+\-*&|<>!]/g);
+  const symbolCount = symbolMatches ? symbolMatches.length : 0;
+
+  // Text scales at 4 characters per token; symbols weight heavier (2 characters per token)
+  const baseTokens = Math.ceil(charCount / 4);
+  const syntaxTokens = Math.ceil(symbolCount / 2);
+
+  return baseTokens + syntaxTokens;
 }
 
 /**
@@ -79,7 +90,7 @@ export function toDate(value: unknown): Date {
  *
  *   - `tool`           — unique string identifier (e.g. `"zed"`, `"aider"`)
  *   - `detect()`       — returns true when the data source is present on disk
- *   - `getStorePaths()` — paths the daemon should watch for changes
+ *   - `getStorePaths()` — transcript source paths used for detection and status
  *   - `scrape(since?)` — yield chunks newer than the given date (incremental)
  *   - `fullSync()`     — yield all chunks from the beginning of time
  *

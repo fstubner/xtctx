@@ -1,0 +1,407 @@
+---
+// IdeMock.astro
+---
+<div class="ide-mock">
+  <!-- IDE Title Bar -->
+  <div class="ide-title-bar">
+    <div class="ide-dots">
+      <span class="ide-dot"></span>
+      <span class="ide-dot"></span>
+      <span class="ide-dot"></span>
+    </div>
+    <div class="ide-title">xtctx - Visual Studio Code / Cursor</div>
+  </div>
+
+  <div class="ide-workspace">
+    <!-- IDE Sidebar (Left) -->
+    <div class="ide-sidebar">
+      <div class="sidebar-header">EXPLORER: PROJECT</div>
+      <div class="sidebar-tree">
+        <div class="tree-group">
+          <div class="tree-row folder open">
+            <span class="tree-icon folder-open"></span>
+            <span>.xtctx</span>
+          </div>
+          <div class="tree-children">
+            <div class="tree-row file"><span class="tree-icon file"></span><span>config.yaml</span></div>
+            <div class="tree-row folder"><span class="tree-icon folder"></span><span>skills</span></div>
+          </div>
+        </div>
+        <div class="tree-group">
+          <div class="tree-row folder open">
+            <span class="tree-icon folder-open"></span>
+            <span>src</span>
+          </div>
+          <div class="tree-children">
+            <div class="tree-row file"><span class="tree-icon file"></span><span>index.ts</span></div>
+          </div>
+        </div>
+        <div class="tree-row file active"><span class="tree-icon file"></span><span>AGENTS.md</span></div>
+        <div class="tree-row file"><span class="tree-icon file"></span><span>CLAUDE.md</span></div>
+        <div class="tree-row file"><span class="tree-icon file"></span><span>package.json</span></div>
+      </div>
+    </div>
+
+    <!-- IDE Code Editor (Center) -->
+    <div class="ide-editor">
+      <div class="editor-tabs">
+        <div class="tab active">AGENTS.md</div>
+        <div class="tab">index.ts</div>
+      </div>
+      <div class="editor-content">
+        <pre class="code-lines"><code><span class="token comment">&lt;!-- xtctx:begin --&gt;</span>
+<span class="token comment"># xtctx Handoff</span>
+
+<span class="token keyword">Tool:</span> cursor
+<span class="token keyword">Project root:</span> ~/projects/my-app
+<span class="token keyword">Integration mode:</span> instruction-only
+
+<span class="token comment">## Session Retrieval</span>
+- Call <span class="token highlight">xtctx_recent_sessions</span> to list sessions.
+- Call <span class="token highlight">xtctx_session_detail</span> for raw messages.
+- Call <span class="token highlight">xtctx_search_sessions</span> for transcript windows.
+<span class="token comment">&lt;!-- xtctx:end --&gt;</span></code></pre>
+      </div>
+    </div>
+
+    <!-- IDE AI Chat Pane (Right) -->
+    <div class="ide-chat">
+      <div class="chat-header">AI ASSISTANT / CHAT</div>
+      <div class="chat-messages">
+        <!-- Agent Question -->
+        <div class="chat-bubble user">
+          <div class="role">You</div>
+          <div class="text">Continue from the last Claude Code session.</div>
+        </div>
+
+        <!-- Agent Response showing MCP tools in action -->
+        <div class="chat-bubble agent">
+          <div class="role">AI Agent</div>
+          <div class="text">I found the <span class="token highlight">AGENTS.md</span> xtctx block. I will list recent local sessions.</div>
+          
+          <!-- Tool Trace 1 -->
+          <div class="tool-call">
+            <div class="tool-name">Calling: xtctx_recent_sessions()</div>
+            <div class="tool-result">
+              <span>- Ref: claude-code:sess_714 (today 13:42)</span>
+              <span>- Messages: 18 turns | Tool: Claude Code</span>
+            </div>
+          </div>
+
+          <div class="text">I found the matching session. I will open the raw messages.</div>
+
+          <!-- Tool Trace 2 -->
+          <div class="tool-call">
+            <div class="tool-name">Calling: xtctx_session_detail(session_ref: "claude-code:sess_714")</div>
+            <div class="tool-result">
+              <span class="token comment">user: add the status smoke after the indexer tests</span>
+              <span>assistant: SqliteHandoffIndex tests passed</span>
+              <span class="token success">user: keep Node 24 as the release runtime</span>
+            </div>
+          </div>
+
+          <div class="text">I have the recent messages. I will start with the status smoke and keep Node 24.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  .ide-mock {
+    width: 100%;
+    background: #080f19;
+    border: 1px solid rgba(232, 223, 200, 0.14);
+    border-radius: 10px;
+    box-shadow: 0 32px 80px rgba(0, 0, 0, 0.42);
+    overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: #dbe4f2;
+    display: flex;
+    flex-direction: column;
+    height: var(--ide-mock-height, 420px);
+  }
+
+  /* Title Bar */
+  .ide-title-bar {
+    background: #0b1523;
+    padding: 10px 16px;
+    border-bottom: 1px solid rgba(232, 223, 200, 0.08);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    user-select: none;
+  }
+
+  .ide-dots {
+    display: flex;
+    gap: 6px;
+  }
+
+  .ide-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #28374d;
+    display: inline-block;
+  }
+
+  .ide-title {
+    color: #a8b9cf;
+    font-size: 0.72rem;
+    flex-grow: 1;
+    text-align: center;
+    margin-right: 32px;
+  }
+
+  /* Workspace Layout */
+  .ide-workspace {
+    display: flex;
+    flex-grow: 1;
+    overflow: hidden;
+    font-size: 0.78rem;
+  }
+
+  .ide-workspace > * {
+    height: 100%;
+    overflow-y: auto;
+  }
+
+  /* Custom scrollbars inside IDE Workspace */
+  .ide-workspace *::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .ide-workspace *::-webkit-scrollbar-track {
+    background: #060c14;
+  }
+  .ide-workspace *::-webkit-scrollbar-thumb {
+    background: rgba(232, 184, 120, 0.18);
+    border-radius: 999px;
+  }
+  .ide-workspace *::-webkit-scrollbar-thumb:hover {
+    background: rgba(232, 184, 120, 0.32);
+  }
+
+  /* Sidebar styling */
+  .ide-sidebar {
+    width: 178px;
+    background: #060c14;
+    border-right: 1px solid rgba(232, 223, 200, 0.08);
+    padding: 14px;
+    flex-shrink: 0;
+    text-align: left;
+  }
+
+  .sidebar-header {
+    color: #a8b9cf;
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    margin-bottom: 12px;
+  }
+
+  .sidebar-tree {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 0.72rem;
+  }
+
+  .tree-row {
+    cursor: default;
+    user-select: none;
+    color: #a8b9cf;
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    line-height: 1.7;
+  }
+
+  .tree-row span:last-child {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .tree-row.active {
+    color: #e8b878;
+    font-weight: 700;
+  }
+
+  .tree-children {
+    padding-left: 22px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    margin-top: 5px;
+  }
+
+  .tree-icon {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    margin-right: 6px;
+    vertical-align: middle;
+    background-size: contain;
+    background-repeat: no-repeat;
+    opacity: 0.85;
+    flex-shrink: 0;
+  }
+  .tree-icon.folder {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23e8b878' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z'/%3E%3C/svg%3E");
+  }
+  .tree-icon.folder-open {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23e8b878' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4zM3 6h18M16 10a4 4 0 0 1-8 0'/%3E%3C/svg%3E");
+  }
+  .tree-icon.file {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a8b9cf' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z'/%3E%3Cpolyline points='14 2 14 8 20 8'/%3E%3C/svg%3E");
+  }
+
+  /* Editor panel */
+  .ide-editor {
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+    background: #080f19;
+    border-right: 1px solid rgba(232, 223, 200, 0.08);
+    min-width: 0;
+  }
+
+  .editor-tabs {
+    display: flex;
+    background: #060c14;
+    border-bottom: 1px solid rgba(232, 223, 200, 0.08);
+  }
+
+  .tab {
+    padding: 8px 14px;
+    color: #a8b9cf;
+    border-right: 1px solid rgba(232, 223, 200, 0.05);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 0.7rem;
+    user-select: none;
+  }
+
+  .tab.active {
+    background: #080f19;
+    color: #e8b878;
+    border-bottom: 1px solid #e8b878;
+  }
+
+  .editor-content {
+    padding: 16px;
+    flex-grow: 1;
+    text-align: left;
+  }
+
+  .code-lines {
+    margin: 0;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 0.72rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    color: #dbe4f2;
+  }
+
+  .token.comment { color: #8ea2bf; }
+  .token.keyword { color: #e8b878; font-weight: 700; }
+  .token.highlight { color: #fff8e8; background: rgba(232, 184, 120, 0.16); border-radius: 3px; padding: 1px 3px; }
+
+  /* Chat Pane */
+  .ide-chat {
+    width: 248px;
+    background: #060c14;
+    padding: 14px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    text-align: left;
+  }
+
+  .chat-header {
+    color: #e8b878;
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    margin-bottom: 12px;
+    border-bottom: 1px solid rgba(232, 223, 200, 0.08);
+    padding-bottom: 6px;
+  }
+
+  .chat-messages {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    flex-grow: 1;
+  }
+
+  .chat-bubble {
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 0.7rem;
+    line-height: 1.4;
+  }
+
+  .chat-bubble.user {
+    background: rgba(232, 223, 200, 0.05);
+    border: 1px solid rgba(232, 223, 200, 0.1);
+  }
+
+  .chat-bubble.agent {
+    background: rgba(12, 28, 50, 0.5);
+    border: 1px solid rgba(157, 180, 216, 0.16);
+  }
+
+  .chat-bubble .role {
+    font-weight: 700;
+    margin-bottom: 4px;
+    font-size: 0.68rem;
+    color: #fff8e8;
+  }
+
+  .chat-bubble.user .role { color: #e8b878; }
+
+  .tool-call {
+    margin: 6px 0;
+    border: 1px solid rgba(232, 184, 120, 0.28);
+    border-radius: 4px;
+    background: #050b14;
+    overflow: hidden;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 0.64rem;
+  }
+
+  .tool-name {
+    background: rgba(232, 184, 120, 0.12);
+    padding: 4px 8px;
+    color: #e8b878;
+    font-weight: 700;
+    border-bottom: 1px solid rgba(232, 184, 120, 0.15);
+  }
+
+  .tool-result {
+    padding: 4px 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    color: #a8b9cf;
+    white-space: pre-wrap;
+  }
+
+  .tool-result .token.success {
+    color: #b7f7cb;
+    font-weight: 700;
+  }
+
+  /* Responsive visibility */
+  @media(max-width: 760px) {
+    .ide-sidebar { display: none; }
+  }
+  @media(max-width: 580px) {
+    .ide-editor { display: none; }
+    .ide-chat { width: 100%; }
+  }
+</style>

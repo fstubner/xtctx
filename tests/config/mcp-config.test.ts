@@ -2,72 +2,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-  loadMcpServerDefinitions,
-  renderMcpServersMarkdown,
-  syncToolMcpConfigs,
-} from "@xtctx/config/mcp-config";
-
-describe("loadMcpServerDefinitions", () => {
-  let configRoot = "";
-
-  beforeEach(async () => {
-    configRoot = await mkdtemp(join(tmpdir(), "xtctx-mcp-"));
-    await mkdir(join(configRoot, "mcp-servers"), { recursive: true });
-  });
-
-  afterEach(async () => {
-    await rm(configRoot, { recursive: true, force: true });
-  });
-
-  it("loads MCP server definitions from JSON files", async () => {
-    await writeFile(
-      join(configRoot, "mcp-servers", "my-server.json"),
-      JSON.stringify({ command: "npx", args: ["my-server"], transport: "stdio" }),
-      "utf-8",
-    );
-
-    const servers = await loadMcpServerDefinitions(configRoot);
-    expect(servers).toHaveLength(1);
-    expect(servers[0].name).toBe("my-server");
-    expect(servers[0].command).toBe("npx");
-    expect(servers[0].args).toEqual(["my-server"]);
-  });
-
-  it("loads MCP server definitions from YAML files", async () => {
-    await writeFile(
-      join(configRoot, "mcp-servers", "yaml-server.yaml"),
-      "command: node\nargs:\n  - server.js\ntransport: stdio\n",
-      "utf-8",
-    );
-
-    const servers = await loadMcpServerDefinitions(configRoot);
-    expect(servers).toHaveLength(1);
-    expect(servers[0].name).toBe("yaml-server");
-    expect(servers[0].command).toBe("node");
-  });
-
-  it("returns empty array when directory is missing", async () => {
-    const emptyRoot = await mkdtemp(join(tmpdir(), "xtctx-mcp-empty-"));
-    try {
-      const servers = await loadMcpServerDefinitions(emptyRoot);
-      expect(servers).toEqual([]);
-    } finally {
-      await rm(emptyRoot, { recursive: true, force: true });
-    }
-  });
-
-  it("skips files without command or url", async () => {
-    await writeFile(
-      join(configRoot, "mcp-servers", "empty.json"),
-      JSON.stringify({ name: "empty" }),
-      "utf-8",
-    );
-
-    const servers = await loadMcpServerDefinitions(configRoot);
-    expect(servers).toHaveLength(0);
-  });
-});
+import { syncToolMcpConfigs } from "@xtctx/config/mcp-config";
 
 describe("syncToolMcpConfigs", () => {
   let projectDir = "";
@@ -81,7 +16,7 @@ describe("syncToolMcpConfigs", () => {
   });
 
   it("writes .mcp.json for Claude Code", async () => {
-    const servers = [{ name: "xtctx", command: "npx", args: ["xtctx", "serve", "--mcp"], transport: "stdio" as const }];
+    const servers = [{ name: "xtctx", command: "npx", args: ["-y", "xtctx"], transport: "stdio" as const }];
     const result = await syncToolMcpConfigs(projectDir, servers, ["claude"]);
 
     expect(result.servers_loaded).toBe(1);
@@ -95,7 +30,7 @@ describe("syncToolMcpConfigs", () => {
   });
 
   it("writes .cursor/mcp.json for Cursor", async () => {
-    const servers = [{ name: "xtctx", command: "npx", args: ["xtctx", "serve"], transport: "stdio" as const }];
+    const servers = [{ name: "xtctx", command: "npx", args: ["-y", "xtctx"], transport: "stdio" as const }];
     const result = await syncToolMcpConfigs(projectDir, servers, ["cursor"]);
 
     expect(result.results).toHaveLength(1);
@@ -150,12 +85,12 @@ describe("syncToolMcpConfigs", () => {
 
   // ---------------------------------------------------------------------
   // New native MCP renderers (Phase 1: Copilot VS Code, Codex, Gemini,
-  // opencode, Copilot CLI)
+  // Antigravity, opencode, Copilot CLI)
   // ---------------------------------------------------------------------
 
   it("writes .vscode/mcp.json for VS Code Copilot under the `servers` root key (not mcpServers)", async () => {
     const servers = [
-      { name: "xtctx", command: "npx", args: ["xtctx", "serve"], transport: "stdio" as const },
+      { name: "xtctx", command: "npx", args: ["-y", "xtctx"], transport: "stdio" as const },
     ];
     const result = await syncToolMcpConfigs(projectDir, servers, ["copilot"]);
 
@@ -171,7 +106,7 @@ describe("syncToolMcpConfigs", () => {
     const entry = (parsed.servers as Record<string, Record<string, unknown>>).xtctx;
     expect(entry.type).toBe("stdio");
     expect(entry.command).toBe("npx");
-    expect(entry.args).toEqual(["xtctx", "serve"]);
+    expect(entry.args).toEqual(["-y", "xtctx"]);
   });
 
   it("writes TOML for Codex with [mcp_servers.<name>] tables and no `type` field", async () => {
@@ -179,7 +114,7 @@ describe("syncToolMcpConfigs", () => {
       {
         name: "xtctx",
         command: "npx",
-        args: ["xtctx", "serve", "--mcp-only"],
+        args: ["-y", "xtctx"],
         transport: "stdio" as const,
         env: { XTCTX_DEBUG: "1" },
       },
@@ -194,7 +129,7 @@ describe("syncToolMcpConfigs", () => {
     // Should contain a [mcp_servers.xtctx] table with command/args/env.
     expect(raw).toMatch(/\[mcp_servers\.xtctx\]/);
     expect(raw).toContain('command = "npx"');
-    expect(raw).toMatch(/args\s*=\s*\[\s*"xtctx",\s*"xtctx",?\s*"serve",?\s*"--mcp-only"\s*\]|args = \[ "xtctx", "serve", "--mcp-only" \]/);
+    expect(raw).toMatch(/args\s*=\s*\[\s*"-y",\s*"xtctx"\s*\]|args = \[ "-y", "xtctx" \]/);
     expect(raw).toContain("XTCTX_DEBUG");
     // Codex's TOML format omits the `type` field (stdio is implicit).
     expect(raw).not.toMatch(/^type =/m);
@@ -229,21 +164,61 @@ describe("syncToolMcpConfigs", () => {
     expect(raw).toMatch(/\[mcp_servers\.xtctx\]/);
   });
 
-  it("writes .gemini/settings.json for Gemini with `mcpServers` root and no `type` field", async () => {
-    const servers = [
-      { name: "xtctx", command: "npx", args: ["xtctx"], transport: "stdio" as const },
-    ];
-    const result = await syncToolMcpConfigs(projectDir, servers, ["gemini"]);
+  it("writes Antigravity MCP config with `mcpServers` root and no `type` field", async () => {
+    const fakeHome = await mkdtemp(join(tmpdir(), "xtctx-antigravity-entry-"));
+    try {
+      const servers = [
+        { name: "xtctx", command: "npx", args: ["xtctx"], transport: "stdio" as const },
+      ];
+      const result = await syncToolMcpConfigs(projectDir, servers, ["antigravity"], { homeDir: fakeHome });
 
-    expect(result.results).toHaveLength(1);
-    expect(result.results[0].path).toContain(join(".gemini", "settings.json"));
+      expect(result.results).toHaveLength(1);
+      expect(result.results[0].path).toBe(join(fakeHome, ".gemini", "antigravity", "mcp_config.json"));
 
-    const raw = await readFile(join(projectDir, ".gemini", "settings.json"), "utf-8");
-    const parsed = JSON.parse(raw) as { mcpServers: Record<string, Record<string, unknown>> };
-    expect(parsed.mcpServers.xtctx).toBeDefined();
-    expect(parsed.mcpServers.xtctx.command).toBe("npx");
-    // Gemini's native MCP entry shape omits `type`.
-    expect(parsed.mcpServers.xtctx.type).toBeUndefined();
+      const raw = await readFile(result.results[0].path, "utf-8");
+      const parsed = JSON.parse(raw) as { mcpServers: Record<string, Record<string, unknown>> };
+      expect(parsed.mcpServers.xtctx).toBeDefined();
+      expect(parsed.mcpServers.xtctx.command).toBe("npx");
+      expect(parsed.mcpServers.xtctx.type).toBeUndefined();
+    } finally {
+      await rm(fakeHome, { recursive: true, force: true });
+    }
+  });
+
+  it("leaves an unparsable MCP config unchanged", async () => {
+    const configPath = join(projectDir, ".mcp.json");
+    await writeFile(configPath, "{ not valid json\n", "utf-8");
+
+    const result = await syncToolMcpConfigs(
+      projectDir,
+      [{ name: "xtctx", command: "npx", args: ["-y", "xtctx"], transport: "stdio" }],
+      ["claude"],
+    );
+
+    expect(result.results[0]?.warning).toContain("Failed to parse existing MCP config");
+    await expect(readFile(configPath, "utf-8")).resolves.toBe("{ not valid json\n");
+  });
+
+  it("writes Antigravity MCP config at the user-level app path", async () => {
+    const fakeHome = await mkdtemp(join(tmpdir(), "xtctx-antigravity-home-"));
+    try {
+      const servers = [
+        { name: "xtctx", command: "npx", args: ["-y", "xtctx"], transport: "stdio" as const },
+      ];
+      const result = await syncToolMcpConfigs(projectDir, servers, ["antigravity"], { homeDir: fakeHome });
+
+      expect(result.results).toHaveLength(1);
+      expect(result.results[0].scope).toBe("global");
+      expect(result.results[0].path).toBe(join(fakeHome, ".gemini", "antigravity", "mcp_config.json"));
+
+      const raw = await readFile(result.results[0].path, "utf-8");
+      const parsed = JSON.parse(raw) as { mcpServers: Record<string, Record<string, unknown>> };
+      expect(parsed.mcpServers.xtctx.command).toBe("npx");
+      expect(parsed.mcpServers.xtctx.args).toEqual(["-y", "xtctx"]);
+      expect(parsed.mcpServers.xtctx.type).toBeUndefined();
+    } finally {
+      await rm(fakeHome, { recursive: true, force: true });
+    }
   });
 
   it("writes opencode.json with the nested `mcp` root key and array-style command", async () => {
@@ -251,7 +226,7 @@ describe("syncToolMcpConfigs", () => {
       {
         name: "xtctx",
         command: "npx",
-        args: ["xtctx", "serve", "--mcp-only"],
+        args: ["-y", "xtctx"],
         transport: "stdio" as const,
       },
     ];
@@ -265,7 +240,7 @@ describe("syncToolMcpConfigs", () => {
     const entry = parsed.mcp.xtctx;
     expect(entry.type).toBe("local");
     // opencode's `command` is a combined ARRAY (executable + args).
-    expect(entry.command).toEqual(["npx", "xtctx", "serve", "--mcp-only"]);
+    expect(entry.command).toEqual(["npx", "-y", "xtctx"]);
     expect(entry.enabled).toBe(true);
   });
 
@@ -301,7 +276,7 @@ describe("syncToolMcpConfigs", () => {
     const fakeHome = await mkdtemp(join(tmpdir(), "xtctx-mcp-home-"));
     try {
       const servers = [
-        { name: "xtctx", command: "npx", args: ["xtctx", "serve"], transport: "stdio" as const },
+        { name: "xtctx", command: "npx", args: ["-y", "xtctx"], transport: "stdio" as const },
       ];
       const result = await syncToolMcpConfigs(projectDir, servers, ["copilot-cli"], { homeDir: fakeHome });
 
@@ -314,7 +289,7 @@ describe("syncToolMcpConfigs", () => {
       const entry = parsed.mcpServers.xtctx;
       expect(entry.type).toBe("local");
       expect(entry.command).toBe("npx");
-      expect(entry.args).toEqual(["xtctx", "serve"]);
+      expect(entry.args).toEqual(["-y", "xtctx"]);
       // Copilot CLI's native shape includes a `tools` allowlist.
       expect(entry.tools).toEqual(["*"]);
     } finally {
@@ -322,16 +297,25 @@ describe("syncToolMcpConfigs", () => {
     }
   });
 
-  it("writes seven distinct files for all 7 native-MCP tools in a single call", async () => {
+  it("writes seven distinct files for all native-MCP tools in a single call", async () => {
     const fakeHome = await mkdtemp(join(tmpdir(), "xtctx-mcp-all-"));
     try {
       const servers = [
-        { name: "xtctx", command: "npx", args: ["xtctx", "serve"], transport: "stdio" as const },
+        { name: "xtctx", command: "npx", args: ["-y", "xtctx"], transport: "stdio" as const },
       ];
       const result = await syncToolMcpConfigs(
         projectDir,
         servers,
-        ["claude", "claude-code", "cursor", "copilot", "codex", "gemini", "opencode", "copilot-cli"],
+        [
+          "claude",
+          "claude-code",
+          "cursor",
+          "copilot",
+          "codex",
+          "antigravity",
+          "opencode",
+          "copilot-cli",
+        ],
         { homeDir: fakeHome },
       );
 
@@ -348,7 +332,7 @@ describe("syncToolMcpConfigs", () => {
         join(projectDir, ".cursor", "mcp.json"),
         join(projectDir, ".vscode", "mcp.json"),
         join(projectDir, ".codex", "config.toml"),
-        join(projectDir, ".gemini", "settings.json"),
+        join(fakeHome, ".gemini", "antigravity", "mcp_config.json"),
         join(projectDir, "opencode.json"),
         join(fakeHome, ".copilot", "mcp-config.json"),
       ];
@@ -359,23 +343,5 @@ describe("syncToolMcpConfigs", () => {
     } finally {
       await rm(fakeHome, { recursive: true, force: true });
     }
-  });
-});
-
-describe("renderMcpServersMarkdown", () => {
-  it("renders connection details for embedding", () => {
-    const servers = [
-      { name: "xtctx", command: "npx", args: ["xtctx", "serve", "--mcp"], transport: "stdio" as const },
-    ];
-    const lines = renderMcpServersMarkdown(servers);
-    const text = lines.join("\n");
-
-    expect(text).toContain("### xtctx");
-    expect(text).toContain("Transport: stdio");
-    expect(text).toContain("`npx xtctx serve --mcp`");
-  });
-
-  it("returns empty for no servers", () => {
-    expect(renderMcpServersMarkdown([])).toEqual([]);
   });
 });

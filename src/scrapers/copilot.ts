@@ -1,7 +1,10 @@
-import { stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { glob } from "glob";
 import type { CopilotChunk } from "../types/scraper.js";
 import { AbstractScraper, estimateTokens, toDate } from "./base.js";
+import { pathMatchesProject } from "../utils/project-scope.js";
 
 /** VS Code stores Copilot Chat history in workspaceStorage SQLite files. */
 const SESSIONS_KEY = "interactive.sessions";
@@ -65,6 +68,7 @@ export class CopilotScraper extends AbstractScraper<CopilotChunk> {
     /** Path to %APPDATA%/Code/User/workspaceStorage (or a test stand-in). */
     private readonly workspaceStoragePath: string,
     stateDir: string,
+    private readonly projectRoot?: string,
   ) {
     super(stateDir);
   }
@@ -326,15 +330,44 @@ export class CopilotScraper extends AbstractScraper<CopilotChunk> {
         return [];
       }
 
-      return glob("*/state.vscdb", {
+      const paths = await glob("*/state.vscdb", {
         cwd: this.workspaceStoragePath,
         absolute: true,
         nodir: true,
       });
+      if (!this.projectRoot) {
+        return paths;
+      }
+
+      const filtered: string[] = [];
+      for (const path of paths) {
+        if (await workspaceMatchesProject(path, this.projectRoot)) {
+          filtered.push(path);
+        }
+      }
+      return filtered;
     } catch {
       // ACCEPTED_DEGRADATIONS.missingWorkspaceStorage
       return [];
     }
+  }
+}
+
+async function workspaceMatchesProject(
+  workspaceDbPath: string,
+  projectRoot: string,
+): Promise<boolean> {
+  try {
+    const raw = await readFile(join(dirname(workspaceDbPath), "workspace.json"), "utf-8");
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const folder = typeof parsed.folder === "string" ? parsed.folder : undefined;
+    if (!folder) {
+      return false;
+    }
+    const folderPath = folder.startsWith("file:") ? fileURLToPath(folder) : folder;
+    return pathMatchesProject(folderPath, projectRoot);
+  } catch {
+    return false;
   }
 }
 

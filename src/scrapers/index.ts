@@ -19,5 +19,6 @@ export type {
 } from "../types/scraper.js";
 
 export { AbstractScraper, ScraperStateManager, estimateTokens } from "./base.js";
+export { AntigravityScraper } from "./antigravity.js";
 export { OpenCodeScraper } from "./opencode.js";
 export { CopilotCliScraper } from "./copilot-cli.js";

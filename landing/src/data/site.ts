@@ -1,67 +1,53 @@
-// All project-specific content lives here. Fork the site and this is
-// the one file you edit to retarget it at a different product. Every
-// component reads from this module.
-
 export interface Meta {
-  /** Canonical site URL without trailing slash. */
   domain: string;
-  /** <title> */
   title: string;
-  /** <meta name="description"> */
   description: string;
-  /** Short form used in OG / Twitter cards. Falls back to description. */
   ogDescription?: string;
-  /** Comma-separated keyword list. */
   keywords: string;
-  /** Site name for OG. */
   siteName: string;
   author: { name: string; url: string };
-  /** Absolute URL to the OG/Twitter share image. */
   ogImage: string;
-  /** Favicon + apple-touch-icon. */
   faviconPath: string;
   themeColor: string;
 }
 
 export interface Branding {
-  /** Path to the wordmark image served from /. Optional — falls back to text. */
   wordmark?: string;
-  /** Plain text wordmark. Used as alt text and as the fallback when no image is set. */
   wordmarkAlt: string;
-  /** Links + underline accent colour. */
   accentGradient: string;
-  /** Background fill. */
   bg: string;
-  /** Default body text colour. */
   fg: string;
 }
 
 export interface Hero {
-  /** Small uppercase strip above the headline. */
   badge: string;
   heading: string;
   subhead: string;
-  /** Shell command shown in the hero's highlighted install block. */
+  proof: string[];
   quickInstall: string;
-  /** Jump-to-install link label. */
   installLinkLabel: string;
-  /** Path to the hero screenshot. Optional. */
   heroImage?: string;
   heroImageAlt?: string;
-  /** Intrinsic pixel dimensions so the browser reserves layout space. */
   heroImageWidth?: number;
   heroImageHeight?: number;
-  /** Optional WebP source for <picture>. */
   heroImageWebp?: string;
-  /** Link to the source repo for the "View source" pill. */
   sourceUrl: string;
+}
+
+export interface SectionCopy {
+  heading: string;
+  leadHtml: string;
+}
+
+export interface WorkflowStep {
+  label: string;
+  title: string;
+  body: string;
 }
 
 export interface SurfaceCard {
   title: string;
-  /** HTML allowed — typically short paragraph, may contain <code>. */
   body: string;
-  /** If set, renders an image panel. */
   image?: {
     src: string;
     webp?: string;
@@ -69,25 +55,19 @@ export interface SurfaceCard {
     width: number;
     height: number;
   };
-  /** If set instead of image, renders a stylised code block. HTML allowed. */
   codeHtml?: string;
-  /** If true, flips text and visual sides for alternating rhythm. */
   flip?: boolean;
 }
 
 export interface InstallEntry {
   label: string;
-  /** Shell command(s) shown monospace with copy button. */
   command: string;
-  /** Optional small hint under the command. HTML allowed. */
   hint?: string;
 }
 
 export interface FaqItem {
   q: string;
-  /** Plain text used verbatim in both the visible section and JSON-LD. */
   a: string;
-  /** Rich HTML variant for the visible section. Falls back to `a`. */
   aHtml?: string;
 }
 
@@ -96,34 +76,21 @@ export interface BuiltWithEntry {
   url: string;
 }
 
-export interface SocialProof {
-  /** GitHub repo in "owner/name" format. Used to fetch stars + download counts. */
-  repo: string;
-  /** If false, skip the live stars/downloads fetch in the hero. */
-  showLiveStats?: boolean;
-}
-
 export interface Analytics {
-  /** Cloudflare Web Analytics beacon token. Omit to disable. */
   cloudflareToken?: string;
-}
-
-export interface SectionCopy {
-  heading: string;
-  /** HTML allowed — typically short tagline with an anchor link. */
-  leadHtml: string;
 }
 
 export interface SiteData {
   meta: Meta;
   branding: Branding;
   hero: Hero;
-  /** Visible headings + leads for each main section. */
   copy: {
+    workflow: SectionCopy;
     surfaces: SectionCopy;
     install: SectionCopy;
     faq: SectionCopy;
   };
+  workflow: WorkflowStep[];
   surfaces: SurfaceCard[];
   install: {
     entries: InstallEntry[];
@@ -132,9 +99,7 @@ export interface SiteData {
   };
   faq: FaqItem[];
   builtWith: BuiltWithEntry[];
-  social: SocialProof;
   analytics: Analytics;
-  /** Version string used in structured data. */
   version: string;
 }
 
@@ -144,208 +109,215 @@ const REPO_URL = `https://github.com/${REPO}`;
 export const site: SiteData = {
   meta: {
     domain: 'https://xtctx.com',
-    title:
-      'xtctx — Cross-tool context continuity for AI coding agents',
+    title: 'xtctx - Move between coding agents without starting over',
     description:
-      'xtctx is a local-first MCP server that indexes your conversations across Claude Code, Cursor, Copilot, Codex, and Gemini, then exposes hybrid search and structured project knowledge so you can switch tools mid-project without re-briefing the model.',
+      'xtctx writes local MCP config and managed instructions so AI coding tools can read recent transcript sessions from the current repo.',
     ogDescription:
-      'Local-first MCP server. Indexes conversation history across five AI coding tools. Resume work in any of them without losing context.',
+      'Local setup, status, skill sync, and MCP transcript retrieval for AI coding tools.',
     keywords:
-      'mcp server, model context protocol, ai coding, claude code, cursor, github copilot, codex, gemini cli, conversation history, hybrid search, lancedb, bm25, vector search, local-first, cross-tool context, ai agent memory, continuity policy',
+      'mcp server, model context protocol, ai coding agents, synced skills, claude code, cursor, codex, google antigravity, opencode, local transcripts, cross tool handoff, semantic transcript search',
     siteName: 'xtctx',
     author: { name: 'Felix Stubner', url: 'https://github.com/fstubner' },
     ogImage: 'https://xtctx.com/favicon.svg',
     faviconPath: '/favicon.svg',
-    themeColor: '#111',
+    themeColor: '#0a1424',
   },
 
   branding: {
     wordmarkAlt: 'xtctx',
-    accentGradient: 'linear-gradient(90deg,#7c5cff,#22b8cf 50%,#0aae7a)',
-    bg: '#111',
-    fg: '#d4d4d4',
+    accentGradient: 'linear-gradient(90deg,#e8dfc8,#e8b878)',
+    bg: '#0a1424',
+    fg: '#e8dfc8',
   },
 
   hero: {
-    badge: 'Open source · MIT · Node ≥20 · Local-first',
-    heading: 'Your AI coding history, indexed across every tool',
+    badge: 'Local transcript retrieval for AI coding tools',
+    heading: 'Keep project context portable across coding tools.',
     subhead:
-      'xtctx ingests conversations from Claude Code, Cursor, Copilot, Codex, and Gemini, indexes them locally with hybrid search (BM25 + embeddings), and exposes recall and writeback over MCP. Switch tools mid-project without re-briefing the model.',
-    quickInstall: 'npm install -g xtctx && xtctx init && xtctx serve',
-    installLinkLabel: 'More install options ↓',
+      'Move between supported coding agents without starting over. xtctx writes local MCP configs and managed instructions so the next agent can retrieve recent context through MCP.',
+    proof: ['Setup writes local config', 'Raw transcripts stay local', 'Five MCP tools'],
+    quickInstall: 'npx -y xtctx setup',
+    installLinkLabel: 'Get started',
     sourceUrl: REPO_URL,
   },
 
   copy: {
-    surfaces: {
-      heading: 'What it actually does',
+    workflow: {
+      heading: 'What happens after setup',
       leadHtml:
-        'Five tools, one local index, one continuity policy. <a href="https://github.com/fstubner/xtctx#readme">Full README →</a>',
+        'xtctx is not a dashboard or memory layer. It is project-local wiring plus MCP retrieval against transcript files your tools already write.',
+    },
+    surfaces: {
+      heading: 'What xtctx writes',
+      leadHtml:
+        'Setup writes config, managed instructions, selected skill targets, and a rebuildable SQLite cache. Raw transcript files remain the source of truth.',
     },
     install: {
-      heading: 'Get started',
+      heading: 'Run setup, then status',
       leadHtml:
-        'Install, init, then serve. <a href="https://github.com/fstubner/xtctx#quick-start">Quick start →</a>',
+        'Start with setup in the repo. Use status to check configured tools, transcript freshness, selected skills, and drift.',
     },
     faq: {
-      heading: 'FAQ',
-      leadHtml: 'The questions people actually ask before installing.',
+      heading: 'Questions before using it in a repo',
+      leadHtml: 'Short answers about setup, local storage, transcript limits, and what xtctx does not do.',
     },
   },
 
+  workflow: [
+    {
+      label: '01',
+      title: 'Run setup',
+      body:
+        'xtctx writes project-level MCP config and managed instruction blocks. Antigravity MCP is always configured. Copilot CLI still requires --global-mcp.',
+    },
+    {
+      label: '02',
+      title: 'Open another tool',
+      body:
+        'The tool reads the managed instructions and can start xtctx over stdio as an MCP server.',
+    },
+    {
+      label: '03',
+      title: 'Read recent sessions',
+      body:
+        'MCP calls list sessions, open raw transcript messages, and search chronological transcript windows.',
+    },
+    {
+      label: '04',
+      title: 'Check status',
+      body:
+        'Status reports configured tools, selected skills, transcript freshness, and unsupported targets.',
+    },
+  ],
+
   surfaces: [
     {
-      title: 'Cross-tool recall via MCP',
+      title: 'Five MCP tools',
       body:
-        'xtctx serve runs an MCP server over stdio. Your assistant calls <code>xtctx_search</code> and <code>xtctx_project_knowledge</code> at session start to recall what you already decided, debugged, and shipped — regardless of which tool you used last week.',
-      codeHtml: `<span style="color:#888">// session opener</span>
-<span style="color:#7c9fc7">xtctx_search</span>(<span style="color:#8fbc7f">"auth error after last deploy"</span>)
-<span style="color:#7c9fc7">xtctx_project_knowledge</span>({ <span style="color:#7c9fc7">type</span>: <span style="color:#8fbc7f">"all"</span> })
-
-<span style="color:#888">// after coding</span>
-<span style="color:#7c9fc7">xtctx_save_decision</span>({ title, rationale, alternatives_considered })
-<span style="color:#7c9fc7">xtctx_save_error_solution</span>({ error, solution, context })`,
+        'Agents can list recent sessions, open session detail, search transcript windows, check continuity status, and fetch a handoff manifest.',
+      codeHtml: `<span class="dim">agent calls</span> xtctx_recent_sessions
+<span class="dim">agent opens</span> xtctx_session_detail
+<span class="dim">agent searches</span> xtctx_search_sessions
+<span class="dim">agent checks</span> xtctx_continuity_status
+<span class="dim">orchestrator reads</span> xtctx_handoff_manifest`,
     },
     {
-      title: 'Hybrid search (BM25 + vector)',
+      title: 'Managed setup files',
       body:
-        'Conversations and structured knowledge land in LanceDB. Queries fuse full-text and embedding similarity via Reciprocal Rank Fusion, with <code>hybrid</code>, <code>semantic</code>, and <code>keyword</code> modes selectable per call. The same pipeline backs the MCP recall tools and the runtime web UI search bar.',
+        'Setup owns generated instruction blocks, MCP config, and selected skill targets so the repo wiring is repeatable.',
       flip: true,
-      codeHtml: `<span style="color:#888">$</span> curl -s localhost:3232/api/search?q=lancedb+routing&mode=hybrid | jq '.[0]'
-<span style="color:#555">{</span>
-  <span style="color:#7c9fc7">"score"</span>:    0.91,
-  <span style="color:#7c9fc7">"source"</span>:   <span style="color:#8fbc7f">"claude-code"</span>,
-  <span style="color:#7c9fc7">"type"</span>:     <span style="color:#8fbc7f">"decision"</span>,
-  <span style="color:#7c9fc7">"title"</span>:    <span style="color:#8fbc7f">"Route LanceDB writes through transaction guard"</span>,
-  <span style="color:#7c9fc7">"snippet"</span>:  <span style="color:#8fbc7f">"...prevents partial-write corruption on..."</span>
-<span style="color:#555">}</span>`,
+      codeHtml: `<span class="dim">$</span> <span class="cmd-text">npx -y xtctx setup</span>
+<span class="success-text">updated</span> .xtctx/config.yaml
+<span class="success-text">updated</span> .xtctx/skills/xtctx-handoff/SKILL.md
+<span class="success-text">updated</span> AGENTS.md
+<span class="success-text">updated</span> .codex/config.toml
+<span class="success-text">verified</span> MCP config`,
     },
     {
-      title: 'Continuity policy across five tools',
+      title: 'Status output',
       body:
-        'One <code>shared.yaml</code> declares the context feed, skills, commands, agents, MCP servers, slash commands, and whitelist policy you want present in every tool. <code>xtctx sync</code> renders that into Claude Code, Cursor, Copilot, Codex, and Gemini in their native formats. <code>xtctx serve</code> auto-reconciles drift on a timer.',
-      codeHtml: `<span style="color:#888"># .xtctx/tool-config/shared.yaml</span>
-<span style="color:#7c9fc7">scope</span>: project
-<span style="color:#7c9fc7">context_feed</span>:
-  session_opener: [xtctx_search, xtctx_project_knowledge]
-  writeback_tools: [xtctx_save_decision, xtctx_save_error_solution]
-<span style="color:#7c9fc7">mcp_servers</span>: [xtctx]
-<span style="color:#7c9fc7">whitelist_policy</span>:
-  advisory_level: warn`,
+        'Status reports configured tools, transcript freshness, selected skills, managed blocks, and unsupported targets.',
+      codeHtml: `<span class="dim">$</span> <span class="cmd-text">npx -y xtctx status</span>
+<span class="success-text">configured</span>
+<span class="info-text">mcp command</span> npx -y xtctx
+<span class="info-text">cache</span> 12 sessions
+<span class="info-text">codex</span> instruction only
+<span class="info-text">claude-code</span> executable hook`,
     },
     {
-      title: 'Local-first, no SaaS',
+      title: 'Search stays local',
       body:
-        'Everything lives under <code>.xtctx/</code> in your repo and <code>~/.xtctx/</code> for the global baseline. Embeddings run in-process via <code>@xenova/transformers</code>; the index is LanceDB on disk. No telemetry, no cloud calls, no account. Your conversation history never leaves your machine.',
+        'Raw transcript files remain the source of truth. SQLite is a rebuildable local index for ordered lookup and fallback keyword search.',
       flip: true,
-      codeHtml: `<span style="color:#888">$</span> ls .xtctx/
-config.yaml      knowledge/       lancedb/         tool-config/
-
-<span style="color:#888">$</span> xtctx serve
-<span style="color:#888">→</span> MCP   stdio
-<span style="color:#888">→</span> API   http://127.0.0.1:3232/api
-<span style="color:#888">→</span> UI    http://127.0.0.1:3232/
-<span style="color:#888">→</span> No outbound network calls.</span>`,
+      codeHtml: `<span class="info-text">cache</span> <span class="var-text">.xtctx/state/xtctx.db</span>
+├── <span class="var-text">sessions</span>
+├── <span class="var-text">messages</span>
+├── <span class="var-text">retrieval_windows</span>
+├── <span class="var-text">vectors</span>
+└── <span class="var-text">fts_index</span>`,
     },
   ],
 
   install: {
     entries: [
       {
-        label: 'npm (global)',
-        command: 'npm install -g xtctx',
+        label: 'Set up this repo',
+        command: 'npx -y xtctx setup',
         hint:
-          'Requires Node ≥20. Installs the <code>xtctx</code> CLI on your PATH.',
+        'Writes project-level MCP config, syncs selected skills, always configures Antigravity MCP, and repairs managed instruction blocks. Use --global-mcp only for Copilot CLI.',
       },
       {
-        label: 'npx (no install)',
-        command: 'npx xtctx init && npx xtctx serve',
+        label: 'Check what is wired',
+        command: 'npx -y xtctx status',
         hint:
-          'Try it without committing to a global install. Same binary, fetched on demand.',
+          'Reports configured tools, cached transcript freshness, skill drift, managed blocks, and repair hints.',
       },
       {
-        label: 'Bootstrap a project',
-        command: 'xtctx init && xtctx sync && xtctx serve',
+        label: 'Start MCP over stdio',
+        command: 'npx -y xtctx',
         hint:
-          'Scaffolds <code>.xtctx/</code>, renders continuity blocks into your AI tools, then starts the MCP + API + runtime UI.',
-      },
-      {
-        label: 'Full re-index',
-        command: 'xtctx ingest --full',
-        hint:
-          'Rebuilds the LanceDB index from every conversation file the scrapers can find. Use after upgrading or after a long offline stretch.',
-      },
-      {
-        label: 'From source',
-        command: 'git clone https://github.com/fstubner/xtctx && cd xtctx && npm ci && npm run build',
-        hint:
-          'Useful for development. Then <code>node dist/src/cli/index.js serve</code>.',
+          'Starts the MCP server for clients. In a normal terminal it prints setup and status help.',
       },
     ],
     tryCommands: [
-      'xtctx init',
-      'xtctx sync',
-      'xtctx serve',
-      'xtctx ingest --full',
-      'xtctx --help',
+      'npx -y xtctx setup',
+      'npx -y xtctx status',
+      'npx -y xtctx --help',
     ],
     binariesNote:
-      'Or read the <a href="https://github.com/fstubner/xtctx#readme" style="color:#ccc;text-decoration:underline;text-underline-offset:3px">full README</a> for hooks, policy merging, and MCP client config.',
+      'Read the <a href="https://github.com/fstubner/xtctx#readme">README</a> for supported tools and local transcript notes.',
   },
 
   faq: [
     {
-      q: 'Does it call out to any cloud service?',
-      a: 'No. xtctx is local-first. Embeddings are computed in-process via @xenova/transformers, the search index is LanceDB on disk, and conversation history is read from the AI tools\' own local storage. There is no telemetry, no account, and no outbound network calls during normal operation. The only network access is the GitHub stars/downloads counter on this landing page itself.',
+      q: 'What problem does xtctx solve?',
+      a: 'It lets a configured AI coding tool read recent local transcript sessions from the current repo through MCP.',
+    },
+    {
+      q: 'Does xtctx run a background service?',
+      a: 'No. xtctx has no daemon, API server, dashboard, watcher, or web service. MCP retrieval calls update the local cache on demand.',
+    },
+    {
+      q: 'Does xtctx sync skills?',
+      a: 'Yes. Setup writes the built-in xtctx-handoff skill, inventories compatible skills from connected tools, and syncs selected project skills to supported targets.',
+    },
+    {
+      q: 'Does it summarize sessions?',
+      a: 'No. xtctx points agents to recent raw transcript messages. Those messages stay the source of truth.',
+    },
+    {
+      q: 'What are the limits?',
+      a: 'xtctx is local-only. Transcript formats can change upstream, semantic vectors are created lazily, and keyword fallback is expected when local vector generation is unavailable.',
+    },
+    {
+      q: 'Can I test it without private transcripts?',
+      a: 'Yes. The public demo smoke creates synthetic Claude Code and Codex transcript stores in a temporary project, then calls the built MCP server over stdio.',
       aHtml:
-        'No. xtctx is local-first. Embeddings are computed in-process via <code>@xenova/transformers</code>, the search index is <a href="https://lancedb.github.io/lancedb/">LanceDB</a> on disk, and conversation history is read from the AI tools\' own local storage. There is no telemetry, no account, and no outbound network calls during normal operation. The only network access is the GitHub stars/downloads counter on this landing page itself.',
+        'Yes. The <a href="https://github.com/fstubner/xtctx/blob/main/docs/demo.md">public demo smoke</a> creates synthetic Claude Code and Codex transcript stores in a temporary project, then calls the built MCP server over stdio.',
     },
     {
       q: 'Which tools are supported?',
-      a: 'Five: Claude Code, Cursor, GitHub Copilot, Codex, and Gemini CLI. Each has a scraper that reads the tool\'s native conversation storage, plus a sync target that renders the shared continuity policy into the tool\'s native config format (CLAUDE.md, .cursor/rules, MCP server config, etc.).',
-      aHtml:
-        'Five: <strong>Claude Code, Cursor, GitHub Copilot, Codex, and Gemini CLI</strong>. Each has a scraper that reads the tool\'s native conversation storage, plus a sync target that renders the shared continuity policy into the tool\'s native config format (<code>CLAUDE.md</code>, <code>.cursor/rules</code>, MCP server config, etc.).',
+      a: 'Claude Code, Cursor, Codex, GitHub Copilot, Google Antigravity, opencode, and GitHub Copilot CLI.',
     },
     {
-      q: 'How does it handle drift in tool storage formats?',
-      a: 'Two layers. A mutation suite under tests/drift/ snapshots the parser output against fixtures from each tool, so a format change shows up as a failing test on the next CI run. A nightly canary workflow runs the live CLIs (Claude Code, Codex, Gemini) end-to-end against current versions to catch breakage that fixtures alone would miss. Cursor and Copilot are GUI tools so the canary covers three of five; the mutation suite covers all five.',
-      aHtml:
-        'Two layers. A <strong>mutation suite</strong> under <code>tests/drift/</code> snapshots the parser output against fixtures from each tool, so a format change shows up as a failing test on the next CI run. A <strong>nightly canary workflow</strong> runs the live CLIs (Claude Code, Codex, Gemini) end-to-end against current versions to catch breakage that fixtures alone would miss. Cursor and Copilot are GUI tools so the canary covers three of five; the mutation suite covers all five.',
-    },
-    {
-      q: 'What about Cursor and Copilot — those are GUI tools, not CLIs?',
-      a: 'Right, which is why the live CLI canary only covers three of the five tools. For the GUI tools we rely on the mutation suite — fixtures captured from real Cursor and Copilot installs, replayed against the parser on every CI run. If Cursor changes its conversation storage format, fixtures stop matching and the test fails before it ships.',
-      aHtml:
-        'Right, which is why the live CLI canary only covers three of the five tools. For the GUI tools we rely on the <strong>mutation suite</strong> — fixtures captured from real Cursor and Copilot installs, replayed against the parser on every CI run. If Cursor changes its conversation storage format, fixtures stop matching and the test fails before it ships.',
-    },
-    {
-      q: 'How is xtctx different from just having a long context window?',
-      a: 'A long context window is per-session and per-tool. xtctx is persistent and cross-tool. When you start a Cursor session tomorrow morning, the recall tools surface decisions you made in Claude Code last week, error solutions you saved from Codex two months ago, and the project conventions you wrote up once and never want to re-derive. The context window holds the current conversation; xtctx holds project memory.',
-    },
-    {
-      q: 'What does the MCP integration look like in practice?',
-      a: 'You add xtctx to your assistant\'s MCP server config (mcpServers.xtctx with command "xtctx" and args ["serve"]), and the assistant gets recall and writeback tools: xtctx_search, xtctx_project_knowledge, xtctx_recent_sessions for reading; xtctx_save_decision, xtctx_save_error_solution, xtctx_save_faq for writing. xtctx sync also generates SessionStart hooks for Claude Code so recall fires automatically at the top of every session.',
-      aHtml:
-        'You add xtctx to your assistant\'s MCP server config (<code>mcpServers.xtctx</code> with <code>command: "xtctx"</code> and <code>args: ["serve"]</code>), and the assistant gets recall and writeback tools: <code>xtctx_search</code>, <code>xtctx_project_knowledge</code>, <code>xtctx_recent_sessions</code> for reading; <code>xtctx_save_decision</code>, <code>xtctx_save_error_solution</code>, <code>xtctx_save_faq</code> for writing. <code>xtctx sync</code> also generates <code>SessionStart</code> hooks for Claude Code so recall fires automatically at the top of every session.',
+      q: 'Where does data live?',
+      a: 'Project config lives in .xtctx/config.yaml. The rebuildable SQLite cache lives in .xtctx/state/xtctx.db. Source transcripts stay in each tool storage location.',
     },
     {
       q: 'Is it open source?',
-      a: 'Yes. xtctx is MIT-licensed. Source, issue tracker, and releases are at https://github.com/fstubner/xtctx. Releases are published to npm via OIDC trusted publishing on every GitHub Release.',
+      a: 'Yes. xtctx is MIT licensed and published at github.com/fstubner/xtctx.',
       aHtml:
-        'Yes. xtctx is MIT-licensed. Source, issue tracker, and releases are at <a href="https://github.com/fstubner/xtctx">github.com/fstubner/xtctx</a>. Releases are published to <a href="https://www.npmjs.com/package/xtctx">npm</a> via OIDC trusted publishing on every GitHub Release.',
+        'Yes. xtctx is MIT licensed and published at <a href="https://github.com/fstubner/xtctx">github.com/fstubner/xtctx</a>.',
     },
   ],
 
   builtWith: [
-    { name: 'LanceDB', url: 'https://lancedb.github.io/lancedb/' },
-    { name: 'transformers.js', url: 'https://huggingface.co/docs/transformers.js' },
     { name: 'Model Context Protocol', url: 'https://modelcontextprotocol.io/' },
+    { name: 'SQLite', url: 'https://www.sqlite.org/' },
     { name: 'Astro', url: 'https://astro.build/' },
   ],
 
-  social: { repo: REPO, showLiveStats: true },
-
   analytics: {},
 
-  version: '0.6.0',
+  version: '0.10.0',
 };

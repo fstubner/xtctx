@@ -1,0 +1,1190 @@
+---
+import { site } from '../data/site';
+import IdeMock from '../components/IdeMock.astro';
+
+const repo = 'fstubner/xtctx';
+const repoUrl = `https://github.com/${repo}`;
+
+const faqs = [
+  {
+    q: 'What does xtctx do?',
+    a: 'xtctx lets a configured AI coding tool read recent local transcript sessions from the current repo through MCP. It lists sessions, opens raw messages, searches chronological windows, and reports continuity status.',
+  },
+  {
+    q: 'Does xtctx run in the background?',
+    a: 'No. xtctx does not run a daemon, dashboard, watcher, or API server. Retrieval happens when an agent calls the MCP tools, and the SQLite cache can be rebuilt from local transcript files.',
+  },
+  {
+    q: 'Where does the context come from?',
+    a: 'Recent context comes from local transcript files written by each tool. xtctx keeps source pointers, message rows, search windows, and vectors in SQLite so retrieval can stay local and ordered.',
+  },
+  {
+    q: 'What are the limits?',
+    a: 'xtctx is local only. Transcript formats can change upstream, semantic vectors are created lazily, and keyword fallback is expected when local vector generation is unavailable.',
+  },
+  {
+    q: 'Can I test it without private transcripts?',
+    a: 'Yes. Run npm run demo:public after building the package. The demo uses synthetic Claude Code and Codex transcript stores in a temporary project.',
+  },
+  {
+    q: 'Does xtctx sync skills?',
+    a: 'Yes. Setup creates the built in xtctx handoff skill, inventories compatible project skills, and syncs selected skills into verified tool targets. Unsupported tools are reported as unsupported.',
+  },
+  {
+    q: 'Can I remove one tool later?',
+    a: 'Yes. Run xtctx disconnect with the tool name. It removes generated MCP wiring, managed instructions, hooks, and generated skill targets for that tool without deleting transcripts or canonical project skills.',
+  },
+  {
+    q: 'What if a tool hangs while starting MCP?',
+    a: 'Disconnect that tool from the project, then fix the package path or command before reconnecting it. Tools that eagerly start MCP servers need a command that starts stdio cleanly.',
+  },
+  {
+    q: 'Which tools are supported?',
+    a: 'xtctx supports Codex, Claude Code, Cursor, GitHub Copilot, GitHub Copilot CLI, Google Antigravity, and opencode with different integration modes depending on the real surfaces each tool exposes.',
+  },
+];
+
+const surfaces = [
+  {
+    label: 'MCP',
+    title: 'Five MCP tools',
+    body: 'Tools can list recent sessions, open session detail, search transcript windows, and check continuity status.',
+  },
+  {
+    label: 'Instructions',
+    title: 'Managed instructions',
+    body: 'Setup writes stable project guidance so tools know how to call xtctx.',
+  },
+  {
+    label: 'Skills',
+    title: 'Selected skills',
+    body: 'Canonical skills stay under .xtctx/skills and sync into verified tool targets.',
+  },
+  {
+    label: 'Cache',
+    title: 'SQLite cache',
+    body: 'Raw transcripts remain authoritative while SQLite stores rebuildable retrieval data.',
+  },
+];
+
+const installCommands = [
+  {
+    label: 'Set up this project',
+    command: 'npx -y xtctx setup',
+    detail: 'Detect tools, choose skills, write MCP config, and repair managed blocks.',
+  },
+  {
+    label: 'Check the handoff',
+    command: 'npx -y xtctx status',
+    detail: 'Inspect wiring, transcript freshness, skill drift, and unsupported targets.',
+  },
+  {
+    label: 'Remove one tool',
+    command: 'npx -y xtctx disconnect antigravity',
+    detail: 'Remove generated xtctx management for a tool without deleting transcripts.',
+  },
+];
+
+const ldJson = JSON.stringify(
+  {
+    '@context': 'https://schema.org',
+    '@graph': [
+      {
+        '@type': 'SoftwareApplication',
+        name: 'xtctx',
+        url: 'https://xtctx.com/v9/',
+        codeRepository: repoUrl,
+        applicationCategory: 'DeveloperApplication',
+        operatingSystem: 'Windows, macOS, Linux',
+        softwareVersion: site.version,
+        programmingLanguage: 'TypeScript',
+        license: 'https://opensource.org/licenses/MIT',
+        description:
+          'Local MCP handoff for AI coding agents that need recent raw transcript context when switching tools.',
+        offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+      },
+      {
+        '@type': 'FAQPage',
+        mainEntity: faqs.map((faq) => ({
+          '@type': 'Question',
+          name: faq.q,
+          acceptedAnswer: { '@type': 'Answer', text: faq.a },
+        })),
+      },
+      {
+        '@type': 'HowTo',
+        name: 'Set up xtctx for local AI coding handoff',
+        step: [
+          {
+            '@type': 'HowToStep',
+            position: 1,
+            name: 'Run setup',
+            text: 'Run npx -y xtctx setup in the project root.',
+          },
+          {
+            '@type': 'HowToStep',
+            position: 2,
+            name: 'Review status',
+            text: 'Run npx -y xtctx status to verify MCP wiring, skill sync, and transcript sources.',
+          },
+          {
+            '@type': 'HowToStep',
+            position: 3,
+            name: 'Open another tool',
+            text: 'The configured agent can call xtctx MCP tools to retrieve recent local transcript detail.',
+          },
+        ],
+      },
+    ],
+  },
+  null,
+  2,
+);
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>xtctx v9 - Move between coding agents without starting over</title>
+    <meta
+      name="description"
+      content="xtctx writes local MCP config and managed instructions so AI coding tools can read recent transcript sessions from the current repo."
+    />
+    <meta
+      name="keywords"
+      content="MCP server, Model Context Protocol, AI coding agents, local transcript retrieval, skill sync, Codex, Claude Code, Cursor, Antigravity, opencode"
+    />
+    <meta name="robots" content="index,follow" />
+    <meta property="og:title" content="xtctx - Move between coding agents without starting over" />
+    <meta
+      property="og:description"
+      content="Local setup, status, skill sync, and MCP transcript retrieval for AI coding tools."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://xtctx.com/v9/" />
+    <meta name="theme-color" content="#081425" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <script type="application/ld+json" set:html={ldJson} />
+    <style is:global>
+      :root{
+        --bg:#07111f;
+        --bg-2:#0a1627;
+        --panel:#0d1b2e;
+        --panel-2:#10223a;
+        --ink:#f7f0e4;
+        --text:#dbe7f5;
+        --muted:#9faec4;
+        --quiet:#71829b;
+        --line:#26384f;
+        --line-2:#1a2b42;
+        --accent:#f0b86b;
+        --accent-2:#ffd08a;
+        --cool:#9eb6d9;
+        --ok:#9bd7b2;
+        --max:1140px;
+      }
+      *{box-sizing:border-box;scrollbar-width:thin;scrollbar-color:#40536f #081425}
+      *::-webkit-scrollbar{width:10px;height:10px}
+      *::-webkit-scrollbar-track{background:#081425}
+      *::-webkit-scrollbar-thumb{background:#40536f;border-radius:999px;border:2px solid #081425}
+      *::-webkit-scrollbar-corner{background:#081425}
+      html{scroll-behavior:smooth;overflow-x:hidden}
+      body{
+        margin:0;
+        min-width:0;
+        overflow-x:hidden;
+        padding-top:66px;
+        color:var(--ink);
+        background:
+          linear-gradient(rgba(255,255,255,.034) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255,255,255,.034) 1px, transparent 1px),
+          radial-gradient(circle at 18% 4%, rgba(240,184,107,.10), transparent 32rem),
+          var(--bg);
+        background-size:32px 32px,32px 32px,auto,auto;
+        font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+        line-height:1.55;
+        -webkit-font-smoothing:antialiased;
+        text-rendering:optimizeLegibility;
+      }
+      a{color:inherit}
+      code,.mono{
+        font-family:ui-monospace,"SF Mono",Consolas,monospace;
+      }
+      button,input,textarea,select{font:inherit}
+      :focus-visible{outline:2px solid var(--accent);outline-offset:4px}
+      .wrap{
+        width:min(var(--max),calc(100vw - 40px));
+        margin:0 auto;
+      }
+      .topbar{
+        position:fixed;
+        top:0;
+        left:0;
+        right:0;
+        z-index:20;
+        border-bottom:1px solid var(--line);
+        background:rgba(7,17,31,.86);
+        backdrop-filter:blur(14px);
+      }
+      .nav{
+        min-height:66px;
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:24px;
+      }
+      .brand{
+        display:inline-flex;
+        align-items:center;
+        color:var(--ink);
+        font-size:22px;
+        font-weight:850;
+        letter-spacing:0;
+        text-decoration:none;
+      }
+      .brand span{color:var(--accent)}
+      .navlinks{
+        display:flex;
+        align-items:center;
+        gap:22px;
+      }
+      .navlinks a{
+        color:var(--text);
+        text-decoration:none;
+        letter-spacing:.02em;
+        font-size:14px;
+        font-weight:650;
+      }
+      .navlinks a:hover{color:var(--ink)}
+      main{display:block}
+      .hero{
+        min-height:min(760px,calc(100svh - 118px));
+        display:grid;
+        grid-template-columns:minmax(0,1fr) minmax(420px,1fr);
+        align-items:center;
+        gap:58px;
+        padding:56px 0 52px;
+      }
+      .eyebrow,.section-label,.panel-kicker{
+        margin:0 0 16px;
+        color:var(--accent);
+        font-family:ui-monospace,"SF Mono",Consolas,monospace;
+        font-size:12px;
+        letter-spacing:.14em;
+        text-transform:uppercase;
+      }
+      h1,h2,h3,p{margin-top:0}
+      h1{
+        max-width:13ch;
+        margin:0 0 22px;
+        color:var(--ink);
+        font-size:clamp(48px,6.2vw,78px);
+        line-height:.96;
+        letter-spacing:0;
+      }
+      .hero-copy{
+        max-width:640px;
+      }
+      .hero-copy p:not(.eyebrow){
+        max-width:620px;
+        margin-bottom:26px;
+        color:var(--text);
+        font-size:19px;
+      }
+      .hero-actions{
+        display:flex;
+        flex-wrap:wrap;
+        gap:12px;
+        margin-bottom:22px;
+      }
+      .button{
+        min-height:44px;
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        gap:8px;
+        border:1px solid rgba(240,184,107,.48);
+        border-radius:7px;
+        padding:10px 15px;
+        color:var(--ink);
+        background:rgba(240,184,107,.08);
+        text-decoration:none;
+        font-weight:750;
+        font-size:14px;
+      }
+      .button.secondary{
+        border-color:var(--line);
+        background:rgba(255,255,255,.02);
+        color:var(--text);
+      }
+      .button:hover{border-color:var(--accent);background:rgba(240,184,107,.13)}
+      .hero-copy .support-line{
+        margin:0;
+        color:var(--quiet);
+        font-family:ui-monospace,"SF Mono",Consolas,monospace;
+        font-size:12px;
+        letter-spacing:.06em;
+        text-transform:uppercase;
+        overflow-wrap:anywhere;
+      }
+      .proof-stack{
+        min-width:0;
+        display:grid;
+        gap:14px;
+      }
+      .blueprint-panel{
+        min-width:0;
+        border:1px solid var(--line);
+        border-radius:10px;
+        background:rgba(13,27,46,.94);
+        box-shadow:0 22px 70px rgba(0,0,0,.28);
+        overflow:hidden;
+      }
+      .panel-head{
+        min-height:46px;
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:16px;
+        padding:12px 15px;
+        border-bottom:1px solid var(--line);
+        color:var(--quiet);
+        font-family:ui-monospace,"SF Mono",Consolas,monospace;
+        font-size:12px;
+        letter-spacing:.08em;
+        text-transform:uppercase;
+      }
+      .command-main{
+        display:grid;
+        grid-template-columns:minmax(0,1fr) auto;
+        gap:12px;
+        align-items:center;
+        padding:18px;
+        background:#07101d;
+      }
+      .command-text{
+        min-width:0;
+        display:flex;
+        gap:12px;
+        align-items:center;
+        color:var(--ink);
+        font-family:ui-monospace,"SF Mono",Consolas,monospace;
+        font-size:17px;
+        overflow-wrap:anywhere;
+      }
+      .prompt{
+        color:var(--accent);
+        font-weight:800;
+      }
+      .copy-button{
+        min-height:34px;
+        border:1px solid var(--line);
+        border-radius:6px;
+        padding:7px 10px;
+        color:var(--muted);
+        background:transparent;
+        cursor:pointer;
+        font-family:ui-monospace,"SF Mono",Consolas,monospace;
+        font-size:12px;
+        letter-spacing:.08em;
+        text-transform:uppercase;
+      }
+      .copy-button:hover,.copy-button.copied{
+        border-color:rgba(240,184,107,.55);
+        color:var(--ink);
+        background:rgba(240,184,107,.08);
+      }
+      .status-lines{
+        margin:0;
+        padding:18px;
+        color:var(--text);
+        font-family:ui-monospace,"SF Mono",Consolas,monospace;
+        font-size:14px;
+        line-height:1.65;
+        white-space:pre-wrap;
+      }
+      .setup-output{
+        border-top:1px solid var(--line);
+      }
+      .status-lines .dim{color:var(--quiet)}
+      .status-lines .ok{color:var(--ok)}
+      .handoff-lines{
+        display:grid;
+        gap:14px;
+        padding:18px;
+        background:#07101d;
+      }
+      .handoff-line{
+        padding-left:14px;
+        border-left:2px solid rgba(240,184,107,.5);
+      }
+      .handoff-line.agent{
+        border-color:rgba(158,182,217,.62);
+      }
+      .line-role{
+        display:block;
+        margin-bottom:4px;
+        color:var(--quiet);
+        font-family:ui-monospace,"SF Mono",Consolas,monospace;
+        font-size:11px;
+        letter-spacing:.08em;
+        text-transform:uppercase;
+      }
+      .handoff-line p{
+        margin:0;
+        color:var(--text);
+        font-size:15px;
+        line-height:1.48;
+      }
+      .handoff-wait{
+        color:var(--quiet);
+        font-family:ui-monospace,"SF Mono",Consolas,monospace;
+        font-size:12px;
+      }
+      .command-flow{
+        display:grid;
+        gap:9px;
+        padding:18px;
+        background:#07101d;
+      }
+      .flow-command{
+        display:flex;
+        gap:10px;
+        min-width:0;
+        color:var(--ink);
+        font-family:ui-monospace,"SF Mono",Consolas,monospace;
+        font-size:15px;
+        overflow-wrap:anywhere;
+      }
+      .flow-result{
+        margin:0 0 6px 21px;
+        color:var(--muted);
+        font-size:14px;
+      }
+      .flow-result.strong{
+        color:var(--ok);
+        font-weight:750;
+      }
+      .handoff-map{
+        position:relative;
+        display:grid;
+        grid-template-columns:minmax(150px,.72fr) minmax(0,1fr) minmax(160px,.8fr);
+        gap:18px;
+        padding:22px;
+      }
+      .handoff-map::before{
+        content:"";
+        position:absolute;
+        left:20%;
+        right:20%;
+        top:50%;
+        border-top:1px solid var(--accent);
+        opacity:.75;
+      }
+      .map-group{
+        position:relative;
+        z-index:1;
+        min-width:0;
+        border:1px solid #31445f;
+        border-radius:8px;
+        background:#0a1728;
+        padding:14px;
+      }
+      .map-group.center{
+        display:grid;
+        gap:10px;
+        background:#0d1b2e;
+      }
+      .map-title{
+        margin:0 0 10px;
+        color:var(--accent);
+        font-family:ui-monospace,"SF Mono",Consolas,monospace;
+        font-size:11px;
+        letter-spacing:.1em;
+        text-transform:uppercase;
+      }
+      .map-list{
+        display:grid;
+        gap:7px;
+        margin:0;
+        padding:0;
+        color:var(--text);
+        list-style:none;
+        font-size:13px;
+      }
+      .map-list li{
+        min-width:0;
+        overflow-wrap:anywhere;
+      }
+      .map-node{
+        border:1px solid var(--line);
+        border-radius:7px;
+        padding:11px;
+        color:var(--text);
+        background:#07111f;
+        font-size:13px;
+      }
+      .ide-proof{
+        width:min(920px,calc(100vw - 40px));
+        margin-top:28px;
+      }
+      .ide-proof-head{
+        max-width:760px;
+        margin:0 auto 16px;
+        text-align:center;
+      }
+      .ide-proof-head h3{
+        margin:0 0 8px;
+        color:var(--ink);
+        font-size:24px;
+      }
+      .ide-proof-head p{
+        margin:0;
+        color:var(--muted);
+        font-size:15px;
+      }
+      .ide-proof :global(.ide-mock){
+        --ide-mock-height:400px;
+      }
+      section{
+        scroll-margin-top:90px;
+        padding:78px 0;
+        border-top:1px solid var(--line-2);
+      }
+      #proof{
+        padding-top:30px;
+      }
+      .section-grid{
+        display:grid;
+        grid-template-columns:minmax(0,.8fr) minmax(0,1.2fr);
+        gap:54px;
+        align-items:start;
+      }
+      h2{
+        max-width:760px;
+        margin:0 0 16px;
+        color:var(--ink);
+        font-size:clamp(32px,4vw,48px);
+        line-height:1.08;
+        letter-spacing:0;
+      }
+      .lead{
+        max-width:720px;
+        margin:0;
+        color:var(--muted);
+        font-size:18px;
+      }
+      .proof-artifact{
+        display:grid;
+        grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+        gap:16px;
+      }
+      .artifact-card{
+        min-width:0;
+        border:1px solid var(--line);
+        border-radius:10px;
+        background:rgba(13,27,46,.78);
+        overflow:hidden;
+      }
+      .artifact-body{
+        padding:18px;
+      }
+      .artifact-body p{
+        margin:0;
+        color:var(--muted);
+        font-size:15px;
+      }
+      .terminal{
+        margin:0;
+        color:var(--text);
+        font-family:ui-monospace,"SF Mono",Consolas,monospace;
+        font-size:13px;
+        line-height:1.62;
+        white-space:pre-wrap;
+        overflow-wrap:anywhere;
+      }
+      .terminal .accent{color:var(--accent)}
+      .terminal .muted{color:var(--quiet)}
+      .surface-grid{
+        display:grid;
+        grid-template-columns:repeat(4,minmax(0,1fr));
+        border-top:1px solid var(--line);
+        border-left:1px solid var(--line);
+      }
+      .surface{
+        min-width:0;
+        padding:22px;
+        border-right:1px solid var(--line);
+        border-bottom:1px solid var(--line);
+        background:rgba(13,27,46,.54);
+      }
+      .surface-label{
+        display:block;
+        margin-bottom:18px;
+        color:var(--accent);
+        font-family:ui-monospace,"SF Mono",Consolas,monospace;
+        font-size:11px;
+        letter-spacing:.12em;
+        text-transform:uppercase;
+      }
+      h3{
+        margin:0 0 8px;
+        color:var(--ink);
+        font-size:19px;
+        line-height:1.25;
+      }
+      .surface p,.skill-copy p,.faq p{
+        margin:0;
+        color:var(--muted);
+        font-size:15px;
+      }
+      .skill-layout{
+        display:grid;
+        grid-template-columns:minmax(0,1fr) minmax(320px,.82fr);
+        gap:24px;
+        align-items:stretch;
+      }
+      .skill-copy{
+        min-width:0;
+        border:1px solid var(--line);
+        border-radius:10px;
+        padding:24px;
+        background:rgba(13,27,46,.62);
+      }
+      .skill-copy + .skill-copy{
+        background:rgba(16,34,58,.62);
+      }
+      .skill-path{
+        margin:18px 0 0;
+        color:var(--accent);
+        font-family:ui-monospace,"SF Mono",Consolas,monospace;
+        font-size:13px;
+        overflow-wrap:anywhere;
+      }
+      .target-list{
+        margin:18px 0 0;
+        padding:0;
+        display:grid;
+        gap:10px;
+        list-style:none;
+      }
+      .target-list li{
+        display:flex;
+        justify-content:space-between;
+        gap:16px;
+        border-top:1px solid var(--line-2);
+        padding-top:10px;
+        color:var(--text);
+        font-size:14px;
+      }
+      .target-list span:last-child{
+        color:var(--quiet);
+        text-align:right;
+      }
+      .install-layout{
+        display:grid;
+        grid-template-columns:minmax(0,1fr) minmax(320px,.84fr);
+        gap:18px;
+        align-items:start;
+      }
+      .command-list{
+        display:grid;
+        gap:12px;
+      }
+      .command-item{
+        min-width:0;
+        display:grid;
+        grid-template-columns:minmax(0,1fr) auto;
+        gap:12px;
+        border:1px solid var(--line);
+        border-radius:10px;
+        background:#07101d;
+        padding:15px;
+      }
+      .command-item strong{
+        display:block;
+        margin-bottom:7px;
+        color:var(--ink);
+        font-size:15px;
+      }
+      .command-item code{
+        display:block;
+        color:var(--accent-2);
+        font-family:ui-monospace,"SF Mono",Consolas,monospace;
+        font-size:14px;
+        overflow-wrap:anywhere;
+      }
+      .command-item p{
+        grid-column:1 / -1;
+        margin:0;
+        color:var(--muted);
+        font-size:14px;
+      }
+      .faq-list{
+        display:grid;
+        gap:10px;
+      }
+      details{
+        border:1px solid var(--line);
+        border-radius:8px;
+        background:rgba(13,27,46,.62);
+        overflow:hidden;
+      }
+      summary{
+        min-height:52px;
+        display:flex;
+        align-items:center;
+        gap:12px;
+        padding:14px 16px;
+        color:var(--ink);
+        cursor:pointer;
+        font-weight:750;
+        list-style:none;
+      }
+      summary::-webkit-details-marker{display:none}
+      summary::before{
+        content:"+";
+        color:var(--accent);
+        font-family:ui-monospace,"SF Mono",Consolas,monospace;
+        flex:0 0 16px;
+      }
+      details[open] summary::before{content:"-"}
+      details p{
+        padding:0 16px 18px 44px;
+        overflow-wrap:anywhere;
+      }
+      .final-cta{
+        padding-bottom:86px;
+      }
+      .cta-panel{
+        display:flex;
+        justify-content:space-between;
+        gap:24px;
+        align-items:center;
+        border:1px solid var(--line);
+        border-radius:12px;
+        padding:26px;
+        background:linear-gradient(135deg,rgba(240,184,107,.12),rgba(13,27,46,.76) 42%,rgba(13,27,46,.86));
+      }
+      .cta-panel h2{
+        font-size:32px;
+        margin-bottom:8px;
+      }
+      .cta-panel p{
+        margin:0;
+        color:var(--muted);
+      }
+      footer{
+        display:flex;
+        justify-content:space-between;
+        gap:20px;
+        flex-wrap:wrap;
+        padding:28px 0 44px;
+        color:var(--quiet);
+        font-family:ui-monospace,"SF Mono",Consolas,monospace;
+        font-size:12px;
+      }
+      footer a{
+        color:var(--muted);
+        text-decoration:none;
+      }
+      footer a:hover{color:var(--ink)}
+      .foot-links{
+        display:flex;
+        gap:14px;
+        flex-wrap:wrap;
+      }
+      .sr-only{
+        position:absolute;
+        width:1px;
+        height:1px;
+        padding:0;
+        margin:-1px;
+        overflow:hidden;
+        clip:rect(0,0,0,0);
+        white-space:nowrap;
+        border:0;
+      }
+
+      @media(max-width:980px){
+        .hero,
+        .section-grid,
+        .skill-layout,
+        .install-layout{
+          grid-template-columns:1fr;
+        }
+        .hero{
+          min-height:0;
+          padding:58px 0 50px;
+        }
+        .surface-grid,
+        .proof-artifact{
+          grid-template-columns:repeat(2,minmax(0,1fr));
+        }
+        .handoff-map{
+          grid-template-columns:1fr;
+        }
+        .handoff-map::before{display:none}
+      }
+      @media(max-width:700px){
+        body{padding-top:96px}
+        .wrap{width:calc(100vw - 32px)}
+        .nav{
+          min-height:auto;
+          padding:16px 0;
+          align-items:flex-start;
+        }
+        .navlinks{
+          justify-content:flex-end;
+          gap:12px;
+          flex-wrap:wrap;
+        }
+        .navlinks a{
+          font-size:12px;
+          letter-spacing:0;
+        }
+        .hero{
+          padding:42px 0 38px;
+          gap:28px;
+        }
+        h1{
+          font-size:44px;
+          max-width:11ch;
+        }
+        .hero-copy p:not(.eyebrow),
+        .lead{
+          font-size:16px;
+        }
+        .command-main,
+        .command-item,
+        .cta-panel{
+          grid-template-columns:1fr;
+        }
+        .command-main{
+          align-items:start;
+        }
+        .copy-button{
+          justify-self:start;
+        }
+        .panel-head{
+          align-items:flex-start;
+          flex-direction:column;
+          gap:4px;
+        }
+        section{
+          padding:54px 0;
+        }
+        .surface-grid,
+        .proof-artifact{
+          grid-template-columns:1fr;
+        }
+        .ide-proof-head{
+          text-align:left;
+        }
+        .ide-proof{
+          width:calc(100vw - 32px);
+        }
+        .ide-proof :global(.ide-mock){
+          --ide-mock-height:360px;
+        }
+        .proof-stack .blueprint-panel:nth-child(2){
+          display:none;
+        }
+        .surface,
+        .skill-copy,
+        .artifact-body{
+          padding:18px;
+        }
+        .target-list li{
+          display:grid;
+          gap:4px;
+        }
+        .target-list span:last-child{
+          text-align:left;
+        }
+        .cta-panel{
+          display:grid;
+          padding:20px;
+        }
+        .cta-panel h2{
+          font-size:28px;
+        }
+        footer{
+          padding-bottom:34px;
+        }
+      }
+      @media(prefers-reduced-motion:reduce){
+        html{scroll-behavior:auto}
+      }
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <nav class="wrap nav" aria-label="Primary">
+        <a class="brand" href="/v9/" aria-label="xtctx"><span>xt</span>ctx</a>
+        <div class="navlinks">
+          <a href="#proof">How it works</a>
+          <a href="#surfaces">Features</a>
+          <a href="#install">Setup</a>
+          <a href="#faq">FAQs</a>
+          <a href={repoUrl}>GitHub</a>
+        </div>
+      </nav>
+    </header>
+
+    <main>
+      <section class="wrap hero" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <p class="eyebrow">Local transcript retrieval for AI coding tools</p>
+          <h1 id="hero-title">Move between coding agents without starting over</h1>
+          <p>
+            Run setup in a repo. xtctx writes MCP config and managed
+            instructions so supported tools can list recent sessions, open raw
+            messages, and search local transcripts.
+          </p>
+          <div class="hero-actions">
+            <a class="button" href="#install">Get started</a>
+            <a class="button secondary" href={repoUrl}>View source</a>
+          </div>
+          <p class="support-line">Open source | MIT | Node 24+ | Local first</p>
+        </div>
+
+        <div class="proof-stack" aria-label="xtctx setup proof">
+          <div class="blueprint-panel">
+            <div class="panel-head">
+              <span>Setup command</span>
+              <span>Run from project root</span>
+            </div>
+            <div class="command-main">
+              <div class="command-text">
+                <span class="prompt">$</span>
+                <span data-copy-text>npx -y xtctx setup</span>
+              </div>
+              <button class="copy-button" type="button" data-copy-target="npx -y xtctx setup">Copy</button>
+            </div>
+            <pre class="status-lines setup-output"><span class="ok">updated</span> .xtctx/config.yaml
+<span class="ok">updated</span> .xtctx/skills/xtctx-handoff/SKILL.md
+<span class="ok">updated</span> AGENTS.md
+<span class="ok">updated</span> .codex/config.toml
+<span class="ok">ready</span> MCP config</pre>
+          </div>
+
+          <div class="blueprint-panel">
+            <div class="panel-head">
+              <span>Status after setup</span>
+              <span>Real surfaces only</span>
+            </div>
+            <pre class="status-lines"><span class="dim">$</span> npx -y xtctx status
+<span class="ok">ready</span> mcp command npx -y xtctx
+<span class="ok">ready</span> managed instructions repaired
+<span class="ok">ready</span> 3 selected skills synced
+<span class="dim">cache</span> indexes on MCP retrieval
+<span class="dim">data</span> raw transcripts stay authoritative</pre>
+          </div>
+        </div>
+      </section>
+
+      <section id="proof">
+        <div class="wrap section-grid">
+          <div>
+            <p class="section-label">How it works</p>
+            <h2>Setup writes config. Tools call MCP.</h2>
+            <p class="lead">
+              No generated summary is treated as truth. The tool asks xtctx for
+              recent sessions, raw messages, search windows, and wiring status.
+            </p>
+          </div>
+          <div class="blueprint-panel">
+            <div class="panel-head">
+              <span>MCP tools</span>
+              <span>No generated summary required</span>
+            </div>
+            <div class="handoff-map" aria-label="Runtime handoff path">
+              <div class="map-group">
+                <p class="map-title">Tool transcripts</p>
+                <ul class="map-list">
+                  <li>Codex sessions</li>
+                  <li>Claude Code projects</li>
+                  <li>Antigravity conversations</li>
+                  <li>Cursor workspace chats</li>
+                </ul>
+              </div>
+              <div class="map-group center">
+                <div class="map-node">xtctx_recent_sessions</div>
+                <div class="map-node">xtctx_session_detail</div>
+                <div class="map-node">xtctx_search_sessions</div>
+                <div class="map-node">xtctx_continuity_status</div>
+                <div class="map-node">xtctx_handoff_manifest</div>
+              </div>
+              <div class="map-group">
+                <p class="map-title">Next agent</p>
+                <ul class="map-list">
+                  <li>Find recent work</li>
+                  <li>Open raw messages</li>
+                  <li>Search ordered windows</li>
+                  <li>Continue in context</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="wrap ide-proof" aria-label="IDE MCP example">
+          <div class="ide-proof-head">
+            <h3>The next tool gets the same project instructions</h3>
+            <p>
+              The managed block tells the tool which MCP calls are available.
+              The transcript data stays local.
+            </p>
+          </div>
+          <IdeMock />
+        </div>
+      </section>
+
+      <section id="surfaces">
+        <div class="wrap">
+          <p class="section-label">What setup writes</p>
+          <h2>Config, instructions, skills, and a rebuildable cache</h2>
+          <p class="lead">
+            xtctx does not run a web app, API server, daemon, or durable memory
+            layer. It writes the local files needed for MCP retrieval.
+          </p>
+          <div class="surface-grid" aria-label="xtctx setup surfaces">
+            {surfaces.map((surface) => (
+              <article class="surface">
+                <span class="surface-label">{surface.label}</span>
+                <h3>{surface.title}</h3>
+                <p>{surface.body}</p>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section id="skills">
+        <div class="wrap section-grid">
+          <div>
+            <p class="section-label">Skill sync</p>
+            <h2>Selected skills stay under .xtctx/skills</h2>
+            <p class="lead">
+              The reusable project instructions you choose stay in canonical
+              local files. Setup adapts them into supported tool targets.
+            </p>
+          </div>
+          <div class="skill-layout">
+            <article class="skill-copy">
+              <h3>Canonical source</h3>
+              <p>
+                Setup creates the built in handoff skill and stores selected
+                project skills under the xtctx project directory.
+              </p>
+              <p class="skill-path">.xtctx/skills/skill-id/SKILL.md</p>
+            </article>
+            <article class="skill-copy">
+              <h3>Generated targets</h3>
+              <p>
+                xtctx writes native targets only where a real target exists. It
+                reports instruction-only and unsupported tools clearly.
+              </p>
+              <ul class="target-list" aria-label="Skill sync targets">
+                <li><span>Claude Code</span><span>project skill folder</span></li>
+                <li><span>Cursor</span><span>generated rule adapter</span></li>
+                <li><span>Copilot</span><span>instruction file adapter</span></li>
+                <li><span>Antigravity</span><span>MCP + GEMINI.md</span></li>
+              </ul>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="install">
+        <div class="wrap install-layout">
+          <div>
+            <p class="section-label">Setup</p>
+            <h2>Run setup, then status</h2>
+            <p class="lead">
+              Setup writes generated files. Status reports configured tools,
+              transcript freshness, selected skills, and unsupported targets.
+            </p>
+          </div>
+          <div class="command-list" aria-label="xtctx commands">
+            {installCommands.map((item) => (
+              <article class="command-item">
+                <div>
+                  <strong>{item.label}</strong>
+                  <code>{item.command}</code>
+                </div>
+                <button class="copy-button" type="button" data-copy-target={item.command}>Copy</button>
+                <p>{item.detail}</p>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section id="faq">
+        <div class="wrap section-grid">
+          <div>
+            <p class="section-label">FAQ</p>
+            <h2>Questions before using it in a repo</h2>
+            <p class="lead">
+              Short answers for setup, retrieval, skill sync, and tool
+              management.
+            </p>
+          </div>
+          <div class="faq-list">
+            {faqs.map((faq) => (
+              <details>
+                <summary>{faq.q}</summary>
+                <p>{faq.a}</p>
+              </details>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section class="final-cta">
+        <div class="wrap cta-panel">
+          <div>
+            <p class="section-label">Use it in one repo</p>
+            <h2>Run setup, check status, then open another tool.</h2>
+            <p>
+              No background service. No generated summary. MCP clients read
+              recent local transcript sessions on demand.
+            </p>
+          </div>
+          <a class="button" href="#install">Get started</a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="wrap">
+      <span>xtctx v{site.version} | MIT | Node 24+</span>
+      <span class="foot-links">
+        <a href={repoUrl}>GitHub</a>
+        <a href={`${repoUrl}#readme`}>Docs</a>
+        <a href={`${repoUrl}/releases`}>Releases</a>
+      </span>
+    </footer>
+
+    <script>
+      document.querySelectorAll('[data-copy-target]').forEach((button) => {
+        button.addEventListener('click', async () => {
+          const value = button.getAttribute('data-copy-target') || '';
+          try {
+            await navigator.clipboard.writeText(value);
+            const original = button.textContent || 'Copy';
+            button.textContent = 'Copied';
+            button.classList.add('copied');
+            window.setTimeout(() => {
+              button.textContent = original;
+              button.classList.remove('copied');
+            }, 1400);
+          } catch {
+            button.textContent = 'Copy failed';
+          }
+        });
+      });
+    </script>
+  </body>
+</html>

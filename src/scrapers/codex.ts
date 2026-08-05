@@ -5,6 +5,7 @@ import { createInterface } from "node:readline";
 import { glob } from "glob";
 import type { CodexChunk } from "../types/scraper.js";
 import { AbstractScraper, estimateTokens, toDate } from "./base.js";
+import { pathMatchesProject } from "../utils/project-scope.js";
 
 const SCRAPER_NAME = "codex";
 
@@ -56,6 +57,7 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
   constructor(
     private readonly codexSessionsPath: string,
     stateDir: string,
+    private readonly projectRoot?: string,
   ) {
     super(stateDir);
   }
@@ -130,6 +132,7 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
       let approvalMode: ApprovalMode = "suggest";
       let sandboxed = false;
       let messageIndex = 0;
+      let projectMatched = this.projectRoot ? false : true;
 
       for await (const line of reader) {
         if (!line.trim()) {
@@ -175,6 +178,11 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
           const payload = parsed.payload;
           if (isRecord(payload)) {
             sessionId = toStringValue(payload.id) ?? sessionIdFromFile;
+            const match = this.matchesProject(payload.cwd);
+            if (match === false) {
+              break;
+            }
+            projectMatched = match ?? projectMatched;
           }
           continue;
         }
@@ -183,12 +191,21 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
         if (eventType === "turn_context") {
           const payload = parsed.payload;
           if (isRecord(payload)) {
+            const match = this.matchesProject(payload.cwd);
+            if (match === false) {
+              break;
+            }
+            projectMatched = match ?? projectMatched;
             approvalMode =
               normalizeApprovalMode(toStringValue(payload.approval_policy)) ?? approvalMode;
             const sandboxPolicy = payload.sandbox_policy;
             sandboxed =
               isRecord(sandboxPolicy) && toStringValue(sandboxPolicy.type) !== "none";
           }
+          continue;
+        }
+
+        if (!projectMatched) {
           continue;
         }
 
@@ -334,6 +351,14 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
         messageIndex++;
       }
     }
+  }
+
+  private matchesProject(value: unknown): boolean | undefined {
+    if (!this.projectRoot) {
+      return true;
+    }
+    const cwd = toStringValue(value);
+    return cwd ? pathMatchesProject(cwd, this.projectRoot) : undefined;
   }
 
   /**

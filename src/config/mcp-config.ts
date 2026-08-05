@@ -1,14 +1,13 @@
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, extname, join } from "node:path";
+import { dirname, join } from "node:path";
 import { parse as parseToml, stringify as stringifyToml } from "@iarna/toml";
-import { parse as parseYaml } from "yaml";
 import { errorMessage } from "../utils/errors.js";
 
 /**
- * Canonical MCP server definition stored under `.xtctx/tool-config/mcp-servers/`.
- * The same definition is rendered into each tool's native config format via
- * the renderer registry below.
+ * MCP server definition rendered into each tool's native config format.
+ * setup owns the xtctx definition directly so the project has one config path:
+ * `.xtctx/config.yaml`.
  */
 export interface McpServerDefinition {
   name: string;
@@ -34,6 +33,19 @@ export interface McpSyncSummary {
   servers_loaded: number;
 }
 
+export interface McpRemoveResult {
+  tool: string;
+  path: string;
+  scope: "project" | "global";
+  removed: boolean;
+  skipped: boolean;
+  warning?: string;
+}
+
+export interface McpRemoveSummary {
+  results: McpRemoveResult[];
+}
+
 /**
  * A renderer describes how to write MCP server config for one specific tool.
  *
@@ -57,7 +69,7 @@ export interface McpRenderer {
   globalPath?: (homeDir: string) => string;
   /**
    * Top-level key under which MCP server entries live.
-   *  - "mcpServers" for Claude Code / Cursor / Gemini / Copilot CLI
+   *  - "mcpServers" for Claude Code / Cursor / Antigravity / Copilot CLI
    *  - "servers" for VS Code Copilot's `.vscode/mcp.json`
    *  - "mcp" for opencode's `opencode.json`
    *  - "mcp_servers" for Codex's `~/.codex/config.toml`
@@ -79,8 +91,8 @@ export interface McpRenderer {
  */
 const NATIVE_MCP_TOOLS: Record<string, McpRenderer> = {
   // Claude Code — `.mcp.json` at project root, `mcpServers` key, stdio entries.
-  // The "claude" alias matches DEFAULT_REGISTERED_TOOLS in policy.ts; the
-  // "claude-code" alias matches the scraper registry name in ingestion.ts.
+  // Keep both aliases because older local setup files may refer to `claude`,
+  // while the current scraper/tool id is `claude-code`.
   claude: {
     projectPath: (root) => join(root, ".mcp.json"),
   },
@@ -112,13 +124,11 @@ const NATIVE_MCP_TOOLS: Record<string, McpRenderer> = {
     buildEntry: buildCodexEntry,
   },
 
-  // Gemini CLI — JSON at `.gemini/settings.json` (project) or
-  // `~/.gemini/settings.json` (global). Uses `mcpServers` root, but entries
-  // do NOT carry a `type` field per Gemini's native format.
-  gemini: {
-    projectPath: (root) => join(root, ".gemini", "settings.json"),
-    globalPath: (home) => join(home, ".gemini", "settings.json"),
-    buildEntry: buildGeminiEntry,
+  // Google Antigravity — JSON at `~/.gemini/antigravity/mcp_config.json`.
+  // App-level config under the Gemini state directory; entries omit `type`.
+  antigravity: {
+    globalPath: (home) => join(home, ".gemini", "antigravity", "mcp_config.json"),
+    buildEntry: buildAntigravityEntry,
   },
 
   // opencode (sst/opencode-ai) — JSON at `opencode.json` (project) or
@@ -148,42 +158,13 @@ export function hasNativeMcpSupport(tool: string): boolean {
   return tool in NATIVE_MCP_TOOLS;
 }
 
-/**
- * Load all MCP server definitions from `.xtctx/tool-config/mcp-servers/`.
- */
-export async function loadMcpServerDefinitions(configRoot: string): Promise<McpServerDefinition[]> {
-  const serversDir = join(configRoot, "mcp-servers");
-  let files: string[];
-  try {
-    files = await readdir(serversDir);
-  } catch {
-    return [];
-  }
-
-  const servers: McpServerDefinition[] = [];
-  for (const file of files) {
-    const ext = extname(file);
-    if (![".json", ".yaml", ".yml"].includes(ext)) continue;
-
-    const name = file.slice(0, file.length - ext.length);
-    if (!name) continue;
-
-    try {
-      const raw = await readFile(join(serversDir, file), "utf-8");
-      const parsed = ext === ".json" ? JSON.parse(raw) : parseYaml(raw);
-      const server = normalizeMcpServer(name, parsed);
-      if (server) servers.push(server);
-    } catch {
-      // Skip unparseable files
-    }
-  }
-
-  return servers;
+export function isGlobalOnlyMcpTool(tool: string): boolean {
+  const renderer = NATIVE_MCP_TOOLS[tool];
+  return Boolean(renderer?.globalPath && !renderer.projectPath);
 }
 
 /**
  * Sync MCP server configs into native formats for tools that support them.
- * Called as Phase 4 of the sync pipeline.
  *
  * For each enabled tool with a renderer:
  *  - Prefer the project-scoped path if the renderer provides one
@@ -242,45 +223,39 @@ export async function syncToolMcpConfigs(
   return { results, servers_loaded: servers.length };
 }
 
-/**
- * Render MCP server details as markdown for embedding in managed instruction
- * blocks. Used by tools without native MCP config (e.g. instructions-only
- * fallbacks for any tool not in `NATIVE_MCP_TOOLS`).
- */
-export function renderMcpServersMarkdown(servers: McpServerDefinition[]): string[] {
-  if (servers.length === 0) return [];
+export async function removeMcpServerConfigs(
+  projectRoot: string,
+  serverName: string,
+  tools: string[],
+  options: { homeDir?: string } = {},
+): Promise<McpRemoveSummary> {
+  const home = options.homeDir ?? homedir();
+  const results: McpRemoveResult[] = [];
+  const writtenPaths = new Set<string>();
 
-  const lines: string[] = [
-    "",
-    "## MCP server connection details",
-    "",
-    "Connect these MCP servers to enable xtctx continuity:",
-    "",
-  ];
+  for (const tool of tools) {
+    const renderer = NATIVE_MCP_TOOLS[tool];
+    if (!renderer) continue;
 
-  for (const server of servers) {
-    lines.push(`### ${server.name}`);
-    lines.push(`- Transport: ${server.transport ?? "stdio"}`);
-    if (server.command) {
-      lines.push(
-        `- Command: \`${server.command}${
-          server.args?.length ? " " + server.args.join(" ") : ""
-        }\``,
-      );
+    const target = resolveConfigTarget(projectRoot, home, renderer);
+    if (!target) continue;
+
+    if (writtenPaths.has(target.path)) {
+      results.push({
+        tool,
+        path: target.path,
+        scope: target.scope,
+        removed: false,
+        skipped: true,
+      });
+      continue;
     }
-    if (server.url) {
-      lines.push(`- URL: ${server.url}`);
-    }
-    if (server.env && Object.keys(server.env).length > 0) {
-      lines.push("- Environment variables:");
-      for (const [key, value] of Object.entries(server.env)) {
-        lines.push(`  - \`${key}=${value}\``);
-      }
-    }
-    lines.push("");
+    writtenPaths.add(target.path);
+
+    results.push(await removeMcpConfig(tool, target.path, target.scope, renderer, serverName));
   }
 
-  return lines;
+  return { results };
 }
 
 // ---------------------------------------------------------------------------
@@ -299,13 +274,27 @@ async function writeMcpConfig(
     const rootKey = renderer.rootKey ?? "mcpServers";
     const buildEntry = renderer.buildEntry ?? defaultBuildEntry;
 
-    let existing: Record<string, unknown> | null = null;
     let existingContent: string | null = null;
     try {
       existingContent = await readFile(configPath, "utf-8");
-      existing = parseConfig(existingContent, format);
-    } catch {
-      // File doesn't exist or isn't parseable; treat as empty.
+    } catch (error) {
+      if (!isMissingFile(error)) {
+        return failedMcpSync(tool, configPath, scope, `Failed to read existing MCP config: ${errorMessage(error)}`);
+      }
+    }
+
+    let existing: Record<string, unknown> | null = null;
+    if (existingContent !== null) {
+      try {
+        existing = parseConfig(existingContent, format);
+      } catch (error) {
+        return failedMcpSync(
+          tool,
+          configPath,
+          scope,
+          `Failed to parse existing MCP config; leaving it unchanged: ${errorMessage(error)}`,
+        );
+      }
     }
 
     const serverEntries = buildServerEntries(servers, buildEntry);
@@ -335,15 +324,7 @@ async function writeMcpConfig(
       skipped: false,
     };
   } catch (error) {
-    return {
-      tool,
-      path: configPath,
-      scope,
-      updated: false,
-      created: false,
-      skipped: false,
-      warning: `Failed to write MCP config: ${errorMessage(error)}`,
-    };
+    return failedMcpSync(tool, configPath, scope, `Failed to write MCP config: ${errorMessage(error)}`);
   }
 }
 
@@ -396,6 +377,27 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
+function isMissingFile(error: unknown): boolean {
+  return Boolean(error && typeof error === "object" && (error as { code?: unknown }).code === "ENOENT");
+}
+
+function failedMcpSync(
+  tool: string,
+  configPath: string,
+  scope: "project" | "global",
+  warning: string,
+): McpSyncResult {
+  return {
+    tool,
+    path: configPath,
+    scope,
+    updated: false,
+    created: false,
+    skipped: false,
+    warning,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Per-tool entry builders
 // ---------------------------------------------------------------------------
@@ -431,7 +433,7 @@ function defaultBuildEntry(server: McpServerDefinition): Record<string, unknown>
  *
  *   [mcp_servers.xtctx]
  *   command = "npx"
- *   args = ["xtctx", "serve", "--mcp-only"]
+ *   args = ["-y", "xtctx"]
  */
 function buildCodexEntry(server: McpServerDefinition): Record<string, unknown> {
   const entry: Record<string, unknown> = {};
@@ -451,13 +453,13 @@ function buildCodexEntry(server: McpServerDefinition): Record<string, unknown> {
 }
 
 /**
- * Gemini CLI entry shape. Same as Codex (no `type` field) but JSON.
+ * Antigravity MCP entry shape. Same as Codex (no `type` field) but JSON.
  *
  *   "mcpServers": {
  *     "xtctx": { "command": "npx", "args": [...] }
  *   }
  */
-function buildGeminiEntry(server: McpServerDefinition): Record<string, unknown> {
+function buildAntigravityEntry(server: McpServerDefinition): Record<string, unknown> {
   return buildCodexEntry(server);
 }
 
@@ -467,7 +469,7 @@ function buildGeminiEntry(server: McpServerDefinition): Record<string, unknown> 
  *   "mcp": {
  *     "xtctx": {
  *       "type": "local",
- *       "command": ["npx", "xtctx", "serve", "--mcp-only"],
+ *       "command": ["npx", "-y", "xtctx"],
  *       "enabled": true
  *     }
  *   }
@@ -508,7 +510,7 @@ function buildOpencodeEntry(server: McpServerDefinition): Record<string, unknown
  *     "xtctx": {
  *       "type": "local",
  *       "command": "npx",
- *       "args": ["xtctx", "serve", "--mcp-only"],
+ *       "args": ["-y", "xtctx"],
  *       "tools": ["*"]
  *     }
  *   }
@@ -546,36 +548,88 @@ function buildCopilotCliEntry(server: McpServerDefinition): Record<string, unkno
 // Misc helpers
 // ---------------------------------------------------------------------------
 
-function normalizeMcpServer(name: string, raw: unknown): McpServerDefinition | null {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
-
-  const obj = raw as Record<string, unknown>;
-  const command = typeof obj.command === "string" ? obj.command : "";
-  const url = typeof obj.url === "string" ? obj.url : undefined;
-
-  if (!command && !url) return null;
-
-  return {
-    name: typeof obj.name === "string" ? obj.name : name,
-    command,
-    args: Array.isArray(obj.args)
-      ? obj.args.filter((a): a is string => typeof a === "string")
-      : undefined,
-    env: isStringRecord(obj.env) ? obj.env : undefined,
-    transport: isTransport(obj.transport) ? obj.transport : "stdio",
-    url,
-  };
-}
-
-function isStringRecord(value: unknown): value is Record<string, string> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  return Object.values(value as Record<string, unknown>).every((v) => typeof v === "string");
-}
-
-function isTransport(value: unknown): value is "stdio" | "sse" | "streamable-http" {
-  return value === "stdio" || value === "sse" || value === "streamable-http";
-}
-
 function normalizeNewlines(input: string): string {
   return input.replace(/\r\n/g, "\n");
+}
+
+async function removeMcpConfig(
+  tool: string,
+  configPath: string,
+  scope: "project" | "global",
+  renderer: McpRenderer,
+  serverName: string,
+): Promise<McpRemoveResult> {
+  try {
+    const format = renderer.format ?? "json";
+    const rootKey = renderer.rootKey ?? "mcpServers";
+
+    let existingContent: string;
+    try {
+      existingContent = await readFile(configPath, "utf-8");
+    } catch {
+      return {
+        tool,
+        path: configPath,
+        scope,
+        removed: false,
+        skipped: true,
+      };
+    }
+
+    const existing = parseConfig(existingContent, format);
+    const existingEntries =
+      isRecord(existing[rootKey]) ? { ...(existing[rootKey] as Record<string, unknown>) } : {};
+
+    if (!(serverName in existingEntries)) {
+      return {
+        tool,
+        path: configPath,
+        scope,
+        removed: false,
+        skipped: true,
+      };
+    }
+
+    delete existingEntries[serverName];
+    const updated = { ...existing, [rootKey]: existingEntries };
+    const content = serializeConfig(updated, format);
+
+    if (normalizeNewlines(existingContent) !== normalizeNewlines(content)) {
+      await mkdir(dirname(configPath), { recursive: true });
+      await writeFile(configPath, content, "utf-8");
+    }
+
+    return {
+      tool,
+      path: configPath,
+      scope,
+      removed: true,
+      skipped: false,
+    };
+  } catch (error) {
+    return {
+      tool,
+      path: configPath,
+      scope,
+      removed: false,
+      skipped: false,
+      warning: `Failed to remove MCP config: ${errorMessage(error)}`,
+    };
+  }
+}
+
+function resolveConfigTarget(
+  projectRoot: string,
+  home: string,
+  renderer: McpRenderer,
+): { path: string; scope: "project" | "global" } | null {
+  if (renderer.projectPath) {
+    return { path: renderer.projectPath(projectRoot), scope: "project" };
+  }
+
+  if (renderer.globalPath) {
+    return { path: renderer.globalPath(home), scope: "global" };
+  }
+
+  return null;
 }

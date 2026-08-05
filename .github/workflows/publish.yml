@@ -4,6 +4,12 @@ on:
   release:
     types:
       - published
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type publish to publish package.json version from this ref via OIDC"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -11,30 +17,32 @@ permissions:
 
 jobs:
   publish-npm:
-    if: github.event.release.prerelease == false
+    if: >
+      (github.event_name == 'release' && github.event.release.prerelease == false) ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.confirm == 'publish')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
       - name: Setup Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
-          node-version: 22
+          node-version: 24
           registry-url: "https://registry.npmjs.org"
           cache: npm
           cache-dependency-path: |
             package-lock.json
-            web/package-lock.json
+            landing/package-lock.json
 
       - name: Install root dependencies
         run: npm ci
 
-      - name: Install web dependencies
-        run: npm --prefix web ci
+      - name: Install landing dependencies
+        run: npm --prefix landing ci
 
       - name: Print package identity
-        run: node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));console.log(`Publishing ${p.name}@${p.version}`);"
+        run: node -e 'const fs=require("fs");const p=JSON.parse(fs.readFileSync("package.json","utf8"));console.log("Publishing "+p.name+"@"+p.version);'
 
       - name: Verify release
         run: npm run verify:release

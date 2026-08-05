@@ -1,0 +1,23 @@
+---
+import { site } from '../data/site';
+const { workflow, copy } = site;
+---
+<section id="how">
+  <div class="w">
+    <div class="section-kicker">Process</div>
+    <h2>{copy.workflow.heading}</h2>
+    <p class="lead" set:html={copy.workflow.leadHtml} />
+
+    <ol class="workflow">
+      {workflow.map((step) => (
+        <li>
+          <span class="workflow-index">{step.label}</span>
+          <div>
+            <h3>{step.title}</h3>
+            <p>{step.body}</p>
+          </div>
+        </li>
+      ))}
+    </ol>
+  </div>
+</section>

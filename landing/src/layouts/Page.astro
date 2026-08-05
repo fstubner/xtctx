@@ -2,11 +2,9 @@
 import '../styles/global.css';
 import { site } from '../data/site';
 
-const { meta, analytics, faq, version } = site;
+const { meta, analytics, faq, version, workflow } = site;
 
-// Build the JSON-LD from the same `site` data source that the visible
-// FAQ section reads from. Keeps them in lockstep — if the visible FAQ
-// changes, the schema updates automatically.
+// Build JSON-LD from the same data used by visible sections.
 const softwareApp = {
   '@type': 'SoftwareApplication',
   name: meta.siteName,
@@ -36,8 +34,20 @@ const faqPage = {
   })),
 };
 
+const howTo = {
+  '@type': 'HowTo',
+  name: 'Set up xtctx local handoff',
+  description: meta.description,
+  step: workflow.map((step, index) => ({
+    '@type': 'HowToStep',
+    position: index + 1,
+    name: step.title,
+    text: step.body,
+  })),
+};
+
 const ldJson = JSON.stringify(
-  { '@context': 'https://schema.org', '@graph': [softwareApp, faqPage] },
+  { '@context': 'https://schema.org', '@graph': [softwareApp, faqPage, howTo] },
   null,
   2,
 );
@@ -55,6 +65,7 @@ const ogDesc = meta.ogDescription ?? meta.description;
 <meta name="description" content={meta.description} />
 <meta name="author" content={meta.author.name} />
 <meta name="keywords" content={meta.keywords} />
+<meta name="robots" content="index,follow" />
 <meta property="og:type" content="website" />
 <meta property="og:title" content={meta.title} />
 <meta property="og:description" content={ogDesc} />
@@ -70,16 +81,12 @@ const ogDesc = meta.ogDescription ?? meta.description;
 <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
 <link rel="manifest" href="/site.webmanifest" />
 
-<!-- Preconnect hints for the only third-party origins this page hits.
-     Shaves ~150-300ms off the first request to each by warming DNS +
-     TLS in parallel with HTML parsing. -->
-<link rel="preconnect" href="https://api.github.com" crossorigin />
+<!-- Preconnect hints for the only third-party origins this page hits. -->
 {analytics.cloudflareToken && (
   <link rel="preconnect" href="https://static.cloudflareinsights.com" crossorigin />
 )}
 
-<!-- Structured data: SoftwareApplication + FAQPage. AI answer engines
-     cite these directly; the visible FAQ section below mirrors them. -->
+<!-- Structured data mirrors the visible product, FAQ, and setup sections. -->
 <script type="application/ld+json" set:html={ldJson} />
 
 {analytics.cloudflareToken && (

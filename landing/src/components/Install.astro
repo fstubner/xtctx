@@ -4,6 +4,7 @@ const { install, copy } = site;
 ---
 <section id="install">
   <div class="w">
+    <div class="section-kicker">Install</div>
     <h2>{copy.install.heading}</h2>
     <p class="lead" set:html={copy.install.leadHtml} />
 
@@ -12,24 +13,28 @@ const { install, copy } = site;
         {install.entries.map((e) => (
           <div class="install-card">
             <div class="install-label">{e.label}</div>
-            <div class="cmd has-copy">{e.command}</div>
+            <div class="codeblock-wrapper has-copy single-line">
+              <div class="cmd">{e.command}</div>
+            </div>
             {e.hint && <div class="install-hint" set:html={e.hint} />}
           </div>
         ))}
         <p
-          style="margin:12px 0 0;font-size:.8125rem;color:#8a8a8a"
+          class="install-note"
           set:html={install.binariesNote}
         />
       </div>
 
       <div>
         <h3 class="try-title">Try it</h3>
-        <div
-          class="tryblock"
-          set:html={install.tryCommands
-            .map((c) => `<span style="color:#888">$</span> ${c}`)
-            .join('\n')}
-        />
+        <div class="codeblock-wrapper has-copy">
+          <div
+            class="tryblock"
+            set:html={install.tryCommands
+              .map((c) => `<span class="dim">$</span> ${c}`)
+              .join('\n')}
+          />
+        </div>
       </div>
     </div>
   </div>

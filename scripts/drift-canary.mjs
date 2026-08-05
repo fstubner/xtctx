@@ -8,18 +8,17 @@
  * directly. Vitest's transformer can't strip shebangs from imported modules,
  * so the absence of one keeps `tests/canary/orchestrator.test.ts` importable.
  *
- * This is the only test that catches *upstream* drift: when Claude Code,
- * Codex CLI, or Gemini CLI changes its storage format, synthetic fixtures stay
- * "correct" but this canary will fail.
+ * This is the only test that catches *upstream* drift: when Claude Code or
+ * Codex CLI changes its storage format, synthetic fixtures stay "correct"
+ * but this canary will fail.
  *
  * Usage:
- *   node scripts/drift-canary.mjs --tool <claude-code|codex|gemini>
+ *   node scripts/drift-canary.mjs --tool <claude-code|codex>
  *   node scripts/drift-canary.mjs --help
  *
  * Env:
  *   ANTHROPIC_API_KEY   required for --tool claude-code
  *   OPENAI_API_KEY      required for --tool codex
- *   GEMINI_API_KEY      required for --tool gemini
  *
  * Exits 0 on success with a one-line summary; exits 1 on any failure with
  * details written to stderr.
@@ -43,7 +42,6 @@ Usage:
 Tools:
   claude-code   Anthropic Claude Code CLI   (needs ANTHROPIC_API_KEY)
   codex         OpenAI Codex CLI            (needs OPENAI_API_KEY)
-  gemini        Google Gemini CLI           (needs GEMINI_API_KEY)
 
 Options:
   --tool <name>     Which tool to exercise. Required.
@@ -252,53 +250,6 @@ export async function invokeCodex({ sandboxHome, prompt, timeoutMs }) {
   return { sessionPath: sessionsDir, invocationMs };
 }
 
-/**
- * Gemini CLI — `@google/gemini-cli`
- *
- * Install (Ubuntu):
- *   npm i -g @google/gemini-cli
- *
- * Non-interactive invocation uses `gemini -p "<prompt>"` which prints the
- * response and exits. Chat sessions are persisted under
- * `$HOME/.gemini/tmp/<project-hash>/chats/session-*.json`.
- */
-export async function invokeGemini({ sandboxHome, prompt, timeoutMs }) {
-  if (!process.env.GEMINI_API_KEY) {
-    throw new Error(
-      "GEMINI_API_KEY is not set — export it to run the gemini canary.",
-    );
-  }
-  if (!(await probeCommand("gemini"))) {
-    throw new Error(
-      "gemini CLI not found on PATH. Install with: npm i -g @google/gemini-cli",
-    );
-  }
-
-  const { stdout: help } = await runCommand("gemini", ["--help"], { timeoutMs: 15_000 });
-  if (!/-p\b|--prompt\b/.test(help)) {
-    throw new Error(
-      "gemini CLI --help no longer advertises -p/--prompt; invocation flag has drifted. " +
-        "Check recent @google/gemini-cli releases and update scripts/drift-canary.mjs.",
-    );
-  }
-
-  const start = Date.now();
-  await runCommand("gemini", ["-p", prompt], {
-    env: { HOME: sandboxHome, USERPROFILE: sandboxHome },
-    timeoutMs,
-    cwd: sandboxHome,
-  });
-  const invocationMs = Date.now() - start;
-
-  const historyDir = join(sandboxHome, ".gemini", "tmp");
-  if (!(await pathExists(historyDir))) {
-    throw new Error(
-      `gemini ran but did not create ${historyDir} — session-storage layout may have drifted.`,
-    );
-  }
-  return { sessionPath: historyDir, invocationMs };
-}
-
 // -----------------------------------------------------------------------------
 // Scraper dispatch
 // -----------------------------------------------------------------------------
@@ -316,13 +267,11 @@ export async function loadScrapers({ distRoot }) {
 
   const claude = await tryLoad("dist/src/scrapers/claude-code.js");
   const codex = await tryLoad("dist/src/scrapers/codex.js");
-  const gemini = await tryLoad("dist/src/scrapers/gemini.js");
 
   return {
     "claude-code": (sessionPath, stateDir) =>
       new claude.ClaudeCodeScraper(sessionPath, stateDir),
     codex: (sessionPath, stateDir) => new codex.CodexCliScraper(sessionPath, stateDir),
-    gemini: (sessionPath, stateDir) => new gemini.GeminiCliScraper(sessionPath, stateDir),
   };
 }
 
@@ -412,7 +361,7 @@ async function main() {
     return 2;
   }
 
-  const known = ["claude-code", "codex", "gemini"];
+  const known = ["claude-code", "codex"];
   if (!known.includes(args.tool)) {
     console.error(
       `drift-canary: unknown --tool ${args.tool}. Expected one of: ${known.join(", ")}`,
@@ -440,7 +389,6 @@ async function main() {
   const invokers = {
     "claude-code": invokeClaudeCode,
     codex: invokeCodex,
-    gemini: invokeGemini,
   };
 
   try {

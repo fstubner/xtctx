@@ -29,7 +29,6 @@ import { CodexCliScraper } from "@xtctx/scrapers/codex";
 import { CopilotScraper } from "@xtctx/scrapers/copilot";
 import { CopilotCliScraper } from "@xtctx/scrapers/copilot-cli";
 import { CursorScraper } from "@xtctx/scrapers/cursor";
-import { GeminiCliScraper } from "@xtctx/scrapers/gemini";
 import { OpenCodeScraper } from "@xtctx/scrapers/opencode";
 import type { ConversationChunk, ConversationScraper } from "@xtctx/types/scraper";
 
@@ -322,17 +321,6 @@ const COPILOT_BASELINE_SESSIONS = {
       },
     ],
   },
-};
-
-// Gemini: session JSON with messages array.
-const GEMINI_BASELINE = {
-  sessionId: "gemini-drift-session",
-  startTime: "2026-02-24T10:00:00Z",
-  lastUpdated: "2026-02-24T10:00:05Z",
-  messages: [
-    { id: "m1", type: "user", timestamp: "2026-02-24T10:00:00Z", content: [{ text: "hi" }] },
-    { id: "m2", type: "gemini", timestamp: "2026-02-24T10:00:05Z", content: "reply" },
-  ],
 };
 
 // ---- Cursor setup (two SQLite DBs, shared layout) ------------------------
@@ -693,42 +681,6 @@ describe("Scraper mutation drift", () => {
           JSON.stringify(mutated) + "\n",
         );
         return new CopilotCliScraper(tempDir, stateDir);
-      },
-      cases,
-    );
-  });
-
-  it("gemini: session-JSON mutations", async () => {
-    const cases: MutationCase[] = [
-      { name: "rename messages -> turns", mutation: { kind: "rename", path: "messages", newKey: "turns" } },
-      { name: "null sessionId", mutation: { kind: "null", path: "sessionId" } },
-      { name: "retype messages to object", mutation: { kind: "retype", path: "messages", to: "object" } },
-      { name: "drop messages", mutation: { kind: "drop", path: "messages" } },
-      {
-        name: "unknown top-level field",
-        mutation: { kind: "unknown", path: "", key: "newMeta" },
-        expectation: "silent-ok",
-      },
-    ];
-
-    await runScraperMutationBattery(
-      "gemini",
-      async () => {
-        const [tempDir, stateDir] = await makeTempDirs();
-        tempDirs.push(tempDir, stateDir);
-        const chatDir = join(tempDir, "proj", "chats");
-        await mkdir(chatDir, { recursive: true });
-        await writeFile(join(chatDir, "session-x.json"), JSON.stringify(GEMINI_BASELINE));
-        return new GeminiCliScraper(tempDir, stateDir);
-      },
-      async (mutation) => {
-        const [tempDir, stateDir] = await makeTempDirs();
-        tempDirs.push(tempDir, stateDir);
-        const chatDir = join(tempDir, "proj", "chats");
-        await mkdir(chatDir, { recursive: true });
-        const mutated = applyMutation(GEMINI_BASELINE, mutation);
-        await writeFile(join(chatDir, "session-x.json"), JSON.stringify(mutated));
-        return new GeminiCliScraper(tempDir, stateDir);
       },
       cases,
     );

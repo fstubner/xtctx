@@ -3,11 +3,9 @@ import { resolve } from "node:path";
 
 const checklistPath = resolve(process.cwd(), "docs", "security", "owasp-asvs-lite.md");
 const requiredHeadings = [
-  "## Authentication",
-  "## Access Control",
+  "## Local-Only Execution",
   "## Input and Output Handling",
-  "## API and Web Security",
-  "## Logging and Monitoring",
+  "## File Safety",
   "## Supply Chain and Release Security",
 ];
 

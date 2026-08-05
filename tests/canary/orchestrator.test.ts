@@ -56,7 +56,6 @@ describe("runCanary", () => {
     const invokers = {
       "claude-code": async () => ({ sessionPath: "/x", invocationMs: 10 }),
       codex: async () => ({ sessionPath: "/x", invocationMs: 10 }),
-      gemini: async () => ({ sessionPath: "/x", invocationMs: 10 }),
     };
     const chunks = [
       makeChunk({ role: "user", content: "hi" }),
@@ -69,10 +68,6 @@ describe("runCanary", () => {
       },
       codex: () => {
         picked = "codex";
-        return fakeScraper(chunks);
-      },
-      gemini: () => {
-        picked = "gemini";
         return fakeScraper(chunks);
       },
     };
@@ -170,18 +165,18 @@ describe("runCanary", () => {
   it("propagates invoker errors with a message naming the tool", async () => {
     await expect(
       runCanary({
-        tool: "gemini",
+        tool: "codex",
         invokers: {
-          gemini: async () => {
-            throw new Error("gemini CLI not found on PATH");
+          codex: async () => {
+            throw new Error("codex CLI not found on PATH");
           },
         },
         scraperFactories: {
-          gemini: () => fakeScraper([]),
+          codex: () => fakeScraper([]),
         },
         ...baseArgs,
       }),
-    ).rejects.toThrow(/gemini CLI not found/);
+    ).rejects.toThrow(/codex CLI not found/);
   });
 
   it("rejects unknown tool names with a helpful list", async () => {

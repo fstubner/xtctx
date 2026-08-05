@@ -9,10 +9,12 @@
     "preview": "astro preview",
     "check": "astro check"
   },
-  "dependencies": {
-    "astro": "^5.0.0"
+  "engines": {
+    "node": ">=24.0.0"
   },
+  "dependencies": {},
   "devDependencies": {
+    "astro": "^6.3.1",
     "typescript": "^5.5.0"
   }
 }
