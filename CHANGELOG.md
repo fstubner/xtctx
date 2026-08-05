@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.11.1](https://github.com/fstubner/xtctx/compare/xtctx-v0.11.0...xtctx-v0.11.1) (2026-08-05)
+
+
+### Bug Fixes
+
+* expect handoff_manifest in public demo smoke ([29de7b9](https://github.com/fstubner/xtctx/commit/29de7b9721a92354f3892762febb55042fbe2499))
+* expect handoff_manifest in public demo smoke ([3041cc3](https://github.com/fstubner/xtctx/commit/3041cc39853c2935e838962c5a0b264c799fac53))
+
 ## [0.11.0](https://github.com/fstubner/xtctx/compare/xtctx-v0.10.0...xtctx-v0.11.0) (2026-08-05)
 
 
