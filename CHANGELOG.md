@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.11.0](https://github.com/fstubner/xtctx/compare/xtctx-v0.10.0...xtctx-v0.11.0) (2026-08-05)
+
+
+### Features
+
+* ship local handoff pivot (Antigravity-only Google support) ([#69](https://github.com/fstubner/xtctx/issues/69)) ([971d745](https://github.com/fstubner/xtctx/commit/971d7451ffbcf0628949822d238939f966b9da41))
+
 ## [0.10.0](https://github.com/fstubner/xtctx/compare/xtctx-v0.9.1...xtctx-v0.10.0) (2026-05-07)
 
 
