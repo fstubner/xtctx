@@ -1,5 +1,6 @@
 import { join, resolve } from "node:path";
 import { inspectManagedFile, pathExists } from "../config/setup.js";
+import { inspectSkillStatus } from "../config/skills.js";
 import { createProjectServices, type ProjectServices } from "../runtime/services.js";
 import { SUPPORTED_TOOLS } from "../tools/sources.js";
 import { readXtctxPackage } from "../utils/package-info.js";
@@ -17,6 +18,7 @@ export async function runStatus(options: StatusOptions = {}): Promise<void> {
 export async function renderStatusBlock(services: ProjectServices): Promise<string> {
   const { version } = readXtctxPackage(import.meta.url);
   const status = await services.sessions.getStatus();
+  const skills = await inspectSkillStatus(services.projectRoot, services.configPath);
   const configPresent = await pathExists(services.configPath);
   const managed = await Promise.all(
     managedTargets(services.projectRoot).map(async (target) => ({
@@ -37,6 +39,9 @@ export async function renderStatusBlock(services: ProjectServices): Promise<stri
     `Data     ${status.sessions} sessions, ${status.messages} messages, ` +
       `${status.retrieval_units} retrieval windows, ${status.vectorized_units} vectorized`,
   );
+  if (status.last_scan_at === null && status.sessions === 0) {
+    lines.push("Next     No sessions are indexed yet. Ask a configured agent to call xtctx_recent_sessions.");
+  }
   lines.push("");
   lines.push("Tools:");
 
@@ -48,6 +53,20 @@ export async function renderStatusBlock(services: ProjectServices): Promise<stri
       `  ${marker} ${tool.tool.padEnd(13)} ${tool.detected ? "detected" : "not detected"}; ` +
         `${tool.indexed_sessions} sessions; hook: ${hook}`,
     );
+  }
+
+  lines.push("");
+  lines.push("Skills:");
+  lines.push(`  Source ${skills.sourceDir}`);
+  for (const skill of skills.selected) {
+    const marker = skill.exists ? "ok" : "missing";
+    const hash = skill.hash ? ` ${skill.hash.slice(0, 18)}` : "";
+    lines.push(`  ${marker.padEnd(8)} ${skill.id}${hash}`);
+  }
+  for (const target of skills.targets) {
+    const skillPart = target.skillId ? ` ${target.skillId}` : "";
+    const pathPart = target.path ? ` ${target.path}` : "";
+    lines.push(`  ${target.state.padEnd(13)} ${target.tool} ${target.mode}${skillPart}${pathPart}`);
   }
 
   lines.push("");
@@ -75,7 +94,7 @@ function managedTargets(projectRoot: string): Array<{ label: string; path: strin
   return [
     { label: "codex/opencode", path: join(projectRoot, "AGENTS.md") },
     { label: "claude-code", path: join(projectRoot, "CLAUDE.md") },
-    { label: "gemini", path: join(projectRoot, "GEMINI.md") },
+    { label: "antigravity", path: join(projectRoot, "GEMINI.md") },
     { label: "cursor", path: join(projectRoot, ".cursor", "rules", "xtctx.mdc") },
     { label: "copilot", path: join(projectRoot, ".github", "copilot-instructions.md") },
   ];

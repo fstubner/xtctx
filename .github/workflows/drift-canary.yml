@@ -21,7 +21,6 @@ on:
           - all
           - claude-code
           - codex
-          - gemini
 
 permissions:
   contents: read
@@ -33,7 +32,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        tool: [claude-code, codex, gemini]
+        tool: [claude-code, codex]
     steps:
       - name: Skip tool when workflow_dispatch selects a single one
         if: >
@@ -77,10 +76,6 @@ jobs:
         if: matrix.tool == 'codex'
         run: npm i -g @openai/codex
 
-      - name: Install gemini CLI
-        if: matrix.tool == 'gemini'
-        run: npm i -g @google/gemini-cli
-
       - name: Run canary (${{ matrix.tool }})
         id: canary
         if: >
@@ -90,7 +85,6 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           set +e
           node scripts/drift-canary.mjs --tool ${{ matrix.tool }} 2>canary-stderr.log | tee canary-stdout.log

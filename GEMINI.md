@@ -16,12 +16,17 @@ Do not rely on this block for a generated summary; raw local transcripts are aut
 - Call `xtctx_search_sessions` only when you need semantic or keyword search across chronological transcript windows.
 - Use `xtctx_continuity_status` for wiring and freshness diagnostics.
 
+## Synced Skills
+- Canonical project skills live in `.xtctx/skills`.
+- If a task matches a synced skill, read that skill file before following it.
+- xtctx-handoff: `.xtctx/skills/xtctx-handoff/SKILL.md`
+
 ## MCP
 - Command: `npx -y xtctx`
 - Transport: stdio
 
 ## Notes
-- Indexing is on-demand from MCP calls and real startup hooks.
+- Indexing is on-demand from MCP recent, detail, and search calls.
 - There is no xtctx daemon, API server, dashboard, durable memory, or generated brief.
 - Content outside this managed block is preserved.
 <!-- xtctx:end -->

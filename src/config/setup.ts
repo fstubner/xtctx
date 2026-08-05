@@ -1,7 +1,17 @@
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { stringify as stringifyYaml } from "yaml";
-import { syncToolMcpConfigs, type McpServerDefinition } from "./mcp-config.js";
+import {
+  isGlobalOnlyMcpTool,
+  syncToolMcpConfigs,
+  type McpServerDefinition,
+} from "./mcp-config.js";
+import {
+  renderSyncedSkillsBlock,
+  syncProjectSkills,
+  type ProjectSkillConfig,
+  type SkillSelection,
+} from "./skills.js";
 import { SUPPORTED_TOOLS, type HookMode } from "../tools/sources.js";
 
 const MARKERS = {
@@ -14,6 +24,8 @@ export interface SetupOptions {
   yes?: boolean;
   repair?: boolean;
   homeDir?: string;
+  selectedSkillIds?: string[];
+  includeGlobalMcp?: boolean;
 }
 
 export interface SetupResult {
@@ -53,22 +65,30 @@ export async function setupProject(options: SetupOptions = {}): Promise<SetupRes
     await rm(join(xtctxDir, ".store"), { recursive: true, force: true });
     await rm(stateDir, { recursive: true, force: true });
     await rm(join(xtctxDir, "tool-config"), { recursive: true, force: true });
-    await rm(join(xtctxDir, "skills"), { recursive: true, force: true });
   }
 
   await mkdir(stateDir, { recursive: true });
 
+  const skillSync = await syncProjectSkills({
+    projectRoot,
+    configPath,
+    selectedSkillIds: options.selectedSkillIds,
+    homeDir: options.homeDir,
+  });
+  writes.push(...skillSync.writes);
+  warnings.push(...skillSync.warnings);
+
   writes.push({
     path: configPath,
     kind: "config",
-    changed: await writeIfChanged(configPath, renderProjectConfig(projectRoot)),
+    changed: await writeIfChanged(configPath, renderProjectConfig(projectRoot, skillSync.config)),
   });
 
   const serverDefinition = xtctxServerDefinition();
   const mcpSummary = await syncToolMcpConfigs(
     projectRoot,
     [serverDefinition],
-    SUPPORTED_TOOLS.map((tool) => tool.id),
+    supportedMcpTools(options.includeGlobalMcp),
     options.homeDir ? { homeDir: options.homeDir } : {},
   );
 
@@ -89,6 +109,7 @@ export async function setupProject(options: SetupOptions = {}): Promise<SetupRes
       tool: target.tool,
       hookMode: target.hookMode,
       serverDefinition,
+      skills: skillSync.selected,
     });
     writes.push({
       path: target.path,
@@ -106,36 +127,69 @@ export async function setupProject(options: SetupOptions = {}): Promise<SetupRes
   return { projectRoot, configPath, writes, warnings };
 }
 
-export function describeSetupPlan(projectPath?: string): {
+export function describeSetupPlan(
+  projectPath?: string,
+  selectedSkillIds: string[] = ["xtctx-handoff"],
+  includeGlobalMcp = false,
+): {
   projectRoot: string;
   writes: PlannedSetupWrite[];
 } {
   const projectRoot = resolve(projectPath ?? process.cwd());
+  const skillIds = [...new Set(["xtctx-handoff", ...selectedSkillIds])];
   const writes: PlannedSetupWrite[] = [
     { path: join(projectRoot, ".xtctx", "config.yaml"), kind: "config" },
     { path: join(projectRoot, ".mcp.json"), kind: "mcp:claude-code" },
     { path: join(projectRoot, ".cursor", "mcp.json"), kind: "mcp:cursor" },
     { path: join(projectRoot, ".vscode", "mcp.json"), kind: "mcp:copilot" },
     { path: join(projectRoot, ".codex", "config.toml"), kind: "mcp:codex" },
-    { path: join(projectRoot, ".gemini", "settings.json"), kind: "mcp:gemini" },
     { path: join(projectRoot, "opencode.json"), kind: "mcp:opencode" },
     { path: join(projectRoot, "AGENTS.md"), kind: "memory:codex/opencode" },
     { path: join(projectRoot, "CLAUDE.md"), kind: "memory:claude-code" },
-    { path: join(projectRoot, "GEMINI.md"), kind: "memory:gemini" },
+    { path: join(projectRoot, "GEMINI.md"), kind: "memory:antigravity" },
     { path: join(projectRoot, ".cursor", "rules", "xtctx.mdc"), kind: "memory:cursor" },
     { path: join(projectRoot, ".github", "copilot-instructions.md"), kind: "memory:copilot" },
     { path: join(projectRoot, ".claude", "hooks.json"), kind: "hook:claude-code" },
   ];
+
+  for (const skillId of skillIds) {
+    writes.push(
+      { path: join(projectRoot, ".xtctx", "skills", skillId, "SKILL.md"), kind: `skill-source:${skillId}` },
+      { path: join(projectRoot, ".claude", "skills", skillId, "SKILL.md"), kind: `skill:claude-code:${skillId}` },
+      { path: join(projectRoot, ".cursor", "rules", "xtctx-skills", `${skillId}.mdc`), kind: `skill:cursor:${skillId}` },
+      {
+        path: join(projectRoot, ".github", "instructions", `xtctx-${skillId}.instructions.md`),
+        kind: `skill:copilot:${skillId}`,
+      },
+    );
+  }
   const home = process.env.USERPROFILE ?? process.env.HOME;
   if (home) {
-    writes.push({ path: join(home, ".copilot", "mcp-config.json"), kind: "mcp:copilot-cli" });
     writes.push({
       path: join(home, ".gemini", "antigravity", "mcp_config.json"),
       kind: "mcp:antigravity",
     });
   }
+  if (includeGlobalMcp && home) {
+    writes.push({ path: join(home, ".copilot", "mcp-config.json"), kind: "mcp:copilot-cli" });
+  }
 
   return { projectRoot, writes };
+}
+
+function supportedMcpTools(includeGlobalMcp = false): string[] {
+  return SUPPORTED_TOOLS
+    .filter((tool) => {
+      if (!isGlobalOnlyMcpTool(tool.id)) {
+        return true;
+      }
+      // Antigravity only has app-level MCP config; always wire it on setup.
+      if (tool.id === "antigravity") {
+        return true;
+      }
+      return includeGlobalMcp;
+    })
+    .map((tool) => tool.id);
 }
 
 
@@ -165,7 +219,7 @@ export function xtctxServerDefinition(): McpServerDefinition {
   };
 }
 
-function renderProjectConfig(projectRoot: string): string {
+function renderProjectConfig(projectRoot: string, skills: ProjectSkillConfig): string {
   const config = {
     project: {
       root: projectRoot,
@@ -179,6 +233,7 @@ function renderProjectConfig(projectRoot: string): string {
       command: "npx",
       args: ["-y", "xtctx"],
     },
+    skills,
     tools: Object.fromEntries(
       SUPPORTED_TOOLS.map((tool) => [
         tool.id,
@@ -207,7 +262,7 @@ function memoryTargets(projectRoot: string): MemoryTarget[] {
       hookMode: "executable",
     },
     {
-      tool: "gemini",
+      tool: "antigravity",
       path: join(projectRoot, "GEMINI.md"),
       hookMode: "instruction-only",
     },
@@ -231,6 +286,7 @@ function renderManagedBlock(input: {
   tool: string;
   hookMode: HookMode;
   serverDefinition: McpServerDefinition;
+  skills: SkillSelection[];
 }): string {
   const command = [input.serverDefinition.command, ...(input.serverDefinition.args ?? [])].join(" ");
   return [
@@ -251,13 +307,15 @@ function renderManagedBlock(input: {
     "- Call `xtctx_session_detail` with a `session_ref` for the raw transcript messages.",
     "- Call `xtctx_search_sessions` only when you need semantic or keyword search across chronological transcript windows.",
     "- Use `xtctx_continuity_status` for wiring and freshness diagnostics.",
+    "- External orchestrators can call `xtctx_handoff_manifest` for stable session references and raw-detail pointers; it does not persist task state.",
     "",
+    ...renderSyncedSkillsBlock(input.skills),
     "## MCP",
     `- Command: \`${command}\``,
     "- Transport: stdio",
     "",
     "## Notes",
-    "- Indexing is on-demand from MCP calls and real startup hooks.",
+    "- Indexing is on-demand from MCP recent, detail, and search calls.",
     "- There is no xtctx daemon, API server, dashboard, durable memory, or generated brief.",
     "- Content outside this managed block is preserved.",
     MARKERS.end,

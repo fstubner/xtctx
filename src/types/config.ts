@@ -11,6 +11,11 @@ export interface XtctxConfig {
     command?: string;
     args?: string[];
   };
+  skills?: {
+    sourceDir?: string;
+    selected?: Record<string, { hash?: string; source?: string }>;
+    targets?: Record<string, { mode?: string; path?: string }>;
+  };
   tools?: Record<string, ToolConfig>;
 }
 

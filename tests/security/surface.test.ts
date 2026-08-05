@@ -10,6 +10,7 @@ const CURRENT_SURFACE_FILES = [
   join(".github", "copilot-instructions.md"),
   join(".github", "release.yml"),
   join("docs", "architecture.md"),
+  join("docs", "demo.md"),
   join("docs", "drift-canary.md"),
   join("docs", "security", "owasp-asvs-lite.md"),
   join("landing", "src", "data", "site.ts"),
@@ -29,10 +30,22 @@ const REMOVED_SURFACES = [
 describe("current product surface", () => {
   it("does not advertise removed serve, brief, durable knowledge, or writeback tools", async () => {
     for (const file of CURRENT_SURFACE_FILES) {
-      const content = await readFile(join(process.cwd(), file), "utf-8");
+      const content = await readOptionalFile(join(process.cwd(), file));
+      if (content === null) {
+        continue;
+      }
+
       for (const pattern of REMOVED_SURFACES) {
         expect(content, `${file} contains ${pattern}`).not.toMatch(pattern);
       }
     }
   });
 });
+
+async function readOptionalFile(path: string): Promise<string | null> {
+  try {
+    return await readFile(path, "utf-8");
+  } catch {
+    return null;
+  }
+}

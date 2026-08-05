@@ -23,6 +23,7 @@ export interface Hero {
   badge: string;
   heading: string;
   subhead: string;
+  proof: string[];
   quickInstall: string;
   installLinkLabel: string;
   heroImage?: string;
@@ -31,6 +32,17 @@ export interface Hero {
   heroImageHeight?: number;
   heroImageWebp?: string;
   sourceUrl: string;
+}
+
+export interface SectionCopy {
+  heading: string;
+  leadHtml: string;
+}
+
+export interface WorkflowStep {
+  label: string;
+  title: string;
+  body: string;
 }
 
 export interface SurfaceCard {
@@ -64,18 +76,8 @@ export interface BuiltWithEntry {
   url: string;
 }
 
-export interface SocialProof {
-  repo: string;
-  showLiveStats?: boolean;
-}
-
 export interface Analytics {
   cloudflareToken?: string;
-}
-
-export interface SectionCopy {
-  heading: string;
-  leadHtml: string;
 }
 
 export interface SiteData {
@@ -83,10 +85,12 @@ export interface SiteData {
   branding: Branding;
   hero: Hero;
   copy: {
+    workflow: SectionCopy;
     surfaces: SectionCopy;
     install: SectionCopy;
     faq: SectionCopy;
   };
+  workflow: WorkflowStep[];
   surfaces: SurfaceCard[];
   install: {
     entries: InstallEntry[];
@@ -95,7 +99,6 @@ export interface SiteData {
   };
   faq: FaqItem[];
   builtWith: BuiltWithEntry[];
-  social: SocialProof;
   analytics: Analytics;
   version: string;
 }
@@ -106,158 +109,205 @@ const REPO_URL = `https://github.com/${REPO}`;
 export const site: SiteData = {
   meta: {
     domain: 'https://xtctx.com',
-    title: 'xtctx - Local handoff for AI coding agents',
+    title: 'xtctx - Move between coding agents without starting over',
     description:
-      'xtctx configures MCP and tool instruction files so AI coding agents can retrieve recent local transcript sessions when you switch tools.',
+      'xtctx writes local MCP config and managed instructions so AI coding tools can read recent transcript sessions from the current repo.',
     ogDescription:
-      'Local cross-tool handoff for AI coding agents. Setup, status, MCP transcript retrieval.',
+      'Local setup, status, skill sync, and MCP transcript retrieval for AI coding tools.',
     keywords:
-      'mcp server, model context protocol, ai coding, claude code, cursor, github copilot, codex, gemini cli, google antigravity, opencode, local transcripts, cross-tool handoff',
+      'mcp server, model context protocol, ai coding agents, synced skills, claude code, cursor, codex, google antigravity, opencode, local transcripts, cross tool handoff, semantic transcript search',
     siteName: 'xtctx',
     author: { name: 'Felix Stubner', url: 'https://github.com/fstubner' },
     ogImage: 'https://xtctx.com/favicon.svg',
     faviconPath: '/favicon.svg',
-    themeColor: '#111',
+    themeColor: '#0a1424',
   },
 
   branding: {
     wordmarkAlt: 'xtctx',
-    accentGradient: 'linear-gradient(90deg,#7c5cff,#22b8cf 50%,#0aae7a)',
-    bg: '#111',
-    fg: '#d4d4d4',
+    accentGradient: 'linear-gradient(90deg,#e8dfc8,#e8b878)',
+    bg: '#0a1424',
+    fg: '#e8dfc8',
   },
 
   hero: {
-    badge: 'Open source · MIT · Node >=24 · Local-first',
-    heading: 'Switch AI coding tools without losing the thread',
+    badge: 'Local transcript retrieval for AI coding tools',
+    heading: 'Keep project context portable across coding tools.',
     subhead:
-      'xtctx wires MCP, hooks, and managed instructions so the next agent can list recent local sessions and open the raw transcript detail it needs.',
+      'Move between supported coding agents without starting over. xtctx writes local MCP configs and managed instructions so the next agent can retrieve recent context through MCP.',
+    proof: ['Setup writes local config', 'Raw transcripts stay local', 'Five MCP tools'],
     quickInstall: 'npx -y xtctx setup',
-    installLinkLabel: 'Setup options ↓',
+    installLinkLabel: 'Get started',
     sourceUrl: REPO_URL,
   },
 
   copy: {
-    surfaces: {
-      heading: 'What it does',
+    workflow: {
+      heading: 'What happens after setup',
       leadHtml:
-        'Small surface, direct mechanics: setup wiring, status diagnostics, and MCP transcript retrieval. <a href="https://github.com/fstubner/xtctx#readme">Full README →</a>',
+        'xtctx is not a dashboard or memory layer. It is project-local wiring plus MCP retrieval against transcript files your tools already write.',
+    },
+    surfaces: {
+      heading: 'What xtctx writes',
+      leadHtml:
+        'Setup writes config, managed instructions, selected skill targets, and a rebuildable SQLite cache. Raw transcript files remain the source of truth.',
     },
     install: {
-      heading: 'Get started',
+      heading: 'Run setup, then status',
       leadHtml:
-        'Run setup once per project, then let MCP retrieve sessions on demand.',
+        'Start with setup in the repo. Use status to check configured tools, transcript freshness, selected skills, and drift.',
     },
     faq: {
-      heading: 'FAQ',
-      leadHtml: 'The questions people ask before trusting local handoff.',
+      heading: 'Questions before using it in a repo',
+      leadHtml: 'Short answers about setup, local storage, transcript limits, and what xtctx does not do.',
     },
   },
 
+  workflow: [
+    {
+      label: '01',
+      title: 'Run setup',
+      body:
+        'xtctx writes project-level MCP config and managed instruction blocks. Antigravity MCP is always configured. Copilot CLI still requires --global-mcp.',
+    },
+    {
+      label: '02',
+      title: 'Open another tool',
+      body:
+        'The tool reads the managed instructions and can start xtctx over stdio as an MCP server.',
+    },
+    {
+      label: '03',
+      title: 'Read recent sessions',
+      body:
+        'MCP calls list sessions, open raw transcript messages, and search chronological transcript windows.',
+    },
+    {
+      label: '04',
+      title: 'Check status',
+      body:
+        'Status reports configured tools, selected skills, transcript freshness, and unsupported targets.',
+    },
+  ],
+
   surfaces: [
     {
-      title: 'MCP retrieves raw transcript context',
+      title: 'Five MCP tools',
       body:
-        'Agents call <code>xtctx_recent_sessions</code> to find recent work, <code>xtctx_search_sessions</code> to search chronological transcript windows, then <code>xtctx_session_detail</code> to read the relevant raw messages. No generated narrative summary is treated as truth.',
-      codeHtml: `<span style="color:#888">// handoff flow</span>
-<span style="color:#7c9fc7">xtctx_recent_sessions</span>({ <span style="color:#7c9fc7">limit</span>: <span style="color:#b48ead">5</span> })
-<span style="color:#7c9fc7">xtctx_session_detail</span>({ <span style="color:#7c9fc7">session_ref</span>, <span style="color:#7c9fc7">limit</span>: <span style="color:#b48ead">50</span> })
-<span style="color:#7c9fc7">xtctx_search_sessions</span>({ <span style="color:#7c9fc7">query</span>: <span style="color:#8fbc7f">"auth callback"</span> })`,
+        'Agents can list recent sessions, open session detail, search transcript windows, check continuity status, and fetch a handoff manifest.',
+      codeHtml: `<span class="dim">agent calls</span> xtctx_recent_sessions
+<span class="dim">agent opens</span> xtctx_session_detail
+<span class="dim">agent searches</span> xtctx_search_sessions
+<span class="dim">agent checks</span> xtctx_continuity_status
+<span class="dim">orchestrator reads</span> xtctx_handoff_manifest`,
     },
     {
-      title: 'Setup owns the wiring',
+      title: 'Managed setup files',
       body:
-        '<code>xtctx setup</code> writes MCP config as <code>npx -y xtctx</code>, installs executable hooks only where they exist, and repairs stale generated blocks without touching user notes outside the fences.',
+        'Setup owns generated instruction blocks, MCP config, and selected skill targets so the repo wiring is repeatable.',
       flip: true,
-      codeHtml: `<span style="color:#888">$</span> npx -y xtctx setup
-<span style="color:#888">updated</span> config .xtctx/config.yaml
-<span style="color:#888">updated</span> mcp:codex .codex/config.toml
-<span style="color:#888">updated</span> instructions:codex AGENTS.md
-<span style="color:#888">updated</span> hook:claude-code .claude/hooks.json`,
+      codeHtml: `<span class="dim">$</span> <span class="cmd-text">npx -y xtctx setup</span>
+<span class="success-text">updated</span> .xtctx/config.yaml
+<span class="success-text">updated</span> .xtctx/skills/xtctx-handoff/SKILL.md
+<span class="success-text">updated</span> AGENTS.md
+<span class="success-text">updated</span> .codex/config.toml
+<span class="success-text">verified</span> MCP config`,
     },
     {
-      title: 'Status reports actual state',
+      title: 'Status output',
       body:
-        '<code>xtctx status</code> shows detected transcript stores, indexed sessions, hook mode, MCP command, managed-block drift, and stale references. It does not pretend a background service is running.',
-      codeHtml: `<span style="color:#888">$</span> xtctx status
-xtctx 0.10.0 - handoff status
-MCP      npx -y xtctx
-Data     12 sessions, 164 messages, 42 retrieval windows
-
-Tools:
-  + codex         detected; 4 sessions; hook: instruction-only
-  + claude-code   detected; 8 sessions; hook: executable`,
+        'Status reports configured tools, transcript freshness, selected skills, managed blocks, and unsupported targets.',
+      codeHtml: `<span class="dim">$</span> <span class="cmd-text">npx -y xtctx status</span>
+<span class="success-text">configured</span>
+<span class="info-text">mcp command</span> npx -y xtctx
+<span class="info-text">cache</span> 12 sessions
+<span class="info-text">codex</span> instruction only
+<span class="info-text">claude-code</span> executable hook`,
     },
     {
-      title: 'Local cache, authoritative sources',
+      title: 'Search stays local',
       body:
-        'xtctx stores a rebuildable SQLite handoff index under <code>.xtctx/state/</code>, including local semantic vectors for chronological transcript windows. The source transcripts in each tool remain authoritative, and MCP calls update the cache lazily.',
+        'Raw transcript files remain the source of truth. SQLite is a rebuildable local index for ordered lookup and fallback keyword search.',
       flip: true,
-      codeHtml: `<span style="color:#888">$</span> ls .xtctx/
-config.yaml      state/
-
-<span style="color:#888">$</span> sqlite3 .xtctx/state/xtctx.db '.tables'
-messages      retrieval_units  retrieval_unit_vectors
-messages_fts  sessions         settings`,
+      codeHtml: `<span class="info-text">cache</span> <span class="var-text">.xtctx/state/xtctx.db</span>
+├── <span class="var-text">sessions</span>
+├── <span class="var-text">messages</span>
+├── <span class="var-text">retrieval_windows</span>
+├── <span class="var-text">vectors</span>
+└── <span class="var-text">fts_index</span>`,
     },
   ],
 
   install: {
     entries: [
       {
-        label: 'Project setup',
+        label: 'Set up this repo',
         command: 'npx -y xtctx setup',
         hint:
-          'Detects tools, writes MCP config, installs supported hooks, and repairs managed instruction blocks.',
+        'Writes project-level MCP config, syncs selected skills, always configures Antigravity MCP, and repairs managed instruction blocks. Use --global-mcp only for Copilot CLI.',
       },
       {
-        label: 'Check wiring',
+        label: 'Check what is wired',
         command: 'npx -y xtctx status',
         hint:
-          'Shows real handoff state and repair hints for stale generated files.',
+          'Reports configured tools, cached transcript freshness, skill drift, managed blocks, and repair hints.',
       },
       {
-        label: 'From source',
-        command: 'git clone https://github.com/fstubner/xtctx && cd xtctx && npm ci && npm run build',
+        label: 'Start MCP over stdio',
+        command: 'npx -y xtctx',
         hint:
-          'Useful for development. Then run <code>node dist/src/cli/index.js --help</code>.',
+          'Starts the MCP server for clients. In a normal terminal it prints setup and status help.',
       },
     ],
     tryCommands: [
-      'xtctx setup',
-      'xtctx status',
-      'xtctx --help',
+      'npx -y xtctx setup',
+      'npx -y xtctx status',
+      'npx -y xtctx --help',
     ],
     binariesNote:
-      'Read the <a href="https://github.com/fstubner/xtctx#readme" style="color:#ccc;text-decoration:underline;text-underline-offset:3px">README</a> for supported tools and MCP configuration details.',
+      'Read the <a href="https://github.com/fstubner/xtctx#readme">README</a> for supported tools and local transcript notes.',
   },
 
   faq: [
     {
-      q: 'Does xtctx run a background service?',
-      a: 'No. xtctx has no daemon or web service in the handoff design. MCP calls and real startup hooks update the local cache on demand.',
+      q: 'What problem does xtctx solve?',
+      a: 'It lets a configured AI coding tool read recent local transcript sessions from the current repo through MCP.',
     },
     {
-      q: 'Does it summarize my sessions?',
-      a: 'No. Managed blocks point the agent to transcript retrieval tools. Raw local transcript messages are the source of truth.',
+      q: 'Does xtctx run a background service?',
+      a: 'No. xtctx has no daemon, API server, dashboard, watcher, or web service. MCP retrieval calls update the local cache on demand.',
+    },
+    {
+      q: 'Does xtctx sync skills?',
+      a: 'Yes. Setup writes the built-in xtctx-handoff skill, inventories compatible skills from connected tools, and syncs selected project skills to supported targets.',
+    },
+    {
+      q: 'Does it summarize sessions?',
+      a: 'No. xtctx points agents to recent raw transcript messages. Those messages stay the source of truth.',
+    },
+    {
+      q: 'What are the limits?',
+      a: 'xtctx is local-only. Transcript formats can change upstream, semantic vectors are created lazily, and keyword fallback is expected when local vector generation is unavailable.',
+    },
+    {
+      q: 'Can I test it without private transcripts?',
+      a: 'Yes. The public demo smoke creates synthetic Claude Code and Codex transcript stores in a temporary project, then calls the built MCP server over stdio.',
+      aHtml:
+        'Yes. The <a href="https://github.com/fstubner/xtctx/blob/main/docs/demo.md">public demo smoke</a> creates synthetic Claude Code and Codex transcript stores in a temporary project, then calls the built MCP server over stdio.',
     },
     {
       q: 'Which tools are supported?',
-      a: 'Claude Code, Cursor, Codex, GitHub Copilot, Gemini CLI, Google Antigravity, opencode, and GitHub Copilot CLI.',
+      a: 'Claude Code, Cursor, Codex, GitHub Copilot, Google Antigravity, opencode, and GitHub Copilot CLI.',
     },
     {
-      q: 'Where does the data live?',
-      a: 'Project configuration lives in .xtctx/config.yaml. The rebuildable local cache lives in .xtctx/state/xtctx.db. Source transcripts stay in each tool\'s own local storage; Antigravity transcript steps are read from its local language server when the app is running.',
-    },
-    {
-      q: 'What does the MCP integration look like?',
-      a: 'Generated MCP config uses command "npx" with args ["-y", "xtctx"]. The exposed tools are xtctx_recent_sessions, xtctx_session_detail, xtctx_search_sessions, and xtctx_continuity_status.',
+      q: 'Where does data live?',
+      a: 'Project config lives in .xtctx/config.yaml. The rebuildable SQLite cache lives in .xtctx/state/xtctx.db. Source transcripts stay in each tool storage location.',
     },
     {
       q: 'Is it open source?',
-      a: 'Yes. xtctx is MIT-licensed. Source, issue tracker, and releases are at https://github.com/fstubner/xtctx.',
+      a: 'Yes. xtctx is MIT licensed and published at github.com/fstubner/xtctx.',
       aHtml:
-        'Yes. xtctx is MIT-licensed. Source, issue tracker, and releases are at <a href="https://github.com/fstubner/xtctx">github.com/fstubner/xtctx</a>.',
+        'Yes. xtctx is MIT licensed and published at <a href="https://github.com/fstubner/xtctx">github.com/fstubner/xtctx</a>.',
     },
   ],
 
@@ -266,8 +316,6 @@ messages_fts  sessions         settings`,
     { name: 'SQLite', url: 'https://www.sqlite.org/' },
     { name: 'Astro', url: 'https://astro.build/' },
   ],
-
-  social: { repo: REPO, showLiveStats: true },
 
   analytics: {},
 

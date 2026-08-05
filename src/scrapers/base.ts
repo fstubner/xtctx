@@ -36,7 +36,18 @@ export class ScraperStateManager {
 }
 
 export function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 4);
+  if (!text) return 0;
+
+  const charCount = text.length;
+  // Match programming syntax delimiters
+  const symbolMatches = text.match(/[{}[\]();=+\-*&|<>!]/g);
+  const symbolCount = symbolMatches ? symbolMatches.length : 0;
+
+  // Text scales at 4 characters per token; symbols weight heavier (2 characters per token)
+  const baseTokens = Math.ceil(charCount / 4);
+  const syntaxTokens = Math.ceil(symbolCount / 2);
+
+  return baseTokens + syntaxTokens;
 }
 
 /**

@@ -6,6 +6,7 @@ import {
   type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
 import { createContinuityStatusHandler } from "./tools/continuity.js";
+import { createHandoffManifestHandler } from "./tools/manifest.js";
 import {
   createRecentSessionsHandler,
   createSearchSessionsHandler,
@@ -107,6 +108,36 @@ export function buildToolDefinitions(): Tool[] {
         },
       },
     },
+    {
+      name: "xtctx_handoff_manifest",
+      description:
+        "Return a read-only handoff manifest with stable session references and raw-detail retrieval pointers for an external orchestrator.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          session_refs: {
+            type: "array",
+            items: { type: "string" },
+            description: "Optional session refs to include. Defaults to recent sessions.",
+          },
+          tool_filter: {
+            type: "array",
+            items: { type: "string" },
+            description: "Optional tool ids to include",
+          },
+          limit: { type: "number", description: "Max recent sessions. Default: 5" },
+          correlation_id: {
+            type: "string",
+            description: "Optional caller-owned ID echoed in the response and never persisted by xtctx.",
+          },
+          format: {
+            type: "string",
+            enum: ["markdown", "json"],
+            description: "Response format. Default: json",
+          },
+        },
+      },
+    },
   ];
 }
 
@@ -120,12 +151,14 @@ export function createToolHandlers(
     handlers.set("xtctx_session_detail", createSessionDetailHandler(dependencies.sessions));
     handlers.set("xtctx_search_sessions", createSearchSessionsHandler(dependencies.sessions));
     handlers.set("xtctx_continuity_status", createContinuityStatusHandler(dependencies.sessions));
+    handlers.set("xtctx_handoff_manifest", createHandoffManifestHandler(dependencies.sessions));
   } else {
     const missing = missingDependency("session service");
     handlers.set("xtctx_recent_sessions", missing);
     handlers.set("xtctx_session_detail", missing);
     handlers.set("xtctx_search_sessions", missing);
     handlers.set("xtctx_continuity_status", missing);
+    handlers.set("xtctx_handoff_manifest", missing);
   }
 
   return handlers;

@@ -56,6 +56,8 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
       return this.extractor;
     }
 
+    process.stderr.write(`xtctx: Initializing local embedding provider (${this.model})...\n`);
+
     const transformers = (await import("@huggingface/transformers")) as unknown as {
       pipeline: PipelineFactory;
     };

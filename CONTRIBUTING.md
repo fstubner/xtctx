@@ -4,7 +4,7 @@ Thanks for contributing.
 
 ## Development Setup
 
-1. Install Node.js 20+.
+1. Install Node.js 24+.
 2. Install dependencies:
    - `npm ci`
    - `npm --prefix landing ci`

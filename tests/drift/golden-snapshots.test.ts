@@ -22,7 +22,6 @@ import { CodexCliScraper } from "@xtctx/scrapers/codex";
 import { CopilotScraper } from "@xtctx/scrapers/copilot";
 import { CopilotCliScraper } from "@xtctx/scrapers/copilot-cli";
 import { CursorScraper } from "@xtctx/scrapers/cursor";
-import { GeminiCliScraper } from "@xtctx/scrapers/gemini";
 import { OpenCodeScraper } from "@xtctx/scrapers/opencode";
 import type { ConversationChunk, ConversationScraper } from "@xtctx/types/scraper";
 
@@ -349,40 +348,6 @@ describe("Golden snapshots", () => {
     const scraper = new CopilotCliScraper(tempDir, stateDir);
     const chunks = await collectChunks(scraper);
     await assertSnapshot("copilot-cli", normalise(chunks));
-  });
-
-  it("gemini", async () => {
-    const tempDir = await mkTemp("xtctx-snap-gemini-");
-    const stateDir = await mkTemp("xtctx-snap-state-");
-    const chatDir = join(tempDir, "proj", "chats");
-    await mkdir(chatDir, { recursive: true });
-    await writeFile(
-      join(chatDir, "session-snap.json"),
-      JSON.stringify({
-        sessionId: "snap-gemini-session",
-        startTime: "2026-02-24T10:00:00Z",
-        lastUpdated: "2026-02-24T10:01:00Z",
-        messages: [
-          {
-            id: "g1",
-            type: "user",
-            timestamp: "2026-02-24T10:00:00Z",
-            content: [{ text: "gemini snap q" }],
-          },
-          {
-            id: "g2",
-            type: "gemini",
-            timestamp: "2026-02-24T10:00:05Z",
-            content: "gemini snap a",
-            model: "gemini-2.5-pro",
-          },
-        ],
-      }),
-    );
-
-    const scraper = new GeminiCliScraper(tempDir, stateDir);
-    const chunks = await collectChunks(scraper);
-    await assertSnapshot("gemini", normalise(chunks));
   });
 
   it("antigravity", async () => {

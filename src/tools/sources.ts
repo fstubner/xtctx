@@ -5,7 +5,6 @@ import { CodexCliScraper } from "../scrapers/codex.js";
 import { CopilotCliScraper } from "../scrapers/copilot-cli.js";
 import { CopilotScraper } from "../scrapers/copilot.js";
 import { CursorScraper } from "../scrapers/cursor.js";
-import { GeminiCliScraper } from "../scrapers/gemini.js";
 import { OpenCodeScraper } from "../scrapers/opencode.js";
 import type { ConversationScraper } from "../types/scraper.js";
 
@@ -14,12 +13,22 @@ export type ToolId =
   | "cursor"
   | "codex"
   | "copilot"
-  | "gemini"
   | "antigravity"
   | "opencode"
   | "copilot-cli";
 
 export type HookMode = "executable" | "instruction-only" | "mcp-only";
+export type SkillSyncMode =
+  | "native-skill"
+  | "rule-adapter"
+  | "instruction-adapter"
+  | "managed-block"
+  | "unsupported";
+
+export interface ToolSkillCapability {
+  mode: SkillSyncMode;
+  targetPath?: (projectRoot: string, skillId: string) => string;
+}
 
 export interface ToolSourceDefinition {
   id: ToolId;
@@ -32,6 +41,7 @@ export interface ToolSourceDefinition {
   ) => ConversationScraper;
   memoryTargets: string[];
   hookMode: HookMode;
+  skillSync?: ToolSkillCapability;
 }
 
 export const SUPPORTED_TOOLS: ToolSourceDefinition[] = [
@@ -43,6 +53,10 @@ export const SUPPORTED_TOOLS: ToolSourceDefinition[] = [
       new ClaudeCodeScraper(storePath, stateDir, projectRoot),
     memoryTargets: ["CLAUDE.md"],
     hookMode: "executable",
+    skillSync: {
+      mode: "native-skill",
+      targetPath: (projectRoot, skillId) => join(projectRoot, ".claude", "skills", skillId, "SKILL.md"),
+    },
   },
   {
     id: "cursor",
@@ -52,6 +66,10 @@ export const SUPPORTED_TOOLS: ToolSourceDefinition[] = [
       new CursorScraper(storePath, stateDir, projectRoot),
     memoryTargets: [join(".cursor", "rules", "xtctx.mdc")],
     hookMode: "instruction-only",
+    skillSync: {
+      mode: "rule-adapter",
+      targetPath: (projectRoot, skillId) => join(projectRoot, ".cursor", "rules", "xtctx-skills", `${skillId}.mdc`),
+    },
   },
   {
     id: "codex",
@@ -61,6 +79,10 @@ export const SUPPORTED_TOOLS: ToolSourceDefinition[] = [
       new CodexCliScraper(storePath, stateDir, projectRoot),
     memoryTargets: ["AGENTS.md"],
     hookMode: "instruction-only",
+    skillSync: {
+      mode: "managed-block",
+      targetPath: (projectRoot) => join(projectRoot, "AGENTS.md"),
+    },
   },
   {
     id: "copilot",
@@ -70,15 +92,11 @@ export const SUPPORTED_TOOLS: ToolSourceDefinition[] = [
       new CopilotScraper(storePath, stateDir, projectRoot),
     memoryTargets: [join(".github", "copilot-instructions.md")],
     hookMode: "instruction-only",
-  },
-  {
-    id: "gemini",
-    label: "Gemini CLI",
-    defaultStorePath: defaultGeminiHistoryPath,
-    createScraper: (storePath, stateDir, projectRoot) =>
-      new GeminiCliScraper(storePath, stateDir, projectRoot),
-    memoryTargets: ["GEMINI.md"],
-    hookMode: "instruction-only",
+    skillSync: {
+      mode: "instruction-adapter",
+      targetPath: (projectRoot, skillId) =>
+        join(projectRoot, ".github", "instructions", `xtctx-${skillId}.instructions.md`),
+    },
   },
   {
     id: "antigravity",
@@ -86,8 +104,13 @@ export const SUPPORTED_TOOLS: ToolSourceDefinition[] = [
     defaultStorePath: defaultAntigravityStorePath,
     createScraper: (storePath, stateDir, projectRoot) =>
       new AntigravityScraper(storePath, stateDir, projectRoot),
-    memoryTargets: [],
-    hookMode: "mcp-only",
+    // Antigravity CLI keeps project-memory compatibility with GEMINI.md.
+    memoryTargets: ["GEMINI.md"],
+    hookMode: "instruction-only",
+    skillSync: {
+      mode: "managed-block",
+      targetPath: (projectRoot) => join(projectRoot, "GEMINI.md"),
+    },
   },
   {
     id: "opencode",
@@ -96,6 +119,10 @@ export const SUPPORTED_TOOLS: ToolSourceDefinition[] = [
     createScraper: (storePath, stateDir) => new OpenCodeScraper(storePath, stateDir),
     memoryTargets: ["AGENTS.md"],
     hookMode: "instruction-only",
+    skillSync: {
+      mode: "managed-block",
+      targetPath: (projectRoot) => join(projectRoot, "AGENTS.md"),
+    },
   },
   {
     id: "copilot-cli",
@@ -104,6 +131,10 @@ export const SUPPORTED_TOOLS: ToolSourceDefinition[] = [
     createScraper: (storePath, stateDir) => new CopilotCliScraper(storePath, stateDir),
     memoryTargets: [join(".github", "copilot-instructions.md")],
     hookMode: "mcp-only",
+    skillSync: {
+      mode: "managed-block",
+      targetPath: (projectRoot) => join(projectRoot, ".github", "copilot-instructions.md"),
+    },
   },
 ];
 
@@ -154,11 +185,6 @@ export function defaultCopilotHistoryPath(): string {
   }
 
   return join(home, "Library", "Application Support", "Code", "User", "workspaceStorage");
-}
-
-export function defaultGeminiHistoryPath(): string {
-  const home = process.env.USERPROFILE ?? process.env.HOME ?? "";
-  return join(home, ".gemini", "tmp");
 }
 
 export function defaultAntigravityStorePath(): string {

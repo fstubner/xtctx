@@ -10,6 +10,7 @@ describe("MCP Server", () => {
       "xtctx_session_detail",
       "xtctx_search_sessions",
       "xtctx_continuity_status",
+      "xtctx_handoff_manifest",
     ]);
 
     expect(toolNames).not.toContain("xtctx_last_session_brief");
@@ -26,8 +27,10 @@ describe("MCP Server", () => {
     const tools = buildToolDefinitions();
     const detail = tools.find((tool) => tool.name === "xtctx_session_detail");
     const search = tools.find((tool) => tool.name === "xtctx_search_sessions");
+    const manifest = tools.find((tool) => tool.name === "xtctx_handoff_manifest");
 
     expect(detail?.inputSchema.required).toEqual(["session_ref"]);
     expect(search?.inputSchema.required).toEqual(["query"]);
+    expect(manifest?.inputSchema.required).toBeUndefined();
   });
 });

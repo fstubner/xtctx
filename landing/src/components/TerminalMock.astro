@@ -1,0 +1,135 @@
+---
+// TerminalMock.astro
+---
+<div class="terminal-mock">
+  <div class="terminal-header">
+    <div class="terminal-dots">
+      <span class="dot red"></span>
+      <span class="dot yellow"></span>
+      <span class="dot green"></span>
+    </div>
+    <div class="terminal-title">bash</div>
+  </div>
+  <div class="terminal-body">
+    <div class="line">
+      <span class="prompt">$</span> npx -y xtctx setup
+    </div>
+    <div class="output">
+      <div class="log header">xtctx setup for ~/projects/my-app</div>
+      <div class="log">  config                 .xtctx/config.yaml</div>
+      <div class="log">  skill                  .xtctx/skills/xtctx-handoff/SKILL.md</div>
+      <div class="log">  memory:codex           AGENTS.md</div>
+      <div class="log">  mcp:codex              .codex/config.toml</div>
+      <div class="log success">[ok] managed instructions written</div>
+      <div class="log success">[ok] mcp server registered</div>
+    </div>
+
+    <div class="line second">
+      <span class="prompt">$</span> npx -y xtctx status
+    </div>
+    <div class="output">
+      <div class="log header">xtctx status</div>
+      <div class="log">MCP command:   npx -y xtctx</div>
+      <div class="log">Local cache:   indexes on MCP retrieval</div>
+      <div class="log">Next agent:    recent, detail, search, status</div>
+      <div class="log muted">Raw transcripts stay the source of truth.</div>
+    </div>
+  </div>
+</div>
+
+<style>
+  .terminal-mock {
+    width: 100%;
+    max-width: 580px;
+    background: #050b14;
+    border: 1px solid rgba(232, 223, 200, 0.14);
+    border-radius: 10px;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+    overflow: hidden;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 0.82rem;
+    line-height: 1.6;
+    margin: 0 auto;
+  }
+
+  .terminal-header {
+    background: #0d1624;
+    border-bottom: 1px solid rgba(232, 223, 200, 0.1);
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    user-select: none;
+  }
+
+  .terminal-dots {
+    display: flex;
+    gap: 6px;
+  }
+
+  .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+
+  .dot.red { background: #ff5f56; }
+  .dot.yellow { background: #ffbd2e; }
+  .dot.green { background: #27c93f; }
+
+  .terminal-title {
+    color: #a8b9cf;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    flex-grow: 1;
+    text-align: center;
+    margin-right: 32px;
+  }
+
+  .terminal-body {
+    padding: 18px;
+    color: #dbe4f2;
+    min-height: 280px;
+    text-align: left;
+  }
+
+  .prompt {
+    color: #e8b878;
+    font-weight: 700;
+    margin-right: 8px;
+  }
+
+  .line {
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+  }
+
+  .line.second {
+    margin-top: 18px;
+  }
+
+  .log {
+    color: #a8b9cf;
+    margin-left: 12px;
+    font-size: 0.8rem;
+  }
+
+  .log.header {
+    color: #fff8e8;
+    font-weight: 700;
+    margin-left: 0;
+    margin-top: 6px;
+  }
+
+  .log.success {
+    color: #b7f7cb;
+    font-weight: 700;
+  }
+
+  .log.muted {
+    color: #627592;
+  }
+</style>

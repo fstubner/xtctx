@@ -55,7 +55,7 @@ class FixtureSessionService implements SessionService {
 }
 
 describe("handoff MCP integration", () => {
-  it("returns recent sessions, detail, search, and status through handlers", async () => {
+  it("returns recent sessions, detail, search, status, and handoff manifests through handlers", async () => {
     const handlers = createToolHandlers({ sessions: new FixtureSessionService() });
 
     await expect(handlers.get("xtctx_recent_sessions")?.({ format: "json" })).resolves.toMatchObject({
@@ -74,6 +74,23 @@ describe("handoff MCP integration", () => {
     await expect(handlers.get("xtctx_continuity_status")?.({ format: "json" })).resolves.toMatchObject({
       sessions: 1,
       messages: 1,
+    });
+    await expect(
+      handlers.get("xtctx_handoff_manifest")?.({
+        format: "json",
+        correlation_id: "orchestrator:task-42",
+        session_refs: ["codex:session-a"],
+      }),
+    ).resolves.toMatchObject({
+      schema_version: "xtctx/handoff-manifest/v1",
+      correlation_id: "orchestrator:task-42",
+      sessions: [
+        {
+          handoff_id: "codex:session-a",
+          retrieve: { tool: "xtctx_session_detail", arguments: { session_ref: "codex:session-a" } },
+        },
+      ],
+      contract: { authority: "raw-transcript" },
     });
   });
 });

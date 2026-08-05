@@ -640,22 +640,25 @@ async function discoverPosixLanguageServerProcesses(): Promise<AntigravityProces
   }
 
   try {
-    const { stdout } = await execFileAsync("pgrep", ["-af", "language_server"], {
+    const { stdout } = await execFileAsync("pgrep", ["-f", "language_server"], {
       timeout: 5_000,
     });
-    return String(stdout)
+    const pids = String(stdout)
       .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0)
-      .map((line) => {
-        const [pidText, ...commandParts] = line.split(/\s+/);
-        const pid = Number(pidText);
-        const command = commandParts.join(" ");
-        return Number.isFinite(pid)
-          ? { pid, csrf: extractCsrfToken(command) }
-          : null;
-      })
-      .filter((value): value is AntigravityProcess => value !== null);
+      .map((line) => Number(line.trim()))
+      .filter((pid) => Number.isFinite(pid) && pid > 0);
+
+    const processes: AntigravityProcess[] = [];
+    for (const pid of pids) {
+      try {
+        const cmdline = await readFile(`/proc/${pid}/cmdline`, "utf8");
+        const commandLine = cmdline.replace(/\0/g, " ");
+        processes.push({ pid, csrf: extractCsrfToken(commandLine) });
+      } catch {
+        // Ignore read failures for exited processes
+      }
+    }
+    return processes;
   } catch {
     return [];
   }

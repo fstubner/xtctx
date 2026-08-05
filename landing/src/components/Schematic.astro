@@ -1,0 +1,94 @@
+<figure class="schematic" aria-label="Local transcript handoff diagram">
+  <div class="schematic-head">
+    <span>Fig 1</span>
+    <span>Handoff map</span>
+  </div>
+
+  <svg viewBox="0 0 760 430" role="img" aria-labelledby="schematic-title schematic-desc">
+    <title id="schematic-title">xtctx handoff map</title>
+    <desc id="schematic-desc">
+      Supported coding tools write local transcripts. xtctx indexes recent sessions
+      into SQLite and exposes retrieval through MCP.
+    </desc>
+
+    <defs>
+      <pattern id="mini-grid" width="16" height="16" patternUnits="userSpaceOnUse">
+        <path d="M 16 0 L 0 0 0 16" fill="none" stroke="rgba(232,223,200,.08)" stroke-width="1" />
+      </pattern>
+      <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+        <path d="M0,0 L8,4 L0,8 Z" fill="#e8b878" />
+      </marker>
+      <marker id="arrow-blue" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+        <path d="M0,0 L8,4 L0,8 Z" fill="#9db4d8" />
+      </marker>
+    </defs>
+
+    <rect x="1" y="1" width="758" height="428" rx="18" fill="url(#mini-grid)" stroke="rgba(232,223,200,.18)" />
+
+    <g class="zone zone-tools">
+      <rect x="44" y="64" width="170" height="288" rx="12" />
+      <text x="129" y="96" text-anchor="middle" class="label">Local tools</text>
+      <text x="129" y="134" text-anchor="middle">Codex</text>
+      <text x="129" y="172" text-anchor="middle">Claude Code</text>
+      <text x="129" y="210" text-anchor="middle">Cursor</text>
+      <text x="129" y="248" text-anchor="middle">Antigravity</text>
+      <text x="129" y="286" text-anchor="middle">Antigravity</text>
+      <text x="129" y="324" text-anchor="middle">opencode</text>
+    </g>
+
+    <g class="zone zone-core">
+      <rect x="292" y="64" width="176" height="288" rx="14" />
+      <text x="380" y="96" text-anchor="middle" class="label">xtctx</text>
+      <text x="380" y="154" text-anchor="middle">setup</text>
+      <text x="380" y="202" text-anchor="middle">status</text>
+      <text x="380" y="250" text-anchor="middle">syncs skills</text>
+      <text x="380" y="298" text-anchor="middle">MCP Server</text>
+    </g>
+
+    <g class="zone zone-store">
+      <rect x="548" y="64" width="168" height="128" rx="12" />
+      <text x="632" y="96" text-anchor="middle" class="label">SQLite cache</text>
+      <text x="632" y="132" text-anchor="middle">sessions & logs</text>
+      <text x="632" y="162" text-anchor="middle">sync-drift vectors</text>
+    </g>
+
+    <g class="zone zone-agent">
+      <rect x="548" y="224" width="168" height="128" rx="12" />
+      <text x="632" y="256" text-anchor="middle" class="label">Next agent</text>
+      <text x="632" y="292" text-anchor="middle">mcp_recent_sessions</text>
+      <text x="632" y="322" text-anchor="middle">mcp_session_detail</text>
+    </g>
+
+    <path class="line line-warm" d="M214 208 H292" marker-end="url(#arrow)" />
+    <path class="line line-warm" d="M468 128 H548" marker-end="url(#arrow)" />
+    <path class="line line-cool" d="M548 272 H468" marker-end="url(#arrow-blue)" />
+    <path class="line line-cool" d="M468 304 H548" marker-end="url(#arrow-blue)" />
+
+    <text x="253" y="196" text-anchor="middle" class="edge">reads logs</text>
+    <text x="508" y="116" text-anchor="middle" class="edge">indexes</text>
+    <text x="508" y="260" text-anchor="middle" class="edge">1. query</text>
+    <text x="508" y="326" text-anchor="middle" class="edge">2. handoff</text>
+
+    <g class="pulse pulse-one">
+      <circle r="4" fill="#e8b878" />
+      <animateMotion dur="4s" repeatCount="indefinite" path="M214 208 H292" />
+    </g>
+    <g class="pulse pulse-two">
+      <circle r="4" fill="#e8dfc8" />
+      <animateMotion dur="4s" repeatCount="indefinite" path="M468 128 H548" />
+    </g>
+    <g class="pulse pulse-three">
+      <circle r="4" fill="#9db4d8" />
+      <animateMotion dur="4s" repeatCount="indefinite" path="M548 272 H468" />
+    </g>
+    <g class="pulse pulse-four">
+      <circle r="4" fill="#ffd08a" />
+      <animateMotion dur="4s" repeatCount="indefinite" path="M468 304 H548" />
+    </g>
+  </svg>
+
+  <figcaption>
+    Source transcripts stay local. MCP calls pull only the session detail the
+    next agent needs.
+  </figcaption>
+</figure>

@@ -81,15 +81,6 @@ export interface CopilotChunk extends ConversationChunk {
   };
 }
 
-export interface GeminiChunk extends ConversationChunk {
-  tool: "gemini";
-  metadata: ChunkMetadata & {
-    model?: string;
-    promptTokens?: number;
-    responseTokens?: number;
-  };
-}
-
 export interface AntigravityChunk extends ConversationChunk {
   tool: "antigravity";
   metadata: ChunkMetadata & {

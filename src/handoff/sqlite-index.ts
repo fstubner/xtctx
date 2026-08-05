@@ -276,8 +276,8 @@ export class SqliteHandoffIndex implements SessionService {
         continue;
       }
 
+      let latestTimestamp: Date | null = null;
       try {
-        let latestTimestamp: Date | null = null;
         for await (const chunk of scraper.scrape()) {
           const sessionRef = this.upsertChunk(chunk);
           if (sessionRef) {
@@ -299,6 +299,15 @@ export class SqliteHandoffIndex implements SessionService {
           `last_error:${scraper.tool}`,
           error instanceof Error ? error.message : String(error),
         );
+        if (latestTimestamp) {
+          try {
+            await scraper.saveScrapedPosition({
+              lastTimestamp: overlapTimestamp(latestTimestamp),
+            });
+          } catch {
+            // Ignore position save failures inside catch
+          }
+        }
       }
     }
 

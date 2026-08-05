@@ -3,13 +3,19 @@ dist/
 landing/dist/
 .xtctx/.store/
 .xtctx/config.yaml
+.xtctx/skills/
 .xtctx/state/
 .claude/
+.claude_disabled/
 .codex/
+.codex_disabled/
 .cursor/
+.cursor_disabled/
 .gemini/
+.antigravityignore
 .vscode/mcp.json
 .mcp.json
+.github/instructions/
 opencode.json
 *.tsbuildinfo
 coverage/
@@ -18,6 +24,9 @@ coverage/
 .artifacts/
 firebase-debug.log
 .playwright-mcp/
+GEMINI.md.bak
+home_page_screenshot.png
+xtctx-v9-fullpage.png
 
 # Local scratch dirs for smoke tests, reproduction harnesses, etc.
 tmp/

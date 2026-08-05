@@ -164,21 +164,39 @@ describe("syncToolMcpConfigs", () => {
     expect(raw).toMatch(/\[mcp_servers\.xtctx\]/);
   });
 
-  it("writes .gemini/settings.json for Gemini with `mcpServers` root and no `type` field", async () => {
-    const servers = [
-      { name: "xtctx", command: "npx", args: ["xtctx"], transport: "stdio" as const },
-    ];
-    const result = await syncToolMcpConfigs(projectDir, servers, ["gemini"]);
+  it("writes Antigravity MCP config with `mcpServers` root and no `type` field", async () => {
+    const fakeHome = await mkdtemp(join(tmpdir(), "xtctx-antigravity-entry-"));
+    try {
+      const servers = [
+        { name: "xtctx", command: "npx", args: ["xtctx"], transport: "stdio" as const },
+      ];
+      const result = await syncToolMcpConfigs(projectDir, servers, ["antigravity"], { homeDir: fakeHome });
 
-    expect(result.results).toHaveLength(1);
-    expect(result.results[0].path).toContain(join(".gemini", "settings.json"));
+      expect(result.results).toHaveLength(1);
+      expect(result.results[0].path).toBe(join(fakeHome, ".gemini", "antigravity", "mcp_config.json"));
 
-    const raw = await readFile(join(projectDir, ".gemini", "settings.json"), "utf-8");
-    const parsed = JSON.parse(raw) as { mcpServers: Record<string, Record<string, unknown>> };
-    expect(parsed.mcpServers.xtctx).toBeDefined();
-    expect(parsed.mcpServers.xtctx.command).toBe("npx");
-    // Gemini's native MCP entry shape omits `type`.
-    expect(parsed.mcpServers.xtctx.type).toBeUndefined();
+      const raw = await readFile(result.results[0].path, "utf-8");
+      const parsed = JSON.parse(raw) as { mcpServers: Record<string, Record<string, unknown>> };
+      expect(parsed.mcpServers.xtctx).toBeDefined();
+      expect(parsed.mcpServers.xtctx.command).toBe("npx");
+      expect(parsed.mcpServers.xtctx.type).toBeUndefined();
+    } finally {
+      await rm(fakeHome, { recursive: true, force: true });
+    }
+  });
+
+  it("leaves an unparsable MCP config unchanged", async () => {
+    const configPath = join(projectDir, ".mcp.json");
+    await writeFile(configPath, "{ not valid json\n", "utf-8");
+
+    const result = await syncToolMcpConfigs(
+      projectDir,
+      [{ name: "xtctx", command: "npx", args: ["-y", "xtctx"], transport: "stdio" }],
+      ["claude"],
+    );
+
+    expect(result.results[0]?.warning).toContain("Failed to parse existing MCP config");
+    await expect(readFile(configPath, "utf-8")).resolves.toBe("{ not valid json\n");
   });
 
   it("writes Antigravity MCP config at the user-level app path", async () => {
@@ -279,7 +297,7 @@ describe("syncToolMcpConfigs", () => {
     }
   });
 
-  it("writes eight distinct files for all native-MCP tools in a single call", async () => {
+  it("writes seven distinct files for all native-MCP tools in a single call", async () => {
     const fakeHome = await mkdtemp(join(tmpdir(), "xtctx-mcp-all-"));
     try {
       const servers = [
@@ -294,7 +312,6 @@ describe("syncToolMcpConfigs", () => {
           "cursor",
           "copilot",
           "codex",
-          "gemini",
           "antigravity",
           "opencode",
           "copilot-cli",
@@ -302,10 +319,10 @@ describe("syncToolMcpConfigs", () => {
         { homeDir: fakeHome },
       );
 
-      // 9 enabled tools; claude/claude-code share .mcp.json (one is skipped), so
-      // 8 unique files actually get written.
+      // 8 enabled tools; claude/claude-code share .mcp.json (one is skipped), so
+      // 7 unique files actually get written.
       const written = result.results.filter((r) => !r.skipped);
-      expect(written).toHaveLength(8);
+      expect(written).toHaveLength(7);
       const skipped = result.results.filter((r) => r.skipped);
       expect(skipped).toHaveLength(1);
 
@@ -315,7 +332,6 @@ describe("syncToolMcpConfigs", () => {
         join(projectDir, ".cursor", "mcp.json"),
         join(projectDir, ".vscode", "mcp.json"),
         join(projectDir, ".codex", "config.toml"),
-        join(projectDir, ".gemini", "settings.json"),
         join(fakeHome, ".gemini", "antigravity", "mcp_config.json"),
         join(projectDir, "opencode.json"),
         join(fakeHome, ".copilot", "mcp-config.json"),
