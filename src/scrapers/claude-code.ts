@@ -4,7 +4,7 @@ import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import type { ChunkMetadata, ClaudeCodeChunk } from "../types/scraper.js";
 import { AbstractScraper, estimateTokens } from "./base.js";
-import { encodePathForToolDirectory } from "../utils/project-scope.js";
+import { encodePathForToolDirectory, pathMatchesProject } from "../utils/project-scope.js";
 
 const SCRAPER_NAME = "claude-code";
 
@@ -179,6 +179,10 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
         continue;
       }
 
+      if (!this.recordMatchesProject(obj)) {
+        continue;
+      }
+
       // Strict-mode schema check: warn (but still emit) on shape surprise.
       if (!("type" in obj)) {
         warnDrift(
@@ -244,6 +248,16 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
     }
   }
 
+  /**
+   * Coarse pre-filter over encoded store directory names.
+   *
+   * Encoded names are ambiguous — `-` stands for `:`, `\` and `/` alike — so
+   * this only decides which directories are worth opening. Each record's own
+   * `cwd` is what actually attributes it (see `recordMatchesProject`), which
+   * is both unambiguous and platform-independent. Keeping the prefix wide
+   * here lets sessions started from a subdirectory through; the per-record
+   * check then rejects a sibling like `<project>--secret`.
+   */
   private filterProjectDirs(projectDirs: string[]): string[] {
     if (!this.projectRoot) {
       return projectDirs;
@@ -252,8 +266,24 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
     const encodedProject = encodePathForToolDirectory(this.projectRoot).toLowerCase();
     return projectDirs.filter((projectDir) => {
       const normalized = projectDir.toLowerCase();
-      return normalized === encodedProject || normalized.startsWith(`${encodedProject}--`);
+      return normalized === encodedProject || normalized.startsWith(`${encodedProject}-`);
     });
+  }
+
+  /**
+   * Attribute a record to the project by the `cwd` Claude Code stamps on it.
+   * Records without a `cwd` fall back to the directory-name decision already
+   * made by `filterProjectDirs`.
+   */
+  private recordMatchesProject(obj: Record<string, unknown>): boolean {
+    if (!this.projectRoot) {
+      return true;
+    }
+    const cwd = obj.cwd;
+    if (typeof cwd !== "string" || cwd.length === 0) {
+      return true;
+    }
+    return pathMatchesProject(cwd, this.projectRoot);
   }
 }
 

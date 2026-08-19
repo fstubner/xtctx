@@ -175,6 +175,54 @@ describe("ClaudeCodeScraper", () => {
     ]);
   });
 
+  it("excludes a sibling project whose encoded directory shares the prefix", async () => {
+    // `H:\projects\...\xtctx--secret` encodes to a directory name starting
+    // with the real project's encoded name, so prefix matching served another
+    // project's transcripts. Records carry their own `cwd`, which is
+    // unambiguous — use it.
+    await writeClaudeSession(
+      join(tempDir, "H--projects-private-needs-work-xtctx"),
+      "session-mine",
+      "my project",
+      "H:\\projects\\private\\needs-work\\xtctx",
+    );
+    await writeClaudeSession(
+      join(tempDir, "H--projects-private-needs-work-xtctx--secret"),
+      "session-sibling",
+      "SIBLING SECRET",
+      "H:\\projects\\private\\needs-work\\xtctx--secret",
+    );
+
+    const scoped = new ClaudeCodeScraper(
+      tempDir,
+      stateDir,
+      "H:\\projects\\private\\needs-work\\xtctx",
+    );
+    const chunks: ClaudeCodeChunk[] = [];
+    for await (const chunk of scoped.fullSync()) chunks.push(chunk);
+
+    expect(chunks.map((chunk) => chunk.sessionId)).toEqual(["session-mine"]);
+  });
+
+  it("includes sessions started from a subdirectory of the project", async () => {
+    await writeClaudeSession(
+      join(tempDir, "H--projects-private-needs-work-xtctx-src"),
+      "session-subdir",
+      "work from src",
+      "H:\\projects\\private\\needs-work\\xtctx\\src",
+    );
+
+    const scoped = new ClaudeCodeScraper(
+      tempDir,
+      stateDir,
+      "H:\\projects\\private\\needs-work\\xtctx",
+    );
+    const chunks: ClaudeCodeChunk[] = [];
+    for await (const chunk of scoped.fullSync()) chunks.push(chunk);
+
+    expect(chunks.map((chunk) => chunk.sessionId)).toEqual(["session-subdir"]);
+  });
+
   it("limits project-scoped scrapers to matching Claude project directories", async () => {
     await writeClaudeSession(
       join(tempDir, "H--projects-private-needs-work-xtctx"),
@@ -206,6 +254,7 @@ async function writeClaudeSession(
   projectDir: string,
   sessionId: string,
   content: string,
+  cwd?: string,
 ): Promise<void> {
   await mkdir(projectDir, { recursive: true });
   await writeFile(
@@ -213,6 +262,7 @@ async function writeClaudeSession(
     JSON.stringify({
       type: "user",
       timestamp: "2026-02-24T10:00:01Z",
+      ...(cwd ? { cwd } : {}),
       message: {
         role: "user",
         content,
