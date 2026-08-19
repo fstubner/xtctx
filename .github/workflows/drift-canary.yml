@@ -88,7 +88,8 @@ jobs:
         run: |
           set +e
           node scripts/drift-canary.mjs --tool ${{ matrix.tool }} 2>canary-stderr.log | tee canary-stdout.log
-          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          # $? after a pipeline is tee's status; the canary's own status is in PIPESTATUS[0].
+          echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
 
       - name: Build issue body on failure
         if: steps.canary.outputs.exit_code != '0' && github.event_name == 'schedule'
@@ -138,7 +139,8 @@ jobs:
         run: gh issue comment ${{ steps.existing.outputs.number }} --body-file issue-body.md
 
       - name: Fail job on canary failure
-        if: steps.canary.outputs.exit_code != '0'
+        # exit_code is empty when the canary step was skipped by a scoped dispatch.
+        if: steps.canary.outputs.exit_code != '' && steps.canary.outputs.exit_code != '0'
         run: |
           echo "canary exited ${{ steps.canary.outputs.exit_code }}"
           exit 1
