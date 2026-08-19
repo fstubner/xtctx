@@ -174,6 +174,29 @@ describe("SqliteHandoffIndex", () => {
     await index.close();
   });
 
+  it("does not match on xtctx's own window scaffolding", async () => {
+    // Retrieval windows are wrapped in "Session: …", "Turn 1/2 |
+    // message_index=0 | user @ …" headers that give the embedding model
+    // ordering context. Indexing that text for keyword search meant
+    // searching `message_index` or a tool name matched every session.
+    const scraper = new FixtureScraper([
+      chunk("scaffold-session", 0, "user", "we discussed pricing tiers"),
+      chunk("scaffold-session", 1, "assistant", "and the renewal flow"),
+    ]);
+    const index = new SqliteHandoffIndex(join(tempDir, "xtctx.db"), tempDir, [
+      { tool: "codex", scraper },
+    ]);
+
+    expect(await index.searchSessions("message_index", 5, undefined, "keyword")).toEqual([]);
+    expect(await index.searchSessions("Chronological", 5, undefined, "keyword")).toEqual([]);
+    // Real transcript text still matches.
+    expect(
+      (await index.searchSessions("pricing", 5, undefined, "keyword")).map((s) => s.session_ref),
+    ).toEqual(["codex:scaffold-session"]);
+
+    await index.close();
+  });
+
   it("looks up a session by ref regardless of recency", async () => {
     const scraper = new FixtureScraper([
       chunk("lookup-session", 0, "user", "find me by ref"),
@@ -287,6 +310,29 @@ describe("SqliteHandoffIndex", () => {
 
     expect(recent).toHaveLength(1);
     expect(recent[0].session_ref).toBe("codex:recovered-session");
+
+    await index.close();
+  });
+
+  it("clears scraper cursors when the index file was deleted, not just corrupted", async () => {
+    // Deleting the db is the recovery the docs actively invite ("can always
+    // be deleted and rebuilt"). A missing file opens cleanly, so the
+    // corrupt-path cursor reset never ran: the fresh index was topped up from
+    // each stale cursor forward and older sessions vanished with no warning.
+    const dbPath = join(tempDir, "xtctx.db");
+    const cursorPath = join(tempDir, "codex-state.json");
+    await writeFile(
+      cursorPath,
+      JSON.stringify({ lastTimestamp: "2030-01-01T00:00:00.000Z" }),
+      "utf-8",
+    );
+
+    const index = new SqliteHandoffIndex(dbPath, tempDir, [
+      { tool: "codex", scraper: new FixtureScraper([chunk("s", 0, "user", "hi")]) },
+    ]);
+    await index.listRecentSessions(5);
+
+    await expect(readFile(cursorPath, "utf-8")).rejects.toThrow();
 
     await index.close();
   });

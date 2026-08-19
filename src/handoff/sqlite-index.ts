@@ -446,10 +446,17 @@ export class SqliteHandoffIndex implements SessionService {
     const now = new Date().toISOString();
     const desired = new Map<
       string,
-      { start: MessageRow; end: MessageRow; content: string; contentHash: string }
+      {
+        start: MessageRow;
+        end: MessageRow;
+        content: string;
+        searchableText: string;
+        contentHash: string;
+      }
     >();
     for (const window of buildMessageWindows(messages, this.windowSize, this.windowStride)) {
       const content = formatRetrievalUnitContent(sessionRef, window.messages);
+      const searchableText = window.messages.map((message) => message.content).join("\n");
       const contentHash = hashParts([content]);
       const unitId = hashParts([
         "retrieval-unit",
@@ -458,7 +465,13 @@ export class SqliteHandoffIndex implements SessionService {
         String(window.end.message_index),
         contentHash,
       ]);
-      desired.set(unitId, { start: window.start, end: window.end, content, contentHash });
+      desired.set(unitId, {
+        start: window.start,
+        end: window.end,
+        content,
+        searchableText,
+        contentHash,
+      });
     }
 
     const existing = new Set(
@@ -488,7 +501,12 @@ export class SqliteHandoffIndex implements SessionService {
           unit.contentHash,
           now,
         );
-        stmts.insertUnitFts.run(unitId, sessionRef, session.tool, unit.content);
+        // Only the transcript text is keyword-indexed. `unit.content` also
+        // carries the window scaffolding ("Session: …", "Turn 1/8 |
+        // message_index=0 | user @ …") that gives the embedding model
+        // ordering context; indexing it made `message_index` or a tool name
+        // match every session.
+        stmts.insertUnitFts.run(unitId, sessionRef, session.tool, unit.searchableText);
       }
     });
     applyDiff();
@@ -745,17 +763,31 @@ export class SqliteHandoffIndex implements SessionService {
       await this.deleteDatabaseFiles();
       this.db = openDatabase(this.dbPath);
     }
+
+    // One rule covers every way the index can end up empty — deleted by a
+    // user (the recovery the docs invite), rebuilt after corruption, or
+    // wiped by hand: an empty index cannot honour a scraper cursor, because
+    // the cursor would skip straight past history still sitting on disk.
+    // On a genuine first run there are no cursor files, so this is a no-op.
+    const sessionCount = (
+      this.db.prepare("SELECT COUNT(*) AS count FROM sessions").get() as CountRow
+    ).count;
+    if (sessionCount === 0) {
+      await this.clearScraperCursors();
+    }
   }
 
   private async deleteDatabaseFiles(): Promise<void> {
     for (const suffix of ["", "-wal", "-shm"]) {
       await rm(`${this.dbPath}${suffix}`, { force: true });
     }
+  }
 
-    // The rebuilt index starts empty, so every scraper must re-scan from the
-    // beginning. Leaving the cursors in place would top the fresh database up
-    // from the last position only, silently dropping everything older that is
-    // still sitting in the transcript stores.
+  /**
+   * Drop every scraper's saved position so the next refresh re-scans from the
+   * beginning. Called whenever the index is empty; see initialize().
+   */
+  private async clearScraperCursors(): Promise<void> {
     const stateDir = dirname(this.dbPath);
     try {
       for (const entry of await readdir(stateDir)) {
