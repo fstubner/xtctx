@@ -47,5 +47,6 @@ content through xtctx without any manual export.
 - **Non-interactive without `--yes`:** setup/disconnect refuse rather than
   guess. Bare `xtctx` with piped stdio starts the MCP server by design;
   `XTCTX_NO_AUTO_MCP=1` opts out.
-- **Hook failure:** the session-start hook prints nothing and exits 0 —
-  a broken index never breaks the host agent's startup.
+- **Hook failure:** the session-start hook always exits 0 — a broken config
+  or index never breaks the host agent's startup. It prints the handoff
+  banner when it can and nothing at all when it cannot.
