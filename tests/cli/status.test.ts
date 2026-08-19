@@ -24,6 +24,24 @@ describe("status", () => {
     await rm(homeDir, { recursive: true, force: true });
   });
 
+  it("does not report drift on a freshly wired project", async () => {
+    // `managed-block` and `unsupported` are healthy skill-target states for
+    // codex/antigravity/opencode/copilot-cli, not drift. Treating any
+    // non-"ok" state as drift told every correctly-wired project to run
+    // `setup --repair`, a command that then changed nothing.
+    await setupProject({ projectPath: projectRoot, homeDir, yes: true });
+
+    const services = await createProjectServices(projectRoot);
+    try {
+      const status = await renderStatusBlock(services);
+
+      expect(status).not.toContain("Wiring has drifted");
+      expect(status).toContain("Ask a configured agent to call xtctx_recent_sessions");
+    } finally {
+      await services.sessions.close();
+    }
+  });
+
   it("reports synced skill inventory and target drift", async () => {
     await setupProject({ projectPath: projectRoot, homeDir, yes: true });
     await writeFile(

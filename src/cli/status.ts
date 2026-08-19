@@ -105,7 +105,10 @@ export async function renderStatusBlock(services: ProjectServices): Promise<stri
     !configPresent ||
     managed.some((file) => file.exists && (file.blockCount !== 1 || file.staleReferences.length > 0)) ||
     skills.selected.some((skill) => !skill.exists) ||
-    skills.targets.some((target) => target.state !== "ok");
+    // Only `missing` and `drift` are faults. `managed-block` and
+    // `unsupported` are the normal, healthy states for tools that carry
+    // skills inside their instruction file or not at all.
+    skills.targets.some((target) => target.state === "missing" || target.state === "drift");
 
   lines.push("");
   if (needsRepair) {

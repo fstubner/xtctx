@@ -175,6 +175,47 @@ describe("ClaudeCodeScraper", () => {
     ]);
   });
 
+  it("excludes a prefix-matched sibling whose records carry no cwd", async () => {
+    // The directory pre-filter is deliberately wide so sessions started in a
+    // subdirectory still qualify, and per-record `cwd` decides. But a record
+    // with no `cwd` defaulted to "mine", which let a plain sibling directory
+    // (`proj-v2` next to `proj`) through. When the directory only matched by
+    // prefix, absent provenance must mean "not mine".
+    await writeClaudeSession(
+      join(tempDir, "H--work-proj"),
+      "session-mine",
+      "my project",
+      "H:\\work\\proj",
+    );
+    await writeClaudeSession(
+      join(tempDir, "H--work-proj-v2"),
+      "session-v2",
+      "V2LEAK content from the sibling project",
+    );
+
+    const scoped = new ClaudeCodeScraper(tempDir, stateDir, "H:\\work\\proj");
+    const chunks: ClaudeCodeChunk[] = [];
+    for await (const chunk of scoped.fullSync()) chunks.push(chunk);
+
+    expect(chunks.map((chunk) => chunk.sessionId)).toEqual(["session-mine"]);
+  });
+
+  it("keeps cwd-less records in the project's own store directory", async () => {
+    // An exact directory match is provenance in itself, so records without a
+    // `cwd` there (metadata-shaped records) must not be dropped.
+    await writeClaudeSession(
+      join(tempDir, "H--work-proj"),
+      "session-nocwd",
+      "no cwd but exact directory",
+    );
+
+    const scoped = new ClaudeCodeScraper(tempDir, stateDir, "H:\\work\\proj");
+    const chunks: ClaudeCodeChunk[] = [];
+    for await (const chunk of scoped.fullSync()) chunks.push(chunk);
+
+    expect(chunks.map((chunk) => chunk.sessionId)).toEqual(["session-nocwd"]);
+  });
+
   it("excludes a sibling project whose encoded directory shares the prefix", async () => {
     // `H:\projects\...\xtctx--secret` encodes to a directory name starting
     // with the real project's encoded name, so prefix matching served another

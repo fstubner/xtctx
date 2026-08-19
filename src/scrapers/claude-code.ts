@@ -116,8 +116,14 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
       return;
     }
 
+    const encodedProject = this.projectRoot
+      ? encodePathForToolDirectory(this.projectRoot).toLowerCase()
+      : null;
+
     for (const projectHash of this.filterProjectDirs(projectDirs)) {
       const projectDir = join(this.claudeProjectsDir, projectHash);
+      const exactDirectory =
+        encodedProject === null || projectHash.toLowerCase() === encodedProject;
       let files: string[];
 
       try {
@@ -134,7 +140,7 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
         const sessionId = file.replace(/\.jsonl$/, "");
         const filePath = join(projectDir, file);
         try {
-          yield* this.readSessionFile(filePath, sessionId, since);
+          yield* this.readSessionFile(filePath, sessionId, since, exactDirectory);
         } catch (err) {
           // One unreadable file must not abort the remaining files/projects.
           warnDrift(filePath, `unreadable transcript file: ${(err as Error).message}`, 0);
@@ -147,6 +153,7 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
     filePath: string,
     sessionId: string,
     since: Date,
+    exactDirectory: boolean,
   ): AsyncIterable<ClaudeCodeChunk> {
     const reader = createInterface({
       input: createReadStream(filePath, { encoding: "utf8" }),
@@ -179,7 +186,7 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
         continue;
       }
 
-      if (!this.recordMatchesProject(obj)) {
+      if (!this.recordMatchesProject(obj, exactDirectory)) {
         continue;
       }
 
@@ -275,13 +282,16 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
    * Records without a `cwd` fall back to the directory-name decision already
    * made by `filterProjectDirs`.
    */
-  private recordMatchesProject(obj: Record<string, unknown>): boolean {
+  private recordMatchesProject(obj: Record<string, unknown>, exactDirectory: boolean): boolean {
     if (!this.projectRoot) {
       return true;
     }
     const cwd = obj.cwd;
     if (typeof cwd !== "string" || cwd.length === 0) {
-      return true;
+      // No provenance on the record. An exact store-directory match is itself
+      // provenance, so keep it; a directory that only matched by prefix could
+      // be a plain sibling (`proj-v2` beside `proj`), so fail closed.
+      return exactDirectory;
     }
     return pathMatchesProject(cwd, this.projectRoot);
   }
