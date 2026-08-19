@@ -1,7 +1,7 @@
-import { readFile } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { writeFileAtomic } from "../utils/atomic-file.js";
-import { normalizeNewlines, removeManagedBlocks } from "./managed-block.js";
+import { matchLineEndings, normalizeNewlines, removeManagedBlocks } from "./managed-block.js";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { removeMcpServerConfigs } from "./mcp-config.js";
 import { BUILT_IN_SKILL_ID, removeSyncedSkillsForTools } from "./skills.js";
@@ -308,7 +308,15 @@ async function removeManagedBlocksFromFile(filePath: string): Promise<boolean> {
     return false;
   }
 
-  await writeFileAtomic(filePath, repaired ? `${repaired}\n` : "");
+  if (!repaired) {
+    // The file held nothing but the xtctx block, so setup created it and
+    // disconnect owns removing it rather than leaving an empty file behind.
+    await rm(filePath, { force: true });
+    return true;
+  }
+
+  // Put the author's line endings back: removal must not reformat the file.
+  await writeFileAtomic(filePath, matchLineEndings(`${repaired}\n`, existing));
   return true;
 }
 
@@ -353,6 +361,18 @@ async function removeClaudeHookFromSettings(settingsPath: string): Promise<boole
   }
 
   parsed.hooks.SessionStart = kept;
+
+  // A settings file left holding nothing but an empty SessionStart list was
+  // created by setup for that hook alone; remove it rather than leave litter.
+  const hooksOnly =
+    Object.keys(parsed).length === 1 &&
+    Object.keys(parsed.hooks).length === 1 &&
+    kept.length === 0;
+  if (hooksOnly) {
+    await rm(settingsPath, { force: true });
+    return true;
+  }
+
   await writeFileAtomic(settingsPath, JSON.stringify(parsed, null, 2) + "\n");
   return true;
 }

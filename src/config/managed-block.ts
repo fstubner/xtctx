@@ -54,6 +54,23 @@ export function removeManagedBlocks(content: string): string {
   return result;
 }
 
+/**
+ * True when the file is predominantly CRLF, so writers can put it back the
+ * way the author had it instead of silently reformatting the whole file.
+ */
+export function isCrlfDominant(content: string): boolean {
+  const crlf = content.match(/\r\n/g)?.length ?? 0;
+  const lf = content.match(/\n/g)?.length ?? 0;
+  return crlf > 0 && crlf * 2 > lf;
+}
+
+/** Re-apply a file's original line endings to rewritten content. */
+export function matchLineEndings(content: string, original: string | null): string {
+  return original !== null && isCrlfDominant(original)
+    ? content.replace(/\r?\n/g, "\r\n")
+    : content;
+}
+
 export function countManagedBlocks(content: string): number {
   return normalizeNewlines(content).match(managedBlockPattern(false))?.length ?? 0;
 }

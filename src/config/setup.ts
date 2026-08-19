@@ -1,7 +1,12 @@
 import { mkdir, readFile, rm, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { writeFileAtomic } from "../utils/atomic-file.js";
-import { MARKERS, countManagedBlocks, removeManagedBlocks } from "./managed-block.js";
+import {
+  MARKERS,
+  countManagedBlocks,
+  matchLineEndings,
+  removeManagedBlocks,
+} from "./managed-block.js";
 import { stringify as stringifyYaml } from "yaml";
 import {
   isGlobalOnlyMcpTool,
@@ -84,6 +89,18 @@ export async function setupProject(options: SetupOptions = {}): Promise<SetupRes
     changed: await writeIfChanged(configPath, renderProjectConfig(projectRoot, skillSync.config)),
   });
 
+  // The index holds raw transcript text from every configured tool, so
+  // committing it would publish conversation content. config.yaml and
+  // skills/ are project config and stay committable.
+  writes.push({
+    path: join(xtctxDir, ".gitignore"),
+    kind: "gitignore",
+    changed: await writeIfChanged(
+      join(xtctxDir, ".gitignore"),
+      ["# Local transcript index — never commit (holds raw conversation text).", "state/", ""].join("\n"),
+    ),
+  });
+
   const serverDefinition = xtctxServerDefinition();
   const mcpSummary = await syncToolMcpConfigs(
     projectRoot,
@@ -141,6 +158,7 @@ export function describeSetupPlan(
   const skillIds = [...new Set(["xtctx-handoff", ...selectedSkillIds])];
   const writes: PlannedSetupWrite[] = [
     { path: join(projectRoot, ".xtctx", "config.yaml"), kind: "config" },
+    { path: join(projectRoot, ".xtctx", ".gitignore"), kind: "gitignore" },
     { path: join(projectRoot, ".mcp.json"), kind: "mcp:claude-code" },
     { path: join(projectRoot, ".cursor", "mcp.json"), kind: "mcp:cursor" },
     { path: join(projectRoot, ".vscode", "mcp.json"), kind: "mcp:copilot" },
@@ -432,22 +450,13 @@ async function writeIfChanged(filePath: string, content: string): Promise<boolea
   const existing = await readUtf8IfExists(filePath);
   // Preserve the existing file's dominant line endings instead of silently
   // converting a CRLF-authored file to LF.
-  const finalContent =
-    existing !== null && isCrlfDominant(existing)
-      ? content.replace(/\r?\n/g, "\r\n")
-      : content;
+  const finalContent = matchLineEndings(content, existing);
   if (existing !== null && existing === finalContent) {
     return false;
   }
 
   await writeFileAtomic(filePath, finalContent);
   return true;
-}
-
-function isCrlfDominant(content: string): boolean {
-  const crlf = content.match(/\r\n/g)?.length ?? 0;
-  const lf = content.match(/\n/g)?.length ?? 0;
-  return crlf > 0 && crlf * 2 > lf;
 }
 
 async function readUtf8IfExists(filePath: string): Promise<string | null> {

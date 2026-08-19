@@ -138,6 +138,16 @@ describe("setupProject", () => {
     expect(legacy.hooks.SessionStart).toEqual([{ type: "command", command: "echo keep-legacy" }]);
   });
 
+  it("keeps the transcript index out of git", async () => {
+    // README calls .xtctx/state/xtctx.db "never commit", but nothing enforced
+    // it — the index holds raw transcript text from every configured tool, so
+    // an accidental commit publishes conversation content.
+    await setupProject({ projectPath: projectRoot, homeDir, yes: true });
+
+    const ignore = await readFile(join(projectRoot, ".xtctx", ".gitignore"), "utf-8");
+    expect(ignore).toContain("state/");
+  });
+
   it("describes planned writes before setup applies them", () => {
     const plan = describeSetupPlan(projectRoot);
 

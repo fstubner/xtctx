@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
@@ -686,6 +686,21 @@ async function removeMcpConfig(
 
     delete existingEntries[serverName];
     const updated = { ...existing, [rootKey]: existingEntries };
+
+    // If removing our entry leaves a project file that is nothing but an
+    // empty xtctx container, setup created it and disconnect owns removing it
+    // — leaving `{"mcp":{}}` behind is litter, not preservation. User-global
+    // app configs are left in place: they belong to the tool, not to us.
+    const onlyEmptyContainer =
+      scope === "project" &&
+      Object.keys(existingEntries).length === 0 &&
+      Object.keys(updated).length === 1 &&
+      Object.prototype.hasOwnProperty.call(updated, rootKey);
+    if (onlyEmptyContainer) {
+      await rm(configPath, { force: true });
+      return { tool, path: configPath, scope, removed: true, skipped: false };
+    }
+
     const content = serializeConfig(updated, format);
 
     if (normalizeNewlines(existingContent) !== normalizeNewlines(content)) {

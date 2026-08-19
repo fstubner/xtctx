@@ -42,8 +42,9 @@ describe("disconnectProject", () => {
     ) as { mcpServers: Record<string, unknown> };
     expect(antigravityConfig.mcpServers.xtctx).toBeUndefined();
 
-    const geminiMd = await readFile(join(projectRoot, "GEMINI.md"), "utf-8");
-    expect(geminiMd).not.toContain("<!-- xtctx:begin -->");
+    // GEMINI.md held nothing but the managed block, so disconnect removes the
+    // file rather than leaving an empty one behind.
+    await expect(readFile(join(projectRoot, "GEMINI.md"), "utf-8")).rejects.toThrow();
 
     const config = parseYaml(await readFile(join(projectRoot, ".xtctx", "config.yaml"), "utf-8")) as {
       tools: Record<string, { enabled?: boolean }>;
@@ -72,10 +73,10 @@ describe("disconnectProject", () => {
 
     await disconnectProject({ projectPath: projectRoot, homeDir, tool: "cursor" });
 
-    const mcpConfig = JSON.parse(
-      await readFile(join(projectRoot, ".cursor", "mcp.json"), "utf-8"),
-    ) as { mcpServers: Record<string, unknown> };
-    expect(mcpConfig.mcpServers.xtctx).toBeUndefined();
+    // The project MCP file existed only to hold the xtctx entry.
+    await expect(
+      readFile(join(projectRoot, ".cursor", "mcp.json"), "utf-8"),
+    ).rejects.toThrow();
 
     const cursorRules = await readFile(join(projectRoot, ".cursor", "rules", "xtctx.mdc"), "utf-8");
     expect(cursorRules).toContain("User note");
@@ -83,6 +84,39 @@ describe("disconnectProject", () => {
     expect(cursorRules).not.toContain("Generated block");
     await expect(readFile(join(projectRoot, ".cursor", "rules", "xtctx-skills", "xtctx-handoff.mdc"), "utf-8"))
       .rejects.toThrow();
+  });
+
+  it("does not leave behind files that hold nothing but xtctx scaffolding", async () => {
+    await setupProject({ projectPath: projectRoot, homeDir, yes: true });
+
+    await disconnectProject({ projectPath: projectRoot, homeDir, all: true, yes: true });
+
+    // A managed file whose only content was the xtctx block, and configs that
+    // now hold an empty xtctx container, are litter created by setup.
+    await expect(readFile(join(projectRoot, "GEMINI.md"), "utf-8")).rejects.toThrow();
+    await expect(readFile(join(projectRoot, "opencode.json"), "utf-8")).rejects.toThrow();
+    await expect(
+      readFile(join(projectRoot, ".claude", "settings.json"), "utf-8"),
+    ).rejects.toThrow();
+  });
+
+  it("preserves CRLF user content when removing managed blocks", async () => {
+    // Setup preserves the file's line endings; removal rewrote the whole file
+    // as LF, so a round trip through setup + disconnect silently reformatted
+    // a CRLF-authored file — against both PRODUCT.md's "byte-for-byte" claim
+    // and ARCHITECTURE.md's "preserve the file's line endings".
+    await setupProject({ projectPath: projectRoot, homeDir, yes: true });
+    const target = join(projectRoot, "CLAUDE.md");
+    const existing = await readFile(target, "utf-8");
+    await writeFile(target, `My CRLF notes\r\n\r\n${existing.replace(/\r?\n/g, "\r\n")}`, "utf-8");
+
+    await disconnectProject({ projectPath: projectRoot, homeDir, tool: "claude-code" });
+
+    const final = await readFile(target, "utf-8");
+    expect(final).toContain("My CRLF notes");
+    expect(final).not.toContain("<!-- xtctx:begin -->");
+    expect(final.includes("\r\n")).toBe(true);
+    expect(/[^\r]\n/.test(final)).toBe(false);
   });
 
   it("removes Claude Code startup hooks without touching unrelated hooks", async () => {
