@@ -1,5 +1,7 @@
 export const DEFAULT_EMBEDDING_MODEL = "Xenova/all-MiniLM-L6-v2";
 const MAX_SEQ_TOKENS = 256;
+/** ~4 characters per token, the budget splitTextForEmbedding segments to. */
+const MAX_SEQ_CHARS = MAX_SEQ_TOKENS * 4;
 const MAX_BATCH_SIZE = 32;
 
 export interface EmbeddingProvider {
@@ -65,12 +67,12 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
       dtype: "fp32",
     });
 
-    const tokenizer = (extractor as unknown as { tokenizer?: { model_max_length?: number } })
-      .tokenizer;
-    if (tokenizer) {
-      tokenizer.model_max_length = MAX_SEQ_TOKENS;
-    }
-
+    // `model_max_length` is a getter with no setter in @huggingface/transformers,
+    // so assigning it threw a TypeError on every embed call under ESM's strict
+    // mode — semantic search failed for every user while hybrid mode silently
+    // degraded to keyword-only. Callers segment input to MAX_SEQ_TOKENS via
+    // splitTextForEmbedding before it reaches the model, and the model's own
+    // 512-token limit is the backstop, so nothing needs to be set here.
     this.extractor = extractor;
     return extractor;
   }
@@ -105,7 +107,7 @@ function toFloat32Array(data: Float32Array | Float64Array | number[]): Float32Ar
  * (~4 chars per token; the default 1000 chars stays under 256 tokens).
  * Splits on line boundaries; a single oversized line is hard-sliced.
  */
-export function splitTextForEmbedding(text: string, maxChars = 1000): string[] {
+export function splitTextForEmbedding(text: string, maxChars = MAX_SEQ_CHARS): string[] {
   if (text.length <= maxChars) {
     return [text];
   }

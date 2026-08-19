@@ -50,3 +50,20 @@ describe("poolVectors", () => {
     expect(norm).toBeCloseTo(1, 5);
   });
 });
+
+describe("TransformersEmbeddingProvider (integration)", () => {
+  // The unit tests above only cover the pure helpers, so a pipeline that
+  // threw on every call shipped undetected: semantic search failed for every
+  // user and hybrid mode swallowed the error into keyword-only results.
+  // This builds the real pipeline. Slow, but it is the only test that would
+  // have caught it.
+  it("embeds text with the real local model", async () => {
+    const { TransformersEmbeddingProvider } = await import("@xtctx/handoff/embeddings");
+    const provider = new TransformersEmbeddingProvider();
+
+    const [vector] = await provider.embedBatch(["handoff context for xtctx"]);
+
+    expect(vector.length).toBeGreaterThan(0);
+    expect(Number.isFinite(vector[0])).toBe(true);
+  }, 120_000);
+});

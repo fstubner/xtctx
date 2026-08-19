@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -246,6 +246,37 @@ describe("SqliteHandoffIndex", () => {
     expect(statusSecond.retrieval_units).toBe(statusFirst.retrieval_units);
   });
 
+  it("surfaces an embedding failure instead of silently degrading to keyword", async () => {
+    class BrokenEmbeddingProvider {
+      readonly model = "broken-embedding";
+      async embed(): Promise<Float32Array> {
+        throw new Error("embedding model unavailable");
+      }
+      async embedBatch(): Promise<Float32Array[]> {
+        throw new Error("embedding model unavailable");
+      }
+    }
+
+    const scraper = new FixtureScraper([
+      chunk("degraded-session", 0, "user", "sqlite handoff notes"),
+    ]);
+    const index = new SqliteHandoffIndex(
+      join(tempDir, "xtctx.db"),
+      tempDir,
+      [{ tool: "codex", scraper }],
+      { embeddingProvider: new BrokenEmbeddingProvider() },
+    );
+
+    // Hybrid still answers from keyword, but the failure must not be silent.
+    const results = await index.searchSessions("sqlite", 5, undefined, "hybrid");
+    const status = await index.getStatus();
+
+    expect(results.length).toBeGreaterThan(0);
+    expect(status.embedding_error).toContain("embedding model unavailable");
+
+    await index.close();
+  });
+
   it("rebuilds a corrupt index database instead of crashing", async () => {
     const dbPath = join(tempDir, "xtctx.db");
     await writeFile(dbPath, "this is not a sqlite database", "utf-8");
@@ -256,6 +287,30 @@ describe("SqliteHandoffIndex", () => {
 
     expect(recent).toHaveLength(1);
     expect(recent[0].session_ref).toBe("codex:recovered-session");
+
+    await index.close();
+  });
+
+  it("clears scraper cursors when it rebuilds, so no history is skipped", async () => {
+    // A rebuilt index starts empty, but a surviving cursor means each scraper
+    // only tops up from its last position forward — sessions still on disk
+    // vanish silently. `setup --repair` clears the whole state dir; the
+    // automatic path must not be lossier than the documented manual one.
+    const dbPath = join(tempDir, "xtctx.db");
+    const cursorPath = join(tempDir, "codex-state.json");
+    await writeFile(dbPath, "this is not a sqlite database", "utf-8");
+    await writeFile(
+      cursorPath,
+      JSON.stringify({ lastTimestamp: "2030-01-01T00:00:00.000Z" }),
+      "utf-8",
+    );
+
+    const index = new SqliteHandoffIndex(dbPath, tempDir, [
+      { tool: "codex", scraper: new FixtureScraper([chunk("s", 0, "user", "hi")]) },
+    ]);
+    await index.listRecentSessions(5);
+
+    await expect(readFile(cursorPath, "utf-8")).rejects.toThrow();
 
     await index.close();
   });

@@ -27,6 +27,9 @@ export interface HandoffStatus {
   retrieval_units: number;
   vectorized_units: number;
   vector_model: string;
+  /** Last semantic-search failure, or null. Non-null means hybrid search is
+   *  silently answering from keyword only. */
+  embedding_error: string | null;
   tools: Array<{
     tool: string;
     detected: boolean;

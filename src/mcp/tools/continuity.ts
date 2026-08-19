@@ -37,6 +37,9 @@ export function createContinuityStatusHandler(service: SessionService) {
       `- Retrieval windows: ${status.retrieval_units}`,
       `- Vectorized windows: ${status.vectorized_units}`,
       `- Vector model: ${status.vector_model}`,
+      ...(status.embedding_error
+        ? [`- Semantic search unavailable (keyword only): ${status.embedding_error}`]
+        : []),
       "",
       "### Tools",
     ];

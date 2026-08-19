@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { mkdir, rm } from "node:fs/promises";
-import { dirname } from "node:path";
+import { mkdir, readdir, rm } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import Database from "better-sqlite3";
 import type { Database as DatabaseHandle, Statement, Transaction } from "better-sqlite3";
 import type { ConversationChunk, ConversationScraper } from "../types/scraper.js";
@@ -218,9 +218,17 @@ export class SqliteHandoffIndex implements SessionService {
     }
 
     try {
-      return await this.semanticSearch(trimmed, limit, toolFilter, normalizedMode);
+      const results = await this.semanticSearch(trimmed, limit, toolFilter, normalizedMode);
+      clearSetting(this.getDb(), "last_error:embeddings");
+      return results;
     } catch (error) {
       if (normalizedMode === "hybrid") {
+        // Degrading to keyword keeps search useful, but a broken embedding
+        // path must not be invisible: it silently returned keyword-only
+        // results for every user while status still read healthy.
+        const message = error instanceof Error ? error.message : String(error);
+        setSetting(this.getDb(), "last_error:embeddings", message);
+        process.stderr.write(`xtctx: semantic search unavailable, using keyword only (${message})\n`);
         return this.keywordSearch(trimmed, limit, toolFilter);
       }
       throw error;
@@ -276,6 +284,7 @@ export class SqliteHandoffIndex implements SessionService {
       retrieval_units: retrievalUnitCount,
       vectorized_units: vectorizedUnitCount,
       vector_model: this.embeddingProvider.model,
+      embedding_error: getSetting(db, "last_error:embeddings"),
       tools,
     };
   }
@@ -741,6 +750,21 @@ export class SqliteHandoffIndex implements SessionService {
   private async deleteDatabaseFiles(): Promise<void> {
     for (const suffix of ["", "-wal", "-shm"]) {
       await rm(`${this.dbPath}${suffix}`, { force: true });
+    }
+
+    // The rebuilt index starts empty, so every scraper must re-scan from the
+    // beginning. Leaving the cursors in place would top the fresh database up
+    // from the last position only, silently dropping everything older that is
+    // still sitting in the transcript stores.
+    const stateDir = dirname(this.dbPath);
+    try {
+      for (const entry of await readdir(stateDir)) {
+        if (entry.endsWith("-state.json")) {
+          await rm(join(stateDir, entry), { force: true });
+        }
+      }
+    } catch {
+      // No state directory yet: nothing to reset.
     }
   }
 

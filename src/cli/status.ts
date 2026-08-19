@@ -39,6 +39,9 @@ export async function renderStatusBlock(services: ProjectServices): Promise<stri
   lines.push(`Index    ${services.dbPath}`);
   lines.push(`MCP      npx -y xtctx`);
   lines.push(`Scan     ${status.last_scan_at ?? "never"}`);
+  if (status.embedding_error) {
+    lines.push(`Search   semantic unavailable (keyword only): ${status.embedding_error}`);
+  }
   lines.push(
     `Data     ${status.sessions} sessions, ${status.messages} messages, ` +
       `${status.retrieval_units} retrieval windows, ${status.vectorized_units} vectorized`,
