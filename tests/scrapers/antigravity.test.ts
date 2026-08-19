@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   AntigravityScraper,
   parseAntigravityRuntimeSteps,
+  parsePosixListeningPorts,
+  parseWindowsListeningPorts,
   type AntigravityRuntimeClient,
   type AntigravityRuntimeConversation,
 } from "@xtctx/scrapers/antigravity";
@@ -350,3 +352,39 @@ async function writeArtifact(
     "utf-8",
   );
 }
+
+describe("listening-port discovery", () => {
+  // Real `netstat -ano` output shape. The PID is the last whitespace-
+  // separated field, so a suffix match attributes another process's
+  // listening ports to the language server — and the CSRF token is then
+  // POSTed to whatever is on that port.
+  const NETSTAT = [
+    "Active Connections",
+    "",
+    "  Proto  Local Address          Foreign Address        State           PID",
+    "  TCP    0.0.0.0:135            0.0.0.0:0              LISTENING       2140",
+    "  TCP    127.0.0.1:52001        0.0.0.0:0              LISTENING       140",
+    "  TCP    127.0.0.1:52002        0.0.0.0:0              LISTENING       31140",
+    "  TCP    127.0.0.1:52003        127.0.0.1:9000         ESTABLISHED     140",
+  ].join("\r\n");
+
+  it("matches the PID column exactly, not by suffix", () => {
+    expect(parseWindowsListeningPorts(NETSTAT, 140)).toEqual([52001]);
+  });
+
+  it("ignores non-listening rows for the same PID", () => {
+    expect(parseWindowsListeningPorts(NETSTAT, 140)).not.toContain(9000);
+  });
+
+  it("returns nothing for a PID that owns no listening socket", () => {
+    expect(parseWindowsListeningPorts(NETSTAT, 999)).toEqual([]);
+  });
+
+  it("parses posix lsof output", () => {
+    const lsof = [
+      "COMMAND     PID  USER   FD   TYPE DEVICE SIZE/OFF NODE NAME",
+      "language_ 4242 felix   21u  IPv4 0x1234      0t0  TCP 127.0.0.1:52010 (LISTEN)",
+    ].join("\n");
+    expect(parsePosixListeningPorts(lsof)).toEqual([52010]);
+  });
+});
