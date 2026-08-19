@@ -6,6 +6,12 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { setupProject } from "../dist/src/config/setup.js";
+// Import the real encoder rather than reimplementing it: this script kept its
+// own copy, which still stripped the leading separator dash after the product
+// stopped doing so. The synthetic store it built then no longer matched what
+// the scraper looks for, so the demo failed on macOS and Linux — and would
+// have passed while shipping a store layout no real POSIX install produces.
+import { encodePathForToolDirectory } from "../dist/src/utils/project-scope.js";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, "..");
@@ -251,10 +257,6 @@ async function callJson(client, name, args) {
 
   const text = result.content?.[0]?.text;
   return JSON.parse(text);
-}
-
-function encodePathForToolDirectory(projectPath) {
-  return projectPath.replace(/[:\\/]/g, "-").replace(/^-+|-+$/g, "");
 }
 
 function assert(condition, message) {
