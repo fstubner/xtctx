@@ -156,6 +156,13 @@ const ldJson = JSON.stringify(
       content="MCP server, Model Context Protocol, AI coding agents, local transcript retrieval, skill sync, Codex, Claude Code, Cursor, Antigravity, opencode"
     />
     <meta name="robots" content="index,follow" />
+    <!--
+      This page duplicates the homepage's content and ships its own
+      SoftwareApplication/FAQPage JSON-LD, so without a canonical the two
+      compete as separate records for the same product. Point ranking signals
+      at the homepage; drop this line if /v9/ is ever meant to rank on its own.
+    -->
+    <link rel="canonical" href="https://xtctx.com/" />
     <meta property="og:title" content="xtctx - Move between coding agents without starting over" />
     <meta
       property="og:description"

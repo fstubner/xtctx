@@ -3,6 +3,7 @@ import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import type { CopilotCliChunk } from "../types/scraper.js";
+import { pathMatchesProject } from "../utils/project-scope.js";
 import { AbstractScraper, estimateTokens, toDate } from "./base.js";
 
 const SCRAPER_NAME = "copilot-cli";
@@ -36,6 +37,17 @@ const ROLE_MAP: Record<string, CopilotCliChunk["role"]> = {
   tool: "tool",
 };
 
+/**
+ * Current Copilot CLI writes typed events ("user.message",
+ * "assistant.message", "system.message") whose payload lives under `data`.
+ * The event type itself carries the role.
+ */
+const EVENT_TYPE_ROLE_MAP: Record<string, CopilotCliChunk["role"]> = {
+  "user.message": "user",
+  "assistant.message": "assistant",
+  "system.message": "system",
+};
+
 function warnDrift(sourcePath: string, surprise: string, recordsAffected: number): void {
   console.warn(
     `[${SCRAPER_NAME}] schema-drift surprise at ${sourcePath}: ${surprise} ` +
@@ -49,6 +61,7 @@ export class CopilotCliScraper extends AbstractScraper<CopilotCliChunk> {
   constructor(
     private readonly sessionStateDir: string,
     stateDir: string,
+    private readonly projectRoot?: string,
   ) {
     super(stateDir);
   }
@@ -104,7 +117,12 @@ export class CopilotCliScraper extends AbstractScraper<CopilotCliChunk> {
         continue;
       }
 
-      yield* this.readEventsFile(eventsPath, sessionId, since);
+      try {
+        yield* this.readEventsFile(eventsPath, sessionId, since);
+      } catch (err) {
+        // One unreadable session must not abort the remaining sessions.
+        warnDrift(eventsPath, `unreadable transcript file: ${(err as Error).message}`, 0);
+      }
     }
   }
 
@@ -120,6 +138,8 @@ export class CopilotCliScraper extends AbstractScraper<CopilotCliChunk> {
 
     let messageIndex = 0;
     let lineNo = 0;
+    // null = no session.start context seen yet; only consulted when scoped.
+    let projectMatch: boolean | null = null;
 
     for await (const line of reader) {
       lineNo++;
@@ -146,6 +166,15 @@ export class CopilotCliScraper extends AbstractScraper<CopilotCliChunk> {
           `events.jsonl line is not an object (got ${describeType(event)})`,
           1,
         );
+        continue;
+      }
+
+      if (this.projectRoot && event.type === "session.start") {
+        projectMatch = sessionStartMatchesProject(event, this.projectRoot);
+        if (projectMatch === false) {
+          // Another project's session; nothing in this file belongs here.
+          return;
+        }
         continue;
       }
 
@@ -191,9 +220,20 @@ export class CopilotCliScraper extends AbstractScraper<CopilotCliChunk> {
         continue;
       }
 
+      if (this.projectRoot && projectMatch === null) {
+        // Fail closed: without session.start context this session cannot be
+        // attributed to a project, so scoped indexing must not include it.
+        warnDrift(
+          filePath,
+          "session has no session.start context; cannot attribute to a project — skipped under project scoping",
+          1,
+        );
+        return;
+      }
+
       const tsValue = event.timestamp ?? event.created_at ?? event.createdAt ?? event.time;
       const timestamp = toDate(tsValue);
-      if (timestamp <= since) {
+      if (since.getTime() > 0 && timestamp <= since) {
         messageIndex++;
         continue;
       }
@@ -232,7 +272,32 @@ function extractRole(event: Record<string, unknown>): CopilotCliChunk["role"] | 
     if (mapped) return mapped;
   }
 
+  // Typed events: event.data.role, then the role implied by the event type.
+  const data = event.data;
+  if (isRecord(data) && typeof data.role === "string") {
+    const mapped = ROLE_MAP[data.role.toLowerCase()];
+    if (mapped) return mapped;
+  }
+  if (typeof event.type === "string") {
+    const mapped = EVENT_TYPE_ROLE_MAP[event.type];
+    if (mapped) return mapped;
+  }
+
   return null;
+}
+
+function sessionStartMatchesProject(
+  event: Record<string, unknown>,
+  projectRoot: string,
+): boolean {
+  const data = event.data;
+  if (!isRecord(data)) return false;
+  const context = data.context;
+  if (!isRecord(context)) return false;
+  const candidates = [context.cwd, context.gitRoot].filter(
+    (value): value is string => typeof value === "string" && value.length > 0,
+  );
+  return candidates.some((candidate) => pathMatchesProject(candidate, projectRoot));
 }
 
 function extractContent(event: Record<string, unknown>): string | undefined {
@@ -280,6 +345,30 @@ function extractContent(event: Record<string, unknown>): string | undefined {
       .filter((t) => t.length > 0);
     const joined = texts.join("\n").trim();
     if (joined.length > 0) return joined;
+  }
+
+  // 5. Typed events: event.data.content / event.data.text.
+  const data = event.data;
+  if (isRecord(data)) {
+    if (typeof data.content === "string") {
+      const trimmed = data.content.trim();
+      if (trimmed.length > 0) return trimmed;
+    }
+    if (Array.isArray(data.content)) {
+      const texts = data.content
+        .map((item) => {
+          if (typeof item === "string") return item;
+          if (isRecord(item) && typeof item.text === "string") return item.text;
+          return "";
+        })
+        .filter((t) => t.length > 0);
+      const joined = texts.join("\n").trim();
+      if (joined.length > 0) return joined;
+    }
+    if (typeof data.text === "string") {
+      const trimmed = data.text.trim();
+      if (trimmed.length > 0) return trimmed;
+    }
   }
 
   return undefined;

@@ -1,5 +1,7 @@
 export const DEFAULT_EMBEDDING_MODEL = "Xenova/all-MiniLM-L6-v2";
 const MAX_SEQ_TOKENS = 256;
+/** ~4 characters per token, the budget splitTextForEmbedding segments to. */
+const MAX_SEQ_CHARS = MAX_SEQ_TOKENS * 4;
 const MAX_BATCH_SIZE = 32;
 
 export interface EmbeddingProvider {
@@ -65,12 +67,12 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
       dtype: "fp32",
     });
 
-    const tokenizer = (extractor as unknown as { tokenizer?: { model_max_length?: number } })
-      .tokenizer;
-    if (tokenizer) {
-      tokenizer.model_max_length = MAX_SEQ_TOKENS;
-    }
-
+    // `model_max_length` is a getter with no setter in @huggingface/transformers,
+    // so assigning it threw a TypeError on every embed call under ESM's strict
+    // mode — semantic search failed for every user while hybrid mode silently
+    // degraded to keyword-only. Callers segment input to MAX_SEQ_TOKENS via
+    // splitTextForEmbedding before it reaches the model, and the model's own
+    // 512-token limit is the backstop, so nothing needs to be set here.
     this.extractor = extractor;
     return extractor;
   }
@@ -98,4 +100,74 @@ function toFloat32Array(data: Float32Array | Float64Array | number[]): Float32Ar
     return data;
   }
   return Float32Array.from(data);
+}
+
+/**
+ * Split text into segments that fit the embedding model's sequence window
+ * (~4 chars per token; the default 1000 chars stays under 256 tokens).
+ * Splits on line boundaries; a single oversized line is hard-sliced.
+ */
+export function splitTextForEmbedding(text: string, maxChars = MAX_SEQ_CHARS): string[] {
+  if (text.length <= maxChars) {
+    return [text];
+  }
+
+  const segments: string[] = [];
+  let current = "";
+  for (const line of text.split("\n")) {
+    if (line.length > maxChars) {
+      if (current) {
+        segments.push(current);
+        current = "";
+      }
+      for (let start = 0; start < line.length; start += maxChars) {
+        segments.push(line.slice(start, start + maxChars));
+      }
+      continue;
+    }
+
+    if (!current) {
+      current = line;
+    } else if (current.length + 1 + line.length <= maxChars) {
+      current = `${current}\n${line}`;
+    } else {
+      segments.push(current);
+      current = line;
+    }
+  }
+  if (current) {
+    segments.push(current);
+  }
+  return segments;
+}
+
+/**
+ * Mean-pool segment vectors into one unit vector, re-normalized to unit
+ * length so cosine scores stay comparable with single-segment vectors.
+ */
+export function poolVectors(vectors: Float32Array[]): Float32Array {
+  if (vectors.length === 1) {
+    return vectors[0];
+  }
+
+  const dimensions = vectors[0]?.length ?? 0;
+  const pooled = new Float32Array(dimensions);
+  for (const vector of vectors) {
+    for (let index = 0; index < dimensions; index += 1) {
+      pooled[index] += vector[index];
+    }
+  }
+
+  let norm = 0;
+  for (let index = 0; index < dimensions; index += 1) {
+    pooled[index] /= vectors.length;
+    norm += pooled[index] * pooled[index];
+  }
+  if (norm > 0) {
+    const scale = 1 / Math.sqrt(norm);
+    for (let index = 0; index < dimensions; index += 1) {
+      pooled[index] *= scale;
+    }
+  }
+  return pooled;
 }

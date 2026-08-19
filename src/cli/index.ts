@@ -13,7 +13,20 @@ const { version: CLI_VERSION } = readXtctxPackage(import.meta.url);
 export async function main(argv = process.argv): Promise<void> {
   if (shouldStartMcp(argv)) {
     const services = await createProjectServices(process.cwd());
-    await startMcpServer({ sessions: services.sessions });
+    let closed = false;
+    const shutdown = (exit: boolean) => {
+      if (closed) return;
+      closed = true;
+      void services.sessions
+        .close()
+        .catch(() => {})
+        .finally(() => {
+          if (exit) process.exit(0);
+        });
+    };
+    process.once("SIGINT", () => shutdown(true));
+    process.once("SIGTERM", () => shutdown(true));
+    await startMcpServer({ sessions: services.sessions }, () => shutdown(false));
     return;
   }
 

@@ -185,7 +185,7 @@ describe("syncToolMcpConfigs", () => {
     }
   });
 
-  it("leaves an unparsable MCP config unchanged", async () => {
+  it("leaves an unparsable MCP config unchanged and flags it as failed", async () => {
     const configPath = join(projectDir, ".mcp.json");
     await writeFile(configPath, "{ not valid json\n", "utf-8");
 
@@ -196,7 +196,63 @@ describe("syncToolMcpConfigs", () => {
     );
 
     expect(result.results[0]?.warning).toContain("Failed to parse existing MCP config");
+    expect(result.results[0]?.failed).toBe(true);
     await expect(readFile(configPath, "utf-8")).resolves.toBe("{ not valid json\n");
+  });
+
+  it("tolerates JSONC comments without clobbering them or failing setup", async () => {
+    const configPath = join(projectDir, ".vscode", "mcp.json");
+    await mkdir(join(projectDir, ".vscode"), { recursive: true });
+    const jsonc = [
+      "// my server notes",
+      "{",
+      '  "servers": {',
+      '    "mine": { "command": "my-server" }',
+      "  }",
+      "}",
+      "",
+    ].join("\n");
+    await writeFile(configPath, jsonc, "utf-8");
+
+    const result = await syncToolMcpConfigs(
+      projectDir,
+      [{ name: "xtctx", command: "npx", args: ["-y", "xtctx"], transport: "stdio" }],
+      ["copilot"],
+    );
+
+    const row = result.results[0];
+    expect(row?.failed).not.toBe(true);
+    expect(row?.skipped).toBe(true);
+    expect(row?.warning).toMatch(/comment/i);
+    // The user's commented file is preserved byte for byte.
+    await expect(readFile(configPath, "utf-8")).resolves.toBe(jsonc);
+  });
+
+  it("reports an up-to-date JSONC config as clean, with no warning", async () => {
+    const configPath = join(projectDir, ".vscode", "mcp.json");
+    await mkdir(join(projectDir, ".vscode"), { recursive: true });
+    const jsonc = [
+      "// my server notes",
+      "{",
+      '  "servers": {',
+      '    "xtctx": { "type": "stdio", "command": "npx", "args": ["-y", "xtctx"] }',
+      "  }",
+      "}",
+      "",
+    ].join("\n");
+    await writeFile(configPath, jsonc, "utf-8");
+
+    const result = await syncToolMcpConfigs(
+      projectDir,
+      [{ name: "xtctx", command: "npx", args: ["-y", "xtctx"], transport: "stdio" }],
+      ["copilot"],
+    );
+
+    const row = result.results[0];
+    expect(row?.failed).not.toBe(true);
+    expect(row?.skipped).toBe(true);
+    expect(row?.warning).toBeUndefined();
+    await expect(readFile(configPath, "utf-8")).resolves.toBe(jsonc);
   });
 
   it("writes Antigravity MCP config at the user-level app path", async () => {

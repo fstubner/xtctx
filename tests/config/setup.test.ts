@@ -71,6 +71,83 @@ describe("setupProject", () => {
     expect(config.tools.gemini).toBeUndefined();
   });
 
+  it("installs the Claude Code hook into .claude/settings.json as a matcher group", async () => {
+    await setupProject({ projectPath: projectRoot, homeDir, yes: true });
+
+    const settings = JSON.parse(
+      await readFile(join(projectRoot, ".claude", "settings.json"), "utf-8"),
+    ) as {
+      hooks: { SessionStart: Array<{ hooks: Array<{ type: string; command: string }> }> };
+    };
+    const groups = settings.hooks.SessionStart;
+    expect(Array.isArray(groups)).toBe(true);
+    const commands = groups.flatMap((group) => group.hooks.map((hook) => hook.command));
+    const hookCommand = commands.find((command) => command.includes("xtctx --hook session-start"));
+    expect(hookCommand).toBeDefined();
+    // Path independence: Claude Code runs hooks with cwd = project root, so
+    // the command must not embed the (shell-unsafe) absolute project path.
+    expect(hookCommand).not.toContain(projectRoot);
+    // The legacy location Claude Code never read is not written.
+    await expect(readFile(join(projectRoot, ".claude", "hooks.json"), "utf-8")).rejects.toThrow();
+  });
+
+  it("migrates legacy hooks.json entries and preserves user settings across reruns", async () => {
+    await mkdir(join(projectRoot, ".claude"), { recursive: true });
+    await writeFile(
+      join(projectRoot, ".claude", "hooks.json"),
+      JSON.stringify({
+        hooks: {
+          SessionStart: [
+            { type: "command", command: "echo keep-legacy" },
+            { type: "command", command: 'npx -y xtctx --hook session-start --tool claude-code --project "x"' },
+          ],
+        },
+      }),
+      "utf-8",
+    );
+    await writeFile(
+      join(projectRoot, ".claude", "settings.json"),
+      JSON.stringify({
+        permissions: { allow: ["Bash(ls:*)"] },
+        hooks: {
+          SessionStart: [{ hooks: [{ type: "command", command: "echo keep-user" }] }],
+        },
+      }),
+      "utf-8",
+    );
+
+    await setupProject({ projectPath: projectRoot, homeDir, yes: true });
+    await setupProject({ projectPath: projectRoot, homeDir, yes: true });
+
+    const settings = JSON.parse(
+      await readFile(join(projectRoot, ".claude", "settings.json"), "utf-8"),
+    ) as {
+      permissions: { allow: string[] };
+      hooks: { SessionStart: Array<{ hooks: Array<{ command: string }> }> };
+    };
+    expect(settings.permissions.allow).toEqual(["Bash(ls:*)"]);
+    const commands = settings.hooks.SessionStart.flatMap((group) =>
+      group.hooks.map((hook) => hook.command),
+    );
+    expect(commands.filter((command) => command.includes("xtctx --hook session-start"))).toHaveLength(1);
+    expect(commands).toContain("echo keep-user");
+
+    const legacy = JSON.parse(
+      await readFile(join(projectRoot, ".claude", "hooks.json"), "utf-8"),
+    ) as { hooks: { SessionStart: Array<{ command: string }> } };
+    expect(legacy.hooks.SessionStart).toEqual([{ type: "command", command: "echo keep-legacy" }]);
+  });
+
+  it("keeps the transcript index out of git", async () => {
+    // README calls .xtctx/state/xtctx.db "never commit", but nothing enforced
+    // it — the index holds raw transcript text from every configured tool, so
+    // an accidental commit publishes conversation content.
+    await setupProject({ projectPath: projectRoot, homeDir, yes: true });
+
+    const ignore = await readFile(join(projectRoot, ".xtctx", ".gitignore"), "utf-8");
+    expect(ignore).toContain("state/");
+  });
+
   it("describes planned writes before setup applies them", () => {
     const plan = describeSetupPlan(projectRoot);
 
@@ -172,6 +249,36 @@ describe("setupProject", () => {
       .resolves.toContain("xtctx Handoff");
     await expect(readFile(join(projectRoot, ".xtctx", "skills", "external-skill", "SKILL.md"), "utf-8"))
       .rejects.toThrow();
+  });
+
+  it("preserves CRLF user content and fenced blank lines across managed writes", async () => {
+    await writeFile(
+      join(projectRoot, "CLAUDE.md"),
+      "My notes\r\n\r\n```txt\r\nline1\r\n\r\n\r\n\r\nline2\r\n```\r\n",
+      "utf-8",
+    );
+
+    await setupProject({ projectPath: projectRoot, homeDir, yes: true });
+
+    const content = await readFile(join(projectRoot, "CLAUDE.md"), "utf-8");
+    expect(content).toContain("<!-- xtctx:begin -->");
+    // Blank lines inside the user's code fence survive, still CRLF.
+    expect(content).toContain("line1\r\n\r\n\r\n\r\nline2");
+  });
+
+  it("does not duplicate cursor rule frontmatter after a user edit", async () => {
+    await setupProject({ projectPath: projectRoot, homeDir, yes: true });
+    const mdcPath = join(projectRoot, ".cursor", "rules", "xtctx.mdc");
+    const edited = (await readFile(mdcPath, "utf-8")).replace(
+      "description:",
+      "description: my custom",
+    );
+    await writeFile(mdcPath, edited, "utf-8");
+
+    await setupProject({ projectPath: projectRoot, homeDir, yes: true });
+
+    const final = await readFile(mdcPath, "utf-8");
+    expect(final.match(/^---$/gm) ?? []).toHaveLength(2);
   });
 
   it("repairs duplicated stale managed blocks idempotently", async () => {

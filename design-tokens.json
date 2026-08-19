@@ -1,0 +1,12 @@
+{
+  "dark": {
+    "text-main": "#e8f1ff",
+    "text-muted": "#91a8cf",
+    "surface-base": "#040a16"
+  },
+  "light": {
+    "text-main": "#142640",
+    "text-muted": "#4e6386",
+    "surface-base": "#f3f7ff"
+  }
+}

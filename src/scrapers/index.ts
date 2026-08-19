@@ -18,7 +18,13 @@ export type {
   ScraperState,
 } from "../types/scraper.js";
 
-export { AbstractScraper, ScraperStateManager, estimateTokens } from "./base.js";
+export { AbstractScraper, ScraperStateManager, estimateTokens, toDate } from "./base.js";
+export { ScraperRegistry } from "./registry.js";
+
 export { AntigravityScraper } from "./antigravity.js";
-export { OpenCodeScraper } from "./opencode.js";
+export { ClaudeCodeScraper } from "./claude-code.js";
+export { CodexCliScraper } from "./codex.js";
+export { CopilotScraper } from "./copilot.js";
 export { CopilotCliScraper } from "./copilot-cli.js";
+export { CursorScraper } from "./cursor.js";
+export { OpenCodeScraper } from "./opencode.js";

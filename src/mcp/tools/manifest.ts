@@ -20,11 +20,23 @@ export function createHandoffManifestHandler(service: SessionService) {
   return async (raw: Record<string, unknown> = {}) => {
     const params = raw as unknown as HandoffManifestParams;
     const requestedRefs = uniqueStrings(params.session_refs);
-    const limit = normalizeLimit(params.limit, requestedRefs.length || DEFAULT_LIMIT);
-    const sessions = await service.listRecentSessions(limit, params.tool_filter);
-    const selected = requestedRefs.length > 0
-      ? sessions.filter((session) => requestedRefs.includes(session.session_ref))
-      : sessions;
+
+    // Requested refs are resolved directly by primary key — filtering a
+    // recency-limited list would misreport older indexed sessions as missing.
+    let selected: SessionSummary[];
+    let missingRefs: string[];
+    if (requestedRefs.length > 0) {
+      const resolved = await Promise.all(
+        requestedRefs.map((sessionRef) => service.getSessionByRef(sessionRef)),
+      );
+      selected = resolved.filter((session): session is SessionSummary => session !== null);
+      missingRefs = requestedRefs.filter((_, index) => resolved[index] === null);
+    } else {
+      const limit = normalizeLimit(params.limit, DEFAULT_LIMIT);
+      selected = await service.listRecentSessions(limit, params.tool_filter);
+      missingRefs = [];
+    }
+
     const status = await service.getStatus();
     const manifest = {
       schema_version: "xtctx/handoff-manifest/v1",
@@ -38,9 +50,7 @@ export function createHandoffManifestHandler(service: SessionService) {
         indexed_sessions: status.sessions,
       },
       sessions: selected.map(formatSession),
-      missing_session_refs: requestedRefs.filter(
-        (sessionRef) => !selected.some((session) => session.session_ref === sessionRef),
-      ),
+      missing_session_refs: missingRefs,
       contract: {
         authority: "raw-transcript",
         detail_tool: "xtctx_session_detail",

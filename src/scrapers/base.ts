@@ -11,9 +11,12 @@ export class ScraperStateManager {
     try {
       const raw = await readFile(path, "utf-8");
       const data = JSON.parse(raw) as ScraperState;
+      const parsed = new Date(data.lastTimestamp);
       return {
         ...data,
-        lastTimestamp: new Date(data.lastTimestamp),
+        // An Invalid Date makes every cutoff comparison false, re-emitting
+        // the full history on every scrape; reset to epoch instead.
+        lastTimestamp: Number.isNaN(parsed.getTime()) ? new Date(0) : parsed,
       };
     } catch {
       return { lastTimestamp: new Date(0) };

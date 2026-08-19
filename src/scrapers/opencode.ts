@@ -1,5 +1,6 @@
 import { stat } from "node:fs/promises";
 import type { OpenCodeChunk } from "../types/scraper.js";
+import { pathMatchesProject } from "../utils/project-scope.js";
 import { AbstractScraper, estimateTokens, toDate } from "./base.js";
 
 const SCRAPER_NAME = "opencode";
@@ -38,6 +39,7 @@ interface SessionRow {
   id: string;
   time_created: number;
   title: string | null;
+  directory: string | null;
 }
 
 interface MessageRow {
@@ -74,6 +76,7 @@ export class OpenCodeScraper extends AbstractScraper<OpenCodeChunk> {
   constructor(
     private readonly opencodeDbPath: string,
     stateDir: string,
+    private readonly projectRoot?: string,
   ) {
     super(stateDir);
   }
@@ -130,9 +133,13 @@ export class OpenCodeScraper extends AbstractScraper<OpenCodeChunk> {
     let db: import("better-sqlite3").Database;
     try {
       db = new Database(this.opencodeDbPath, { readonly: true, fileMustExist: true });
-    } catch {
-      // ACCEPTED_DEGRADATIONS.missingDatabase
-      return;
+    } catch (err) {
+      // The file exists (checked above), so failing to open it is a broken
+      // store, not an absent one. Reporting it as absent made a corrupt
+      // database read as a pristine install in status.
+      throw new Error(
+        `[${SCRAPER_NAME}] opencode database at ${this.opencodeDbPath} could not be opened: ${(err as Error).message}`,
+      );
     }
 
     try {
@@ -150,16 +157,46 @@ export class OpenCodeScraper extends AbstractScraper<OpenCodeChunk> {
     try {
       sessions = db
         .prepare(
-          "SELECT id, time_created, title FROM session ORDER BY time_created ASC",
+          "SELECT id, time_created, title, directory FROM session ORDER BY time_created ASC",
         )
         .all() as SessionRow[];
-    } catch (err) {
-      warnDrift(
-        this.opencodeDbPath,
-        `session table query failed: ${(err as Error).message}`,
-        0,
+    } catch {
+      // Older opencode schemas may lack the directory column; retry without it.
+      try {
+        sessions = (
+          db
+            .prepare("SELECT id, time_created, title FROM session ORDER BY time_created ASC")
+            .all() as Omit<SessionRow, "directory">[]
+        ).map((row) => ({ ...row, directory: null }));
+      } catch (err) {
+        const message = (err as Error).message;
+        if (/not a database|file is encrypted|malformed|corrupt/i.test(message)) {
+          // Corruption, not schema drift — surface it rather than reporting
+          // an empty store.
+          throw new Error(
+            `[${SCRAPER_NAME}] opencode database at ${this.opencodeDbPath} is unreadable: ${message}`,
+          );
+        }
+        warnDrift(this.opencodeDbPath, `session table query failed: ${message}`, 0);
+        return;
+      }
+    }
+
+    if (this.projectRoot) {
+      const root = this.projectRoot;
+      // Fail closed: a session with no directory cannot be attributed to a
+      // project, so scoped indexing must never include it.
+      const unattributable = sessions.filter((session) => session.directory === null).length;
+      if (unattributable > 0) {
+        warnDrift(
+          this.opencodeDbPath,
+          "sessions without a 'directory' value cannot be attributed to a project; skipped under project scoping",
+          unattributable,
+        );
+      }
+      sessions = sessions.filter(
+        (session) => session.directory !== null && pathMatchesProject(session.directory, root),
       );
-      return;
     }
 
     if (sessions.length === 0) {
@@ -242,7 +279,7 @@ export class OpenCodeScraper extends AbstractScraper<OpenCodeChunk> {
         // Timestamp: prefer msgData.time.created, fall back to msg.time_created.
         const tsValue = msgData.time?.created ?? msg.time_created;
         const timestamp = toDate(tsValue);
-        if (timestamp <= since) {
+        if (since.getTime() > 0 && timestamp <= since) {
           messageIndex++;
           continue;
         }

@@ -34,3 +34,6 @@ tmp/
 
 # Per-run artifact from ranking eval (only the committed baseline is tracked)
 tests/eval/results/ranking-latest.json
+
+# Checker output from the agent-skills acceptance gate
+.agent-evidence/

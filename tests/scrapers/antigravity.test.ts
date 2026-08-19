@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   AntigravityScraper,
   parseAntigravityRuntimeSteps,
+  parsePosixListeningPorts,
+  parseWindowsListeningPorts,
   type AntigravityRuntimeClient,
   type AntigravityRuntimeConversation,
 } from "@xtctx/scrapers/antigravity";
@@ -32,6 +34,17 @@ describe("AntigravityScraper", () => {
   afterEach(async () => {
     await rm(rootDir, { recursive: true, force: true });
     await rm(stateDir, { recursive: true, force: true });
+  });
+
+  it("does not report Antigravity as installed because xtctx wrote its MCP config", async () => {
+    // `setup` writes ~/.gemini/antigravity/mcp_config.json unconditionally,
+    // so counting that file as evidence made status flip from "not detected"
+    // to "detected" purely as a side effect of running setup.
+    await writeFile(join(rootDir, "mcp_config.json"), "{}", "utf-8");
+
+    const scraper = new AntigravityScraper(rootDir, stateDir, projectRoot, emptyRuntimeClient());
+
+    await expect(scraper.detect()).resolves.toBe(false);
   });
 
   it("detects Antigravity state when brain artifacts are present", async () => {
@@ -220,7 +233,11 @@ describe("AntigravityScraper", () => {
     expect(chunks.map((chunk) => chunk.sessionId)).not.toContain("artifact-fallback");
   });
 
-  it("matches runtime conversations by project name when Antigravity omits workspace paths", async () => {
+  it("excludes runtime conversations whose only link to the project is its name", async () => {
+    // Attribution must be path-based. Matching the project's directory name
+    // anywhere in the text attributed *another* project's private
+    // conversation to this one whenever it happened to mention the word —
+    // observed live during an acceptance review. Fail closed instead.
     const chunks = await collect(new AntigravityScraper(
       rootDir,
       stateDir,
@@ -244,8 +261,34 @@ describe("AntigravityScraper", () => {
       ]),
     ));
 
-    expect(chunks).toHaveLength(1);
-    expect(chunks[0].sessionId).toBe("cascade-summary-only");
+    expect(chunks).toHaveLength(0);
+  });
+
+  it("does not leak another project's conversation that mentions this project's name", async () => {
+    const chunks = await collect(new AntigravityScraper(
+      rootDir,
+      stateDir,
+      projectRoot,
+      runtimeClient([
+        {
+          sessionId: "cascade-other-project",
+          title: "work in the other repo",
+          workspaces: ["file:///h:/projects/private/needs-work/other-thing"],
+          messages: [
+            {
+              sessionId: "cascade-other-project",
+              timestamp: new Date("2026-05-10T12:00:00.000Z"),
+              role: "user",
+              content: "port the xtctx approach over to this repo",
+              referencedFiles: ["h:/projects/private/needs-work/other-thing/src/main.ts"],
+              stepType: "CORTEX_STEP_TYPE_USER_INPUT",
+            },
+          ],
+        },
+      ]),
+    ));
+
+    expect(chunks).toHaveLength(0);
   });
 
   it("parses raw Antigravity language-server steps into user, assistant, and tool messages", () => {
@@ -350,3 +393,39 @@ async function writeArtifact(
     "utf-8",
   );
 }
+
+describe("listening-port discovery", () => {
+  // Real `netstat -ano` output shape. The PID is the last whitespace-
+  // separated field, so a suffix match attributes another process's
+  // listening ports to the language server — and the CSRF token is then
+  // POSTed to whatever is on that port.
+  const NETSTAT = [
+    "Active Connections",
+    "",
+    "  Proto  Local Address          Foreign Address        State           PID",
+    "  TCP    0.0.0.0:135            0.0.0.0:0              LISTENING       2140",
+    "  TCP    127.0.0.1:52001        0.0.0.0:0              LISTENING       140",
+    "  TCP    127.0.0.1:52002        0.0.0.0:0              LISTENING       31140",
+    "  TCP    127.0.0.1:52003        127.0.0.1:9000         ESTABLISHED     140",
+  ].join("\r\n");
+
+  it("matches the PID column exactly, not by suffix", () => {
+    expect(parseWindowsListeningPorts(NETSTAT, 140)).toEqual([52001]);
+  });
+
+  it("ignores non-listening rows for the same PID", () => {
+    expect(parseWindowsListeningPorts(NETSTAT, 140)).not.toContain(9000);
+  });
+
+  it("returns nothing for a PID that owns no listening socket", () => {
+    expect(parseWindowsListeningPorts(NETSTAT, 999)).toEqual([]);
+  });
+
+  it("parses posix lsof output", () => {
+    const lsof = [
+      "COMMAND     PID  USER   FD   TYPE DEVICE SIZE/OFF NODE NAME",
+      "language_ 4242 felix   21u  IPv4 0x1234      0t0  TCP 127.0.0.1:52010 (LISTEN)",
+    ].join("\n");
+    expect(parsePosixListeningPorts(lsof)).toEqual([52010]);
+  });
+});

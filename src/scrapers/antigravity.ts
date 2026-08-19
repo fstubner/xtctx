@@ -81,8 +81,10 @@ export class AntigravityScraper extends AbstractScraper<AntigravityChunk> {
         return false;
       }
 
+      // Deliberately not mcp_config.json: xtctx's own setup writes that file,
+      // so treating it as evidence made a diagnostic report its own side
+      // effect as an installed tool. Only Antigravity's own state counts.
       return (await pathIsDirectory(join(this.antigravityRoot, "brain"))) ||
-        (await pathExists(join(this.antigravityRoot, "mcp_config.json"))) ||
         (await pathIsDirectory(join(this.antigravityRoot, "conversations")));
     } catch {
       return false;
@@ -721,16 +723,41 @@ async function findListeningPorts(pid: number): Promise<number[]> {
   return process.platform === "win32" ? findWindowsListeningPorts(pid) : findPosixListeningPorts(pid);
 }
 
+/**
+ * Extract the ports a specific PID is listening on from `netstat -ano`.
+ *
+ * The PID is the last whitespace-separated column. Matching it with
+ * `endsWith` treats PID 2140 as a match for PID 140, which would attribute
+ * an unrelated process's port to the language server — and the CSRF token
+ * is POSTed to whatever answers there. The column is compared exactly.
+ */
+export function parseWindowsListeningPorts(netstatOutput: string, pid: number): number[] {
+  return netstatOutput
+    .split(/\r?\n/)
+    .filter((line) => {
+      const columns = line.trim().split(/\s+/);
+      return columns.includes("LISTENING") && columns[columns.length - 1] === String(pid);
+    })
+    .map((line) => line.match(/\s(?:127\.0\.0\.1|0\.0\.0\.0|\[::1\]):(\d+)\s/)?.[1])
+    .filter((value): value is string => value !== undefined)
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value));
+}
+
+/** Extract listening ports from `lsof -Pan -p <pid> -iTCP -sTCP:LISTEN`. */
+export function parsePosixListeningPorts(lsofOutput: string): number[] {
+  return lsofOutput
+    .split(/\r?\n/)
+    .map((line) => line.match(/:(\d+)\s+\(LISTEN\)/)?.[1])
+    .filter((value): value is string => value !== undefined)
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value));
+}
+
 async function findWindowsListeningPorts(pid: number): Promise<number[]> {
   try {
     const { stdout } = await execFileAsync("netstat", ["-ano"], { timeout: 10_000 });
-    return String(stdout)
-      .split(/\r?\n/)
-      .filter((line) => line.includes("LISTENING") && line.trim().endsWith(String(pid)))
-      .map((line) => line.match(/\s(?:127\.0\.0\.1|0\.0\.0\.0|\[::1\]):(\d+)\s/)?.[1])
-      .filter((value): value is string => value !== undefined)
-      .map((value) => Number(value))
-      .filter((value) => Number.isFinite(value));
+    return parseWindowsListeningPorts(String(stdout), pid);
   } catch {
     return [];
   }
@@ -743,12 +770,7 @@ async function findPosixListeningPorts(pid: number): Promise<number[]> {
       ["-Pan", "-p", String(pid), "-iTCP", "-sTCP:LISTEN"],
       { timeout: 10_000 },
     );
-    return String(stdout)
-      .split(/\r?\n/)
-      .map((line) => line.match(/:(\d+)\s+\(LISTEN\)/)?.[1])
-      .filter((value): value is string => value !== undefined)
-      .map((value) => Number(value))
-      .filter((value) => Number.isFinite(value));
+    return parsePosixListeningPorts(String(stdout));
   } catch {
     return [];
   }
@@ -764,7 +786,12 @@ async function callLanguageServer(
     const body = JSON.stringify(payload);
     const req = httpsRequest(
       {
-        hostname: "localhost",
+        // Loopback only, and the language server presents a self-signed
+        // certificate there is no CA to validate against — so verification is
+        // off by necessity, not convenience. The control that matters is
+        // sending the CSRF token to the *right* process, which is why the
+        // PID column is matched exactly (see parseWindowsListeningPorts).
+        hostname: "127.0.0.1",
         port: endpoint.port,
         path: `/${LANGUAGE_SERVER_SERVICE}/${method}`,
         method: "POST",
@@ -847,6 +874,12 @@ function runtimeConversationMatchesProject(
     return true;
   }
 
+  // Path evidence only. A previous fallback attributed a conversation when
+  // the project's directory name appeared as a word anywhere in the title or
+  // message text, which handed another project's private transcript to this
+  // one whenever it mentioned that word — any project called `core`, `docs`,
+  // or `client` collected most of the machine. A conversation Antigravity
+  // gives us no path for is not attributable, so it is excluded.
   return conversation.messages.some((message) =>
     textMentionsProject(
       [
@@ -856,12 +889,6 @@ function runtimeConversationMatchesProject(
       ].join("\n"),
       projectRoot,
     ),
-  ) || runtimeTextMentionsProjectName(
-    [
-      conversation.title ?? "",
-      ...conversation.messages.map((message) => message.content),
-    ].join("\n"),
-    projectRoot,
   );
 }
 
@@ -871,16 +898,6 @@ function textMentionsProject(value: string, projectRoot: string): boolean {
   const projectName = normalizeSearchText(basename(projectRoot));
   return text.includes(root) || text.includes(`/playground/${projectName}/`) ||
     text.endsWith(`/playground/${projectName}`);
-}
-
-function runtimeTextMentionsProjectName(value: string, projectRoot: string): boolean {
-  const projectName = normalizeSearchText(basename(projectRoot));
-  if (projectName.length < 4) {
-    return false;
-  }
-
-  const escaped = projectName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`(^|[^a-z0-9_-])${escaped}([^a-z0-9_-]|$)`, "i").test(value);
 }
 
 function extractWorkspaceUris(summary: Record<string, unknown>): string[] {
@@ -1022,15 +1039,6 @@ async function listFileNames(path: string): Promise<string[]> {
     return entries.filter((entry) => entry.isFile()).map((entry) => entry.name).sort();
   } catch {
     return [];
-  }
-}
-
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await stat(path);
-    return true;
-  } catch {
-    return false;
   }
 }
 

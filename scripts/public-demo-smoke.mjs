@@ -66,6 +66,30 @@ try {
     );
     assert(codexMatch, "expected keyword search to find the synthetic Codex session");
 
+    // Exercise the embedding path too. Pinning this to keyword let a broken
+    // pipeline — which threw on every embed call and silently degraded hybrid
+    // to keyword-only — pass the whole release gate.
+    const vectorSearch = await callJson(client, "xtctx_search_sessions", {
+      query: "synthetic public demo",
+      mode: "vector",
+      limit: 3,
+      format: "json",
+    });
+    assert(
+      vectorSearch.sessions.length > 0,
+      "expected semantic search to return a session (embedding pipeline broken?)",
+    );
+
+    const vectorStatus = await callJson(client, "xtctx_continuity_status", { format: "json" });
+    assert(
+      !vectorStatus.embedding_error,
+      `expected no embedding error, got: ${vectorStatus.embedding_error}`,
+    );
+    assert(
+      vectorStatus.vectorized_units > 0,
+      "expected the demo to produce vectorized retrieval windows",
+    );
+
     const detail = await callJson(client, "xtctx_session_detail", {
       session_ref: "codex:demo-codex-session",
       offset: 0,

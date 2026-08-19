@@ -12,7 +12,11 @@ export interface StatusOptions {
 export async function runStatus(options: StatusOptions = {}): Promise<void> {
   const projectRoot = resolve(options.projectPath ?? process.cwd());
   const services = await createProjectServices(projectRoot);
-  process.stdout.write((await renderStatusBlock(services)) + "\n");
+  try {
+    process.stdout.write((await renderStatusBlock(services)) + "\n");
+  } finally {
+    await services.sessions.close().catch(() => {});
+  }
 }
 
 export async function renderStatusBlock(services: ProjectServices): Promise<string> {
@@ -35,13 +39,13 @@ export async function renderStatusBlock(services: ProjectServices): Promise<stri
   lines.push(`Index    ${services.dbPath}`);
   lines.push(`MCP      npx -y xtctx`);
   lines.push(`Scan     ${status.last_scan_at ?? "never"}`);
+  if (status.embedding_error) {
+    lines.push(`Search   semantic unavailable (keyword only): ${status.embedding_error}`);
+  }
   lines.push(
     `Data     ${status.sessions} sessions, ${status.messages} messages, ` +
       `${status.retrieval_units} retrieval windows, ${status.vectorized_units} vectorized`,
   );
-  if (status.last_scan_at === null && status.sessions === 0) {
-    lines.push("Next     No sessions are indexed yet. Ask a configured agent to call xtctx_recent_sessions.");
-  }
   lines.push("");
   lines.push("Tools:");
 
@@ -49,10 +53,17 @@ export async function renderStatusBlock(services: ProjectServices): Promise<stri
     const definition = SUPPORTED_TOOLS.find((item) => item.id === tool.tool);
     const hook = definition?.hookMode ?? "mcp-only";
     const marker = tool.detected ? "+" : "-";
+    const error = tool.last_error ? `; last scrape error: ${tool.last_error}` : "";
     lines.push(
       `  ${marker} ${tool.tool.padEnd(13)} ${tool.detected ? "detected" : "not detected"}; ` +
-        `${tool.indexed_sessions} sessions; hook: ${hook}`,
+        `${tool.indexed_sessions} sessions; hook: ${hook}${error}`,
     );
+    // `.xtctx/config.yaml` is committable, so a cloned repo can point a
+    // scraper at any directory on disk. Overrides stay legal but visible.
+    const custom = customStorePaths(definition, tool.store_paths);
+    for (const path of custom) {
+      lines.push(`      custom store path (not the ${tool.tool} default): ${path}`);
+    }
   }
 
   lines.push("");
@@ -87,6 +98,27 @@ export async function renderStatusBlock(services: ProjectServices): Promise<stri
     lines.push(`  ${state.padEnd(12)} ${file.label} ${file.path}${details.length ? ` (${details.join("; ")})` : ""}`);
   }
 
+  // Status always ends with one concrete next step, as ux-walkthrough.md
+  // promises. Repairing wiring outranks indexing advice: a drifted managed
+  // file or missing skill target is why an agent would see nothing at all.
+  const needsRepair =
+    !configPresent ||
+    managed.some((file) => file.exists && (file.blockCount !== 1 || file.staleReferences.length > 0)) ||
+    skills.selected.some((skill) => !skill.exists) ||
+    // Only `missing` and `drift` are faults. `managed-block` and
+    // `unsupported` are the normal, healthy states for tools that carry
+    // skills inside their instruction file or not at all.
+    skills.targets.some((target) => target.state === "missing" || target.state === "drift");
+
+  lines.push("");
+  if (needsRepair) {
+    lines.push("Next     Wiring has drifted. Run: xtctx setup --repair");
+  } else if (status.sessions === 0) {
+    lines.push("Next     No sessions are indexed yet. Ask a configured agent to call xtctx_recent_sessions.");
+  } else {
+    lines.push("Next     Handoff is wired. Ask a configured agent to call xtctx_recent_sessions.");
+  }
+
   return lines.join("\n");
 }
 
@@ -98,4 +130,27 @@ function managedTargets(projectRoot: string): Array<{ label: string; path: strin
     { label: "cursor", path: join(projectRoot, ".cursor", "rules", "xtctx.mdc") },
     { label: "copilot", path: join(projectRoot, ".github", "copilot-instructions.md") },
   ];
+}
+
+/** Store paths that differ from the tool's built-in default location. */
+function customStorePaths(
+  definition: (typeof SUPPORTED_TOOLS)[number] | undefined,
+  storePaths: string[],
+): string[] {
+  if (!definition) {
+    return [];
+  }
+
+  let fallback: string;
+  try {
+    fallback = normalizePath(definition.defaultStorePath());
+  } catch {
+    return [];
+  }
+
+  return storePaths.filter((path) => normalizePath(path) !== fallback);
+}
+
+function normalizePath(value: string): string {
+  return value.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
 }

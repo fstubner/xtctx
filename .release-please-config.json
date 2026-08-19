@@ -6,6 +6,12 @@
       "package-name": "xtctx",
       "include-v-in-tag": true,
       "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        {
+          "type": "generic",
+          "path": "landing/src/data/site.ts"
+        }
+      ],
       "changelog-sections": [
         {
           "type": "feat",

@@ -4,7 +4,7 @@ import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import type { ChunkMetadata, ClaudeCodeChunk } from "../types/scraper.js";
 import { AbstractScraper, estimateTokens } from "./base.js";
-import { encodePathForToolDirectory } from "../utils/project-scope.js";
+import { encodePathForToolDirectory, pathMatchesProject } from "../utils/project-scope.js";
 
 const SCRAPER_NAME = "claude-code";
 
@@ -84,7 +84,7 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
 
   parseRaw(raw: unknown): ClaudeCodeChunk {
     const obj = raw as Record<string, unknown>;
-    const timestamp = new Date((obj.timestamp as string) || 0);
+    const timestamp = parseRecordTimestamp(obj.timestamp);
     const content = extractContent(obj);
     const type = (obj.type as string) || "unknown";
     const role = extractRole(obj, type);
@@ -116,8 +116,14 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
       return;
     }
 
+    const encodedProject = this.projectRoot
+      ? encodePathForToolDirectory(this.projectRoot).toLowerCase()
+      : null;
+
     for (const projectHash of this.filterProjectDirs(projectDirs)) {
       const projectDir = join(this.claudeProjectsDir, projectHash);
+      const exactDirectory =
+        encodedProject === null || projectHash.toLowerCase() === encodedProject;
       let files: string[];
 
       try {
@@ -131,101 +137,134 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
           continue;
         }
 
-        const sessionId = file.replace(".jsonl", "");
+        const sessionId = file.replace(/\.jsonl$/, "");
         const filePath = join(projectDir, file);
-        const reader = createInterface({
-          input: createReadStream(filePath, { encoding: "utf8" }),
-          crlfDelay: Infinity,
-        });
-
-        let messageIndex = 0;
-        let lineNo = 0;
-        for await (const line of reader) {
-          lineNo++;
-          if (!line.trim()) {
-            continue;
-          }
-
-          let obj: Record<string, unknown>;
-          try {
-            obj = JSON.parse(line) as Record<string, unknown>;
-          } catch (err) {
-            // ACCEPTED_DEGRADATIONS.malformedJsonlLine, but warn so the
-            // mutation test can see drift instead of data silently vanishing.
-            warnDrift(
-              `${filePath}:${lineNo}`,
-              `line is not valid JSON: ${(err as Error).message}`,
-              1,
-            );
-            continue;
-          }
-
-          if (NON_MESSAGE_TYPES.has(String(obj.type))) {
-            continue;
-          }
-
-          // Strict-mode schema check: warn (but still emit) on shape surprise.
-          if (!("type" in obj)) {
-            warnDrift(
-              `${filePath}:${lineNo}`,
-              "record is missing required 'type' field — likely renamed",
-              1,
-            );
-          } else if (typeof obj.type !== "string" || !(obj.type in ROLE_MAP)) {
-            warnDrift(
-              `${filePath}:${lineNo}`,
-              `unknown 'type' value ${JSON.stringify(obj.type)}`,
-              1,
-            );
-          }
-
-          if (
-            "content" in obj &&
-            obj.content !== undefined &&
-            typeof obj.content !== "string"
-          ) {
-            warnDrift(
-              `${filePath}:${lineNo}`,
-              `expected 'content' to be a string, got ${describeType(obj.content)}`,
-              1,
-            );
-          }
-
-          if (!("timestamp" in obj)) {
-            warnDrift(
-              `${filePath}:${lineNo}`,
-              "record is missing 'timestamp' field",
-              1,
-            );
-          } else if (typeof obj.timestamp !== "string") {
-            warnDrift(
-              `${filePath}:${lineNo}`,
-              `expected 'timestamp' string, got ${describeType(obj.timestamp)}`,
-              1,
-            );
-          }
-
-          const timestamp = new Date((obj.timestamp as string) ?? 0);
-
-          if (timestamp <= since) {
-            messageIndex += 1;
-            continue;
-          }
-
-          obj.sessionId = sessionId;
-          obj.messageIndex = messageIndex;
-          const chunk = this.parseRaw(obj);
-          if (!chunk.content.trim()) {
-            continue;
-          }
-
-          messageIndex += 1;
-          yield chunk;
+        try {
+          yield* this.readSessionFile(filePath, sessionId, since, exactDirectory);
+        } catch (err) {
+          // One unreadable file must not abort the remaining files/projects.
+          warnDrift(filePath, `unreadable transcript file: ${(err as Error).message}`, 0);
         }
       }
     }
   }
 
+  private async *readSessionFile(
+    filePath: string,
+    sessionId: string,
+    since: Date,
+    exactDirectory: boolean,
+  ): AsyncIterable<ClaudeCodeChunk> {
+    const reader = createInterface({
+      input: createReadStream(filePath, { encoding: "utf8" }),
+      crlfDelay: Infinity,
+    });
+
+    let messageIndex = 0;
+    let lineNo = 0;
+    for await (const line of reader) {
+      lineNo++;
+      if (!line.trim()) {
+        continue;
+      }
+
+      let obj: Record<string, unknown>;
+      try {
+        obj = JSON.parse(line) as Record<string, unknown>;
+      } catch (err) {
+        // ACCEPTED_DEGRADATIONS.malformedJsonlLine, but warn so the
+        // mutation test can see drift instead of data silently vanishing.
+        warnDrift(
+          `${filePath}:${lineNo}`,
+          `line is not valid JSON: ${(err as Error).message}`,
+          1,
+        );
+        continue;
+      }
+
+      if (NON_MESSAGE_TYPES.has(String(obj.type))) {
+        continue;
+      }
+
+      if (!this.recordMatchesProject(obj, exactDirectory)) {
+        continue;
+      }
+
+      // Strict-mode schema check: warn (but still emit) on shape surprise.
+      if (!("type" in obj)) {
+        warnDrift(
+          `${filePath}:${lineNo}`,
+          "record is missing required 'type' field — likely renamed",
+          1,
+        );
+      } else if (typeof obj.type !== "string" || !(obj.type in ROLE_MAP)) {
+        warnDrift(
+          `${filePath}:${lineNo}`,
+          `unknown 'type' value ${JSON.stringify(obj.type)}`,
+          1,
+        );
+      }
+
+      if (
+        "content" in obj &&
+        obj.content !== undefined &&
+        typeof obj.content !== "string"
+      ) {
+        warnDrift(
+          `${filePath}:${lineNo}`,
+          `expected 'content' to be a string, got ${describeType(obj.content)}`,
+          1,
+        );
+      }
+
+      if (!("timestamp" in obj)) {
+        warnDrift(
+          `${filePath}:${lineNo}`,
+          "record is missing 'timestamp' field",
+          1,
+        );
+      } else if (typeof obj.timestamp !== "string") {
+        warnDrift(
+          `${filePath}:${lineNo}`,
+          `expected 'timestamp' string, got ${describeType(obj.timestamp)}`,
+          1,
+        );
+      }
+
+      const timestamp = parseRecordTimestamp(obj.timestamp);
+
+      // Every message-shaped record consumes an index, whether or not it is
+      // emitted, so chunk identity is identical between full and incremental
+      // scrapes (chunk ids hash the index).
+      const currentIndex = messageIndex;
+      messageIndex += 1;
+
+      // A zero `since` means full sync: emit even epoch-sentinel timestamps.
+      if (since.getTime() > 0 && timestamp <= since) {
+        continue;
+      }
+
+      obj.sessionId = sessionId;
+      obj.messageIndex = currentIndex;
+      const chunk = this.parseRaw(obj);
+      if (!chunk.content.trim()) {
+        continue;
+      }
+
+      yield chunk;
+    }
+  }
+
+  /**
+   * Coarse pre-filter over encoded store directory names.
+   *
+   * Encoded names are ambiguous — `-` stands for `:`, `\` and `/` alike — so
+   * this only decides which directories are worth opening. Each record's own
+   * `cwd` is what actually attributes it (see `recordMatchesProject`), which
+   * is both unambiguous and platform-independent. Keeping the prefix wide
+   * here lets sessions started from a subdirectory through; the per-record
+   * check then rejects a sibling like `<project>--secret`.
+   */
   private filterProjectDirs(projectDirs: string[]): string[] {
     if (!this.projectRoot) {
       return projectDirs;
@@ -234,9 +273,37 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
     const encodedProject = encodePathForToolDirectory(this.projectRoot).toLowerCase();
     return projectDirs.filter((projectDir) => {
       const normalized = projectDir.toLowerCase();
-      return normalized === encodedProject || normalized.startsWith(`${encodedProject}--`);
+      return normalized === encodedProject || normalized.startsWith(`${encodedProject}-`);
     });
   }
+
+  /**
+   * Attribute a record to the project by the `cwd` Claude Code stamps on it.
+   * Records without a `cwd` fall back to the directory-name decision already
+   * made by `filterProjectDirs`.
+   */
+  private recordMatchesProject(obj: Record<string, unknown>, exactDirectory: boolean): boolean {
+    if (!this.projectRoot) {
+      return true;
+    }
+    const cwd = obj.cwd;
+    if (typeof cwd !== "string" || cwd.length === 0) {
+      // No provenance on the record. An exact store-directory match is itself
+      // provenance, so keep it; a directory that only matched by prefix could
+      // be a plain sibling (`proj-v2` beside `proj`), so fail closed.
+      return exactDirectory;
+    }
+    return pathMatchesProject(cwd, this.projectRoot);
+  }
+}
+
+/**
+ * Missing or unparseable timestamps become the epoch sentinel rather than an
+ * Invalid Date, which would poison cutoff comparisons and toISOString().
+ */
+function parseRecordTimestamp(value: unknown): Date {
+  const parsed = new Date((value as string) || 0);
+  return Number.isNaN(parsed.getTime()) ? new Date(0) : parsed;
 }
 
 function extractRole(

@@ -17,7 +17,7 @@ Expected output:
 
 ```text
 xtctx public demo smoke passed
-tools: xtctx_continuity_status, xtctx_recent_sessions, xtctx_search_sessions, xtctx_session_detail
+tools: xtctx_continuity_status, xtctx_handoff_manifest, xtctx_recent_sessions, xtctx_search_sessions, xtctx_session_detail
 sessions: 2, messages: 4
 search match: codex:demo-codex-session
 data: synthetic temp transcripts only

@@ -178,6 +178,105 @@ describe("CopilotCliScraper", () => {
     expect(chunks[0].content).toBe("late");
   });
 
+  it("parses typed events with data payloads (current Copilot CLI format)", async () => {
+    await writeSessionEvents("sess-real", [
+      JSON.stringify({
+        type: "session.start",
+        data: { context: { cwd: "H:\\work\\proj", gitRoot: "H:\\work\\proj" } },
+        timestamp: "2026-02-24T09:59:00Z",
+      }),
+      JSON.stringify({
+        type: "system.message",
+        data: { role: "system", content: "system prompt" },
+        timestamp: "2026-02-24T09:59:30Z",
+      }),
+      JSON.stringify({
+        type: "user.message",
+        data: { content: "real user ask" },
+        timestamp: "2026-02-24T10:00:00Z",
+      }),
+      JSON.stringify({
+        type: "assistant.message",
+        data: { content: "real answer", model: "claude-haiku-4.5" },
+        timestamp: "2026-02-24T10:00:05Z",
+      }),
+    ]);
+
+    const scraper = new CopilotCliScraper(rootDir, stateDir);
+    const chunks: CopilotCliChunk[] = [];
+    for await (const chunk of scraper.fullSync()) chunks.push(chunk);
+
+    expect(chunks).toHaveLength(3);
+    expect(chunks[0].role).toBe("system");
+    expect(chunks[0].content).toBe("system prompt");
+    expect(chunks[1].role).toBe("user");
+    expect(chunks[1].content).toBe("real user ask");
+    expect(chunks[2].role).toBe("assistant");
+    expect(chunks[2].content).toBe("real answer");
+    expect(chunks[2].metadata.eventType).toBe("assistant.message");
+  });
+
+  it("scopes sessions to the project root from session.start context", async () => {
+    await writeSessionEvents("sess-in", [
+      JSON.stringify({
+        type: "session.start",
+        data: { context: { cwd: "H:\\work\\myproj", gitRoot: "H:\\work\\myproj" } },
+        timestamp: "2026-02-24T09:59:00Z",
+      }),
+      JSON.stringify({
+        type: "user.message",
+        data: { content: "inside" },
+        timestamp: "2026-02-24T10:00:00Z",
+      }),
+    ]);
+    await writeSessionEvents("sess-out", [
+      JSON.stringify({
+        type: "session.start",
+        data: { context: { cwd: "H:\\work\\otherproj", gitRoot: "H:\\work\\otherproj" } },
+        timestamp: "2026-02-24T09:59:00Z",
+      }),
+      JSON.stringify({
+        type: "user.message",
+        data: { content: "outside" },
+        timestamp: "2026-02-24T10:00:00Z",
+      }),
+    ]);
+
+    const scraper = new CopilotCliScraper(rootDir, stateDir, "H:\\work\\myproj");
+    const chunks: CopilotCliChunk[] = [];
+    for await (const chunk of scraper.fullSync()) chunks.push(chunk);
+
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0].content).toBe("inside");
+    expect(chunks[0].sessionId).toBe("sess-in");
+  });
+
+  it("excludes sessions with no session.start context when project-scoped", async () => {
+    const warnings: string[] = [];
+    const origWarn = console.warn;
+    console.warn = (...args) => warnings.push(args.join(" "));
+
+    await writeSessionEvents("sess-unknown", [
+      JSON.stringify({
+        type: "message",
+        role: "user",
+        content: "provenance unknown",
+        timestamp: "2026-02-24T10:00:00Z",
+      }),
+    ]);
+
+    try {
+      const scraper = new CopilotCliScraper(rootDir, stateDir, "H:\\work\\myproj");
+      const chunks: CopilotCliChunk[] = [];
+      for await (const chunk of scraper.fullSync()) chunks.push(chunk);
+
+      expect(chunks).toHaveLength(0);
+      expect(warnings.some((w) => w.includes("project"))).toBe(true);
+    } finally {
+      console.warn = origWarn;
+    }
+  });
+
   it("walks multiple session directories", async () => {
     await writeSessionEvents("sess-A", [
       JSON.stringify({

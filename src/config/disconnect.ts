@@ -1,14 +1,11 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { readFile, rm, stat } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import { writeFileAtomic } from "../utils/atomic-file.js";
+import { matchLineEndings, normalizeNewlines, removeManagedBlocks } from "./managed-block.js";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { removeMcpServerConfigs } from "./mcp-config.js";
 import { BUILT_IN_SKILL_ID, removeSyncedSkillsForTools } from "./skills.js";
 import { SUPPORTED_TOOLS, getToolDefinition, type ToolId } from "../tools/sources.js";
-
-const MARKERS = {
-  begin: "<!-- xtctx:begin -->",
-  end: "<!-- xtctx:end -->",
-};
 
 const TOOL_ALIASES: Record<string, ToolId> = {
   claude: "claude-code",
@@ -35,7 +32,14 @@ export interface DisconnectOptions {
 export interface DisconnectResult {
   projectRoot: string;
   tools: ToolId[];
-  writes: Array<{ path: string; kind: string; changed: boolean; note?: string }>;
+  writes: Array<{
+    path: string;
+    kind: string;
+    changed: boolean;
+    /** What happened to the file. Defaults to "removed" for real removals. */
+    action?: "removed" | "updated";
+    note?: string;
+  }>;
   warnings: string[];
 }
 
@@ -65,6 +69,7 @@ export function describeDisconnectPlan(options: DisconnectOptions = {}): {
     writes.push(...plannedMcpWrites(projectRoot, tool, options.homeDir));
 
     if (tool === "claude-code") {
+      writes.push({ path: join(projectRoot, ".claude", "settings.json"), kind: "hook:claude-code" });
       writes.push({ path: join(projectRoot, ".claude", "hooks.json"), kind: "hook:claude-code" });
     }
 
@@ -94,6 +99,9 @@ export async function disconnectProject(options: DisconnectOptions = {}): Promis
   writes.push({
     path: configPath,
     kind: "config",
+    // config.yaml is rewritten with the tools disabled, never deleted — it is
+    // the record that xtctx was disconnected.
+    action: "updated",
     changed: await disableToolsInProjectConfig(configPath, tools),
   });
 
@@ -118,12 +126,35 @@ export async function disconnectProject(options: DisconnectOptions = {}): Promis
 
   writes.push(...(await removeSyncedSkillsForTools(projectRoot, tools)));
 
+  if (options.all === true) {
+    // Nothing is left managing skills, so the synced source and the ignore
+    // file setup wrote are xtctx's own scaffolding, not user content.
+    // Transcript data under .xtctx/state is deliberately untouched.
+    for (const path of [
+      join(projectRoot, ".xtctx", "skills"),
+      join(projectRoot, ".xtctx", ".gitignore"),
+    ]) {
+      writes.push({
+        path,
+        kind: "skill-source",
+        changed: await removeIfPresent(path),
+      });
+    }
+  }
+
   if (tools.includes("claude-code")) {
-    const hooksPath = join(projectRoot, ".claude", "hooks.json");
+    const settingsPath = join(projectRoot, ".claude", "settings.json");
     writes.push({
-      path: hooksPath,
+      path: settingsPath,
       kind: "hook:claude-code",
-      changed: await removeClaudeHook(hooksPath),
+      changed: await removeClaudeHookFromSettings(settingsPath),
+    });
+    const legacyHooksPath = join(projectRoot, ".claude", "hooks.json");
+    writes.push({
+      path: legacyHooksPath,
+      kind: "hook:claude-code",
+      changed: await removeClaudeHook(legacyHooksPath),
+      note: "legacy hook file",
     });
   }
 
@@ -142,7 +173,7 @@ export function printDisconnectResult(result: DisconnectResult): void {
   process.stdout.write(`Project: ${result.projectRoot}\n`);
   process.stdout.write(`Tools: ${result.tools.join(", ")}\n`);
   for (const write of result.writes) {
-    const marker = write.changed ? "removed" : "ok";
+    const marker = write.changed ? (write.action ?? "removed") : "ok";
     const note = write.note ? ` (${write.note})` : "";
     process.stdout.write(`  ${marker.padEnd(8)} ${write.kind} ${write.path}${note}\n`);
   }
@@ -201,8 +232,7 @@ async function disableToolsInProjectConfig(configPath: string, tools: ToolId[]):
   }
 
   config.tools = currentTools;
-  await mkdir(dirname(configPath), { recursive: true });
-  await writeFile(configPath, stringifyYaml(config), "utf-8");
+  await writeFileAtomic(configPath, stringifyYaml(config));
   return true;
 }
 
@@ -304,8 +334,94 @@ async function removeManagedBlocksFromFile(filePath: string): Promise<boolean> {
     return false;
   }
 
-  await mkdir(dirname(filePath), { recursive: true });
-  await writeFile(filePath, repaired ? `${repaired}\n` : "", "utf-8");
+  if (!repaired || isOnlyFrontmatter(repaired)) {
+    // The file held nothing but the xtctx block — or the YAML frontmatter
+    // xtctx itself wrote above it, which Cursor would keep loading as an
+    // xtctx rule. Either way setup created it and disconnect owns removing
+    // it, rather than leaving a stub behind.
+    await rm(filePath, { force: true });
+    return true;
+  }
+
+  // Put the author's line endings back: removal must not reformat the file.
+  await writeFileAtomic(filePath, matchLineEndings(`${repaired}\n`, existing));
+  return true;
+}
+
+async function removeIfPresent(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+  } catch {
+    return false;
+  }
+  await rm(path, { recursive: true, force: true });
+  return true;
+}
+
+/** True when nothing survives but a single YAML frontmatter block. */
+function isOnlyFrontmatter(content: string): boolean {
+  const trimmed = content.trim();
+  if (!trimmed.startsWith("---")) {
+    return false;
+  }
+  const end = trimmed.indexOf("\n---", 3);
+  return end !== -1 && trimmed.slice(end + 4).trim().length === 0;
+}
+
+/** Strip xtctx SessionStart matcher groups from .claude/settings.json. */
+async function removeClaudeHookFromSettings(settingsPath: string): Promise<boolean> {
+  const raw = await readUtf8IfExists(settingsPath);
+  if (raw === null) {
+    return false;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    return false;
+  }
+
+  if (!isRecord(parsed) || !isRecord(parsed.hooks)) {
+    return false;
+  }
+
+  const sessionStart = Array.isArray(parsed.hooks.SessionStart) ? parsed.hooks.SessionStart : [];
+  const kept = sessionStart
+    .map((group) => {
+      if (!isRecord(group) || !Array.isArray(group.hooks)) {
+        return group;
+      }
+      const hooks = group.hooks.filter(
+        (hook) =>
+          !isRecord(hook) ||
+          typeof hook.command !== "string" ||
+          !hook.command.includes("xtctx --hook session-start"),
+      );
+      return hooks.length === group.hooks.length ? group : { ...group, hooks };
+    })
+    .filter(
+      (group) => !isRecord(group) || !Array.isArray(group.hooks) || group.hooks.length > 0,
+    );
+
+  if (JSON.stringify(kept) === JSON.stringify(sessionStart)) {
+    return false;
+  }
+
+  parsed.hooks.SessionStart = kept;
+
+  // A settings file left holding nothing but an empty SessionStart list was
+  // created by setup for that hook alone; remove it rather than leave litter.
+  const hooksOnly =
+    Object.keys(parsed).length === 1 &&
+    Object.keys(parsed.hooks).length === 1 &&
+    kept.length === 0;
+  if (hooksOnly) {
+    await rm(settingsPath, { force: true });
+    return true;
+  }
+
+  await writeFileAtomic(settingsPath, JSON.stringify(parsed, null, 2) + "\n");
   return true;
 }
 
@@ -338,18 +454,8 @@ async function removeClaudeHook(hooksPath: string): Promise<boolean> {
   }
 
   parsed.hooks.SessionStart = nextSessionStart;
-  await mkdir(dirname(hooksPath), { recursive: true });
-  await writeFile(hooksPath, JSON.stringify(parsed, null, 2) + "\n", "utf-8");
+  await writeFileAtomic(hooksPath, JSON.stringify(parsed, null, 2) + "\n");
   return true;
-}
-
-function removeManagedBlocks(content: string): string {
-  const normalized = normalizeNewlines(content);
-  const pattern = new RegExp(
-    `${escapeRegExp(MARKERS.begin)}[\\s\\S]*?${escapeRegExp(MARKERS.end)}\\n?`,
-    "g",
-  );
-  return normalized.replace(pattern, "").replace(/\n{3,}/g, "\n\n");
 }
 
 async function readUtf8IfExists(filePath: string): Promise<string | null> {
@@ -358,14 +464,6 @@ async function readUtf8IfExists(filePath: string): Promise<string | null> {
   } catch {
     return null;
   }
-}
-
-function normalizeNewlines(input: string): string {
-  return input.replace(/\r\n/g, "\n");
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
