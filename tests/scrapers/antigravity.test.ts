@@ -36,6 +36,17 @@ describe("AntigravityScraper", () => {
     await rm(stateDir, { recursive: true, force: true });
   });
 
+  it("does not report Antigravity as installed because xtctx wrote its MCP config", async () => {
+    // `setup` writes ~/.gemini/antigravity/mcp_config.json unconditionally,
+    // so counting that file as evidence made status flip from "not detected"
+    // to "detected" purely as a side effect of running setup.
+    await writeFile(join(rootDir, "mcp_config.json"), "{}", "utf-8");
+
+    const scraper = new AntigravityScraper(rootDir, stateDir, projectRoot, emptyRuntimeClient());
+
+    await expect(scraper.detect()).resolves.toBe(false);
+  });
+
   it("detects Antigravity state when brain artifacts are present", async () => {
     await mkdir(join(rootDir, "brain"), { recursive: true });
 
@@ -222,7 +233,11 @@ describe("AntigravityScraper", () => {
     expect(chunks.map((chunk) => chunk.sessionId)).not.toContain("artifact-fallback");
   });
 
-  it("matches runtime conversations by project name when Antigravity omits workspace paths", async () => {
+  it("excludes runtime conversations whose only link to the project is its name", async () => {
+    // Attribution must be path-based. Matching the project's directory name
+    // anywhere in the text attributed *another* project's private
+    // conversation to this one whenever it happened to mention the word —
+    // observed live during an acceptance review. Fail closed instead.
     const chunks = await collect(new AntigravityScraper(
       rootDir,
       stateDir,
@@ -246,8 +261,34 @@ describe("AntigravityScraper", () => {
       ]),
     ));
 
-    expect(chunks).toHaveLength(1);
-    expect(chunks[0].sessionId).toBe("cascade-summary-only");
+    expect(chunks).toHaveLength(0);
+  });
+
+  it("does not leak another project's conversation that mentions this project's name", async () => {
+    const chunks = await collect(new AntigravityScraper(
+      rootDir,
+      stateDir,
+      projectRoot,
+      runtimeClient([
+        {
+          sessionId: "cascade-other-project",
+          title: "work in the other repo",
+          workspaces: ["file:///h:/projects/private/needs-work/other-thing"],
+          messages: [
+            {
+              sessionId: "cascade-other-project",
+              timestamp: new Date("2026-05-10T12:00:00.000Z"),
+              role: "user",
+              content: "port the xtctx approach over to this repo",
+              referencedFiles: ["h:/projects/private/needs-work/other-thing/src/main.ts"],
+              stepType: "CORTEX_STEP_TYPE_USER_INPUT",
+            },
+          ],
+        },
+      ]),
+    ));
+
+    expect(chunks).toHaveLength(0);
   });
 
   it("parses raw Antigravity language-server steps into user, assistant, and tool messages", () => {

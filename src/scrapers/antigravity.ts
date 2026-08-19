@@ -81,8 +81,10 @@ export class AntigravityScraper extends AbstractScraper<AntigravityChunk> {
         return false;
       }
 
+      // Deliberately not mcp_config.json: xtctx's own setup writes that file,
+      // so treating it as evidence made a diagnostic report its own side
+      // effect as an installed tool. Only Antigravity's own state counts.
       return (await pathIsDirectory(join(this.antigravityRoot, "brain"))) ||
-        (await pathExists(join(this.antigravityRoot, "mcp_config.json"))) ||
         (await pathIsDirectory(join(this.antigravityRoot, "conversations")));
     } catch {
       return false;
@@ -872,6 +874,12 @@ function runtimeConversationMatchesProject(
     return true;
   }
 
+  // Path evidence only. A previous fallback attributed a conversation when
+  // the project's directory name appeared as a word anywhere in the title or
+  // message text, which handed another project's private transcript to this
+  // one whenever it mentioned that word — any project called `core`, `docs`,
+  // or `client` collected most of the machine. A conversation Antigravity
+  // gives us no path for is not attributable, so it is excluded.
   return conversation.messages.some((message) =>
     textMentionsProject(
       [
@@ -881,12 +889,6 @@ function runtimeConversationMatchesProject(
       ].join("\n"),
       projectRoot,
     ),
-  ) || runtimeTextMentionsProjectName(
-    [
-      conversation.title ?? "",
-      ...conversation.messages.map((message) => message.content),
-    ].join("\n"),
-    projectRoot,
   );
 }
 
@@ -896,16 +898,6 @@ function textMentionsProject(value: string, projectRoot: string): boolean {
   const projectName = normalizeSearchText(basename(projectRoot));
   return text.includes(root) || text.includes(`/playground/${projectName}/`) ||
     text.endsWith(`/playground/${projectName}`);
-}
-
-function runtimeTextMentionsProjectName(value: string, projectRoot: string): boolean {
-  const projectName = normalizeSearchText(basename(projectRoot));
-  if (projectName.length < 4) {
-    return false;
-  }
-
-  const escaped = projectName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`(^|[^a-z0-9_-])${escaped}([^a-z0-9_-]|$)`, "i").test(value);
 }
 
 function extractWorkspaceUris(summary: Record<string, unknown>): string[] {
@@ -1047,15 +1039,6 @@ async function listFileNames(path: string): Promise<string[]> {
     return entries.filter((entry) => entry.isFile()).map((entry) => entry.name).sort();
   } catch {
     return [];
-  }
-}
-
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await stat(path);
-    return true;
-  } catch {
-    return false;
   }
 }
 
