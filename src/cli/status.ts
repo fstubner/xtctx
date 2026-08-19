@@ -12,7 +12,11 @@ export interface StatusOptions {
 export async function runStatus(options: StatusOptions = {}): Promise<void> {
   const projectRoot = resolve(options.projectPath ?? process.cwd());
   const services = await createProjectServices(projectRoot);
-  process.stdout.write((await renderStatusBlock(services)) + "\n");
+  try {
+    process.stdout.write((await renderStatusBlock(services)) + "\n");
+  } finally {
+    await services.sessions.close().catch(() => {});
+  }
 }
 
 export async function renderStatusBlock(services: ProjectServices): Promise<string> {
@@ -49,9 +53,10 @@ export async function renderStatusBlock(services: ProjectServices): Promise<stri
     const definition = SUPPORTED_TOOLS.find((item) => item.id === tool.tool);
     const hook = definition?.hookMode ?? "mcp-only";
     const marker = tool.detected ? "+" : "-";
+    const error = tool.last_error ? `; last scrape error: ${tool.last_error}` : "";
     lines.push(
       `  ${marker} ${tool.tool.padEnd(13)} ${tool.detected ? "detected" : "not detected"}; ` +
-        `${tool.indexed_sessions} sessions; hook: ${hook}`,
+        `${tool.indexed_sessions} sessions; hook: ${hook}${error}`,
     );
   }
 
