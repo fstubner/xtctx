@@ -16,6 +16,11 @@ class FixtureSessionService implements SessionService {
     ];
   }
 
+  async getSessionByRef(sessionRef: string): Promise<SessionSummary | null> {
+    const sessions = await this.listRecentSessions();
+    return sessions.find((session) => session.session_ref === sessionRef) ?? null;
+  }
+
   async getSessionDetail(): Promise<SessionMessage[]> {
     return [
       {
@@ -44,6 +49,7 @@ class FixtureSessionService implements SessionService {
         {
           tool: "codex",
           detected: true,
+          last_error: null,
           store_paths: ["/home/user/.codex/sessions"],
           indexed_sessions: 1,
           indexed_messages: 1,
@@ -51,6 +57,10 @@ class FixtureSessionService implements SessionService {
         },
       ],
     };
+  }
+
+  async close(): Promise<void> {
+    return;
   }
 }
 

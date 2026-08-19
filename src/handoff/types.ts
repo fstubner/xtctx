@@ -30,6 +30,7 @@ export interface HandoffStatus {
   tools: Array<{
     tool: string;
     detected: boolean;
+    last_error: string | null;
     store_paths: string[];
     indexed_sessions: number;
     indexed_messages: number;
@@ -39,6 +40,7 @@ export interface HandoffStatus {
 
 export interface SessionService {
   listRecentSessions(limit: number, toolFilter?: string[]): Promise<SessionSummary[]>;
+  getSessionByRef(sessionRef: string): Promise<SessionSummary | null>;
   getSessionDetail(sessionRef: string, offset: number, limit: number): Promise<SessionMessage[]>;
   searchSessions(
     query: string,
@@ -47,6 +49,7 @@ export interface SessionService {
     mode?: SessionSearchMode,
   ): Promise<SessionSummary[]>;
   getStatus(): Promise<HandoffStatus>;
+  close(): Promise<void>;
 }
 
 export type SessionSearchMode = "hybrid" | "keyword" | "vector";

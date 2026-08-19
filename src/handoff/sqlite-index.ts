@@ -1,12 +1,14 @@
 import { createHash } from "node:crypto";
-import { mkdir } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { dirname } from "node:path";
 import Database from "better-sqlite3";
-import type { Database as DatabaseHandle } from "better-sqlite3";
+import type { Database as DatabaseHandle, Statement, Transaction } from "better-sqlite3";
 import type { ConversationChunk, ConversationScraper } from "../types/scraper.js";
 import {
   DEFAULT_EMBEDDING_MODEL,
   TransformersEmbeddingProvider,
+  poolVectors,
+  splitTextForEmbedding,
   type EmbeddingProvider,
 } from "./embeddings.js";
 import type {
@@ -22,6 +24,20 @@ import { cosineSimilarity, deserializeVector, serializeVector } from "./vector.j
 interface ToolRuntime {
   tool: string;
   scraper: ConversationScraper;
+}
+
+interface PreparedStatements {
+  upsertSession: Statement;
+  insertMessage: Statement;
+  upsertChunkTxn: Transaction<(sessionArgs: unknown[], messageArgs: unknown[]) => void>;
+  sessionRollup: Statement;
+  selectSessionMessages: Statement;
+  selectSessionTool: Statement;
+  selectUnitIds: Statement;
+  insertUnit: Statement;
+  insertUnitFts: Statement;
+  deleteUnit: Statement;
+  deleteUnitFts: Statement;
 }
 
 interface SqliteHandoffIndexOptions {
@@ -82,6 +98,13 @@ interface ToolCountRow {
   last_indexed_at: string | null;
 }
 
+/**
+ * Bumped whenever the schema shape changes. The index is derived data, so a
+ * version mismatch (older or newer) triggers a full rebuild rather than a
+ * migration — the transcript stores remain authoritative.
+ */
+const SCHEMA_VERSION = 1;
+
 const DEFAULT_LIMIT = 5;
 const MAX_LIMIT = 100;
 const DEFAULT_WINDOW_SIZE = 8;
@@ -91,10 +114,11 @@ const SOURCE_CURSOR_OVERLAP_MS = 1_000;
 
 export class SqliteHandoffIndex implements SessionService {
   private db: DatabaseHandle | null = null;
+  private stmts: PreparedStatements | null = null;
   private readonly initialized: Promise<void>;
   private refreshPromise: Promise<void> | null = null;
   private lastRefreshMs = 0;
-  private readonly refreshTtlMs = 1_000;
+  private readonly refreshTtlMs = 5_000;
   private readonly embeddingProvider: EmbeddingProvider;
   private readonly windowSize: number;
   private readonly windowStride: number;
@@ -110,6 +134,10 @@ export class SqliteHandoffIndex implements SessionService {
     this.windowSize = Math.max(2, Math.floor(options.windowSize ?? DEFAULT_WINDOW_SIZE));
     this.windowStride = Math.max(1, Math.floor(options.windowStride ?? DEFAULT_WINDOW_STRIDE));
     this.initialized = this.initialize();
+    // Attach a no-op handler so a failed open cannot become an unhandled
+    // rejection (which would kill the process) before the first caller
+    // awaits; each awaiter of `initialized` still observes the rejection.
+    this.initialized.catch(() => {});
   }
 
   async listRecentSessions(limit: number, toolFilter?: string[]): Promise<SessionSummary[]> {
@@ -123,12 +151,26 @@ export class SqliteHandoffIndex implements SessionService {
         `SELECT session_ref, tool, started_at, last_activity_at, message_count, preview, source_path
          FROM sessions
          ${where}
-         ORDER BY datetime(last_activity_at) DESC
+         ORDER BY last_activity_at DESC
          LIMIT ?`,
       )
       .all(...filters, normalizedLimit) as SessionRow[];
 
     return rows.map(formatSessionRow);
+  }
+
+  async getSessionByRef(sessionRef: string): Promise<SessionSummary | null> {
+    await this.refresh({ sessionRef });
+    const db = this.getDb();
+    const row = db
+      .prepare(
+        `SELECT session_ref, tool, started_at, last_activity_at, message_count, preview, source_path
+         FROM sessions
+         WHERE session_ref = ?`,
+      )
+      .get(sessionRef) as SessionRow | undefined;
+
+    return row ? formatSessionRow(row) : null;
   }
 
   async getSessionDetail(
@@ -145,7 +187,7 @@ export class SqliteHandoffIndex implements SessionService {
         `SELECT id, timestamp, role, content, message_index, source_pointer
          FROM messages
          WHERE session_ref = ?
-         ORDER BY datetime(timestamp) ASC, message_index ASC, id ASC
+         ORDER BY timestamp ASC, message_index ASC, id ASC
          LIMIT ? OFFSET ?`,
       )
       .all(sessionRef, normalizedLimit, normalizedOffset) as MessageRow[];
@@ -220,6 +262,7 @@ export class SqliteHandoffIndex implements SessionService {
           indexed_sessions: indexed?.sessions ?? 0,
           indexed_messages: indexed?.messages ?? 0,
           last_indexed_at: indexed?.last_indexed_at ?? null,
+          last_error: getSetting(db, `last_error:${tool}`),
         };
       }),
     );
@@ -238,7 +281,7 @@ export class SqliteHandoffIndex implements SessionService {
   }
 
   async close(): Promise<void> {
-    await this.initialized;
+    await this.initialized.catch(() => {});
     this.db?.close();
     this.db = null;
   }
@@ -259,6 +302,9 @@ export class SqliteHandoffIndex implements SessionService {
 
     if (!this.refreshPromise) {
       this.refreshPromise = this.refreshNow().finally(() => {
+        // Stamp the TTL on failure as well as success so a persistently
+        // broken refresh backs off instead of re-running on every call.
+        this.lastRefreshMs = Date.now();
         this.refreshPromise = null;
       });
     }
@@ -293,30 +339,28 @@ export class SqliteHandoffIndex implements SessionService {
             lastTimestamp: overlapTimestamp(latestTimestamp),
           });
         }
+        clearSetting(db, `last_error:${scraper.tool}`);
       } catch (error) {
         setSetting(
           db,
           `last_error:${scraper.tool}`,
           error instanceof Error ? error.message : String(error),
         );
-        if (latestTimestamp) {
-          try {
-            await scraper.saveScrapedPosition({
-              lastTimestamp: overlapTimestamp(latestTimestamp),
-            });
-          } catch {
-            // Ignore position save failures inside catch
-          }
-        }
+        // Deliberately do NOT advance the cursor here: chunks yielded before
+        // the failure may sort after content in files never reached, and
+        // advancing would skip that content permanently. Re-scraping the
+        // same window is safe (message ids are deterministic hashes).
       }
     }
 
     for (const sessionRef of touchedSessions) {
+      // Roll up message_count/preview once per touched session rather than
+      // once per inserted message (which made indexing O(N²) per session).
+      this.prepared().sessionRollup.run(sessionRef);
       this.rebuildRetrievalUnitsForSession(sessionRef);
     }
 
     setSetting(db, "last_scan_at", startedAt);
-    this.lastRefreshMs = Date.now();
   }
 
   private upsertChunk(chunk: ConversationChunk): string | null {
@@ -324,7 +368,7 @@ export class SqliteHandoffIndex implements SessionService {
       return null;
     }
 
-    const db = this.getDb();
+    const stmts = this.prepared();
     const timestamp = chunk.timestamp.toISOString();
     const sessionRef = `${chunk.tool}:${chunk.sessionId}`;
     const messageIndex = chunk.metadata.messageIndex ?? 0;
@@ -341,7 +385,113 @@ export class SqliteHandoffIndex implements SessionService {
     const metadataJson = JSON.stringify(chunk.metadata ?? {});
     const sourcePointer = sourcePathFromMetadata(chunk.metadata);
 
-    db.prepare(
+    stmts.upsertChunkTxn(
+      [
+        sessionRef,
+        chunk.tool,
+        chunk.sessionId,
+        this.projectRoot,
+        timestamp,
+        timestamp,
+        sourcePointer,
+        now,
+      ],
+      [
+        id,
+        sessionRef,
+        chunk.tool,
+        chunk.sessionId,
+        timestamp,
+        chunk.role,
+        chunk.content,
+        messageIndex,
+        contentHash,
+        metadataJson,
+        sourcePointer,
+        now,
+      ],
+    );
+
+    return sessionRef;
+  }
+
+  private rebuildRetrievalUnitsForSession(sessionRef: string): void {
+    const db = this.getDb();
+    const stmts = this.prepared();
+    const messages = stmts.selectSessionMessages.all(sessionRef) as MessageRow[];
+
+    if (messages.length === 0) {
+      db.prepare("DELETE FROM retrieval_units_fts WHERE session_ref = ?").run(sessionRef);
+      db.prepare("DELETE FROM retrieval_units WHERE session_ref = ?").run(sessionRef);
+      return;
+    }
+
+    const session = stmts.selectSessionTool.get(sessionRef) as { tool: string } | undefined;
+    if (!session) {
+      return;
+    }
+
+    // Diff the desired windows against what is stored instead of deleting
+    // everything: unit ids are deterministic content hashes, so unchanged
+    // windows (and, via the FK, their vectors) survive a re-index untouched.
+    const now = new Date().toISOString();
+    const desired = new Map<
+      string,
+      { start: MessageRow; end: MessageRow; content: string; contentHash: string }
+    >();
+    for (const window of buildMessageWindows(messages, this.windowSize, this.windowStride)) {
+      const content = formatRetrievalUnitContent(sessionRef, window.messages);
+      const contentHash = hashParts([content]);
+      const unitId = hashParts([
+        "retrieval-unit",
+        sessionRef,
+        String(window.start.message_index),
+        String(window.end.message_index),
+        contentHash,
+      ]);
+      desired.set(unitId, { start: window.start, end: window.end, content, contentHash });
+    }
+
+    const existing = new Set(
+      (stmts.selectUnitIds.all(sessionRef) as Array<{ id: string }>).map((row) => row.id),
+    );
+
+    const applyDiff = db.transaction(() => {
+      for (const unitId of existing) {
+        if (!desired.has(unitId)) {
+          stmts.deleteUnitFts.run(unitId);
+          stmts.deleteUnit.run(unitId);
+        }
+      }
+      for (const [unitId, unit] of desired) {
+        if (existing.has(unitId)) {
+          continue;
+        }
+        stmts.insertUnit.run(
+          unitId,
+          sessionRef,
+          session.tool,
+          unit.start.message_index,
+          unit.end.message_index,
+          unit.start.timestamp,
+          unit.end.timestamp,
+          unit.content,
+          unit.contentHash,
+          now,
+        );
+        stmts.insertUnitFts.run(unitId, sessionRef, session.tool, unit.content);
+      }
+    });
+    applyDiff();
+  }
+
+  private prepared(): PreparedStatements {
+    if (this.stmts) {
+      return this.stmts;
+    }
+
+    const db = this.getDb();
+    const upsertSession = db.prepare(
       `INSERT INTO sessions
        (session_ref, tool, source_session_id, project_root, started_at, last_activity_at,
         message_count, preview, source_path, updated_at)
@@ -357,125 +507,60 @@ export class SqliteHandoffIndex implements SessionService {
          END,
          source_path = COALESCE(source_path, excluded.source_path),
          updated_at = excluded.updated_at`,
-    ).run(
-      sessionRef,
-      chunk.tool,
-      chunk.sessionId,
-      this.projectRoot,
-      timestamp,
-      timestamp,
-      sourcePointer,
-      now,
     );
-
-    db.prepare(
+    const insertMessage = db.prepare(
       `INSERT OR IGNORE INTO messages
        (id, session_ref, tool, source_session_id, timestamp, role, content,
         message_index, content_hash, metadata_json, source_pointer, indexed_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-      id,
-      sessionRef,
-      chunk.tool,
-      chunk.sessionId,
-      timestamp,
-      chunk.role,
-      chunk.content,
-      messageIndex,
-      contentHash,
-      metadataJson,
-      sourcePointer,
-      now,
     );
 
-    db.prepare(
-      `INSERT OR IGNORE INTO messages_fts(rowid, session_ref, tool, role, timestamp, content)
-       SELECT rowid, session_ref, tool, role, timestamp, content
-       FROM messages
-       WHERE id = ?`,
-    ).run(id);
-
-    db.prepare(
-      `UPDATE sessions
-       SET message_count = (
-             SELECT COUNT(*) FROM messages WHERE messages.session_ref = sessions.session_ref
-           ),
-           preview = COALESCE(
-             (
-               SELECT substr(content, 1, 240)
-               FROM messages
-               WHERE messages.session_ref = sessions.session_ref
-               ORDER BY datetime(timestamp) ASC, message_index ASC, id ASC
-               LIMIT 1
+    this.stmts = {
+      upsertSession,
+      insertMessage,
+      upsertChunkTxn: db.transaction((sessionArgs: unknown[], messageArgs: unknown[]) => {
+        upsertSession.run(...sessionArgs);
+        insertMessage.run(...messageArgs);
+      }),
+      sessionRollup: db.prepare(
+        `UPDATE sessions
+         SET message_count = (
+               SELECT COUNT(*) FROM messages WHERE messages.session_ref = sessions.session_ref
              ),
-             preview
-           )
-       WHERE session_ref = ?`,
-    ).run(sessionRef);
-
-    return sessionRef;
-  }
-
-  private rebuildRetrievalUnitsForSession(sessionRef: string): void {
-    const db = this.getDb();
-    const messages = db
-      .prepare(
+             preview = COALESCE(
+               (
+                 SELECT substr(content, 1, 240)
+                 FROM messages
+                 WHERE messages.session_ref = sessions.session_ref
+                 ORDER BY timestamp ASC, message_index ASC, id ASC
+                 LIMIT 1
+               ),
+               preview
+             )
+         WHERE session_ref = ?`,
+      ),
+      selectSessionMessages: db.prepare(
         `SELECT id, timestamp, role, content, message_index, source_pointer
          FROM messages
          WHERE session_ref = ?
-         ORDER BY datetime(timestamp) ASC, message_index ASC, id ASC`,
-      )
-      .all(sessionRef) as MessageRow[];
-
-    db.prepare("DELETE FROM retrieval_units_fts WHERE session_ref = ?").run(sessionRef);
-    db.prepare("DELETE FROM retrieval_units WHERE session_ref = ?").run(sessionRef);
-
-    if (messages.length === 0) {
-      return;
-    }
-
-    const session = db
-      .prepare("SELECT tool FROM sessions WHERE session_ref = ?")
-      .get(sessionRef) as { tool: string } | undefined;
-    if (!session) {
-      return;
-    }
-
-    const now = new Date().toISOString();
-    for (const window of buildMessageWindows(messages, this.windowSize, this.windowStride)) {
-      const content = formatRetrievalUnitContent(sessionRef, window.messages);
-      const contentHash = hashParts([content]);
-      const unitId = hashParts([
-        "retrieval-unit",
-        sessionRef,
-        String(window.start.message_index),
-        String(window.end.message_index),
-        contentHash,
-      ]);
-
-      db.prepare(
+         ORDER BY timestamp ASC, message_index ASC, id ASC`,
+      ),
+      selectSessionTool: db.prepare("SELECT tool FROM sessions WHERE session_ref = ?"),
+      selectUnitIds: db.prepare("SELECT id FROM retrieval_units WHERE session_ref = ?"),
+      insertUnit: db.prepare(
         `INSERT INTO retrieval_units
          (id, session_ref, tool, message_start_index, message_end_index,
           started_at, ended_at, content, content_hash, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(
-        unitId,
-        sessionRef,
-        session.tool,
-        window.start.message_index,
-        window.end.message_index,
-        window.start.timestamp,
-        window.end.timestamp,
-        content,
-        contentHash,
-        now,
-      );
-
-      db.prepare(
+      ),
+      insertUnitFts: db.prepare(
         `INSERT INTO retrieval_units_fts(unit_id, session_ref, tool, content)
          VALUES (?, ?, ?, ?)`,
-      ).run(unitId, sessionRef, session.tool, content);
-    }
+      ),
+      deleteUnit: db.prepare("DELETE FROM retrieval_units WHERE id = ?"),
+      deleteUnitFts: db.prepare("DELETE FROM retrieval_units_fts WHERE unit_id = ?"),
+    };
+    return this.stmts;
   }
 
   private async keywordSearch(
@@ -484,7 +569,8 @@ export class SqliteHandoffIndex implements SessionService {
     toolFilter?: string[],
   ): Promise<SessionSummary[]> {
     const rows = this.queryKeywordUnits(query, limit, toolFilter);
-    return groupUnits(rows, new Map(), "keyword", normalizeLimit(limit, DEFAULT_LIMIT));
+    // Rank by BM25 position so relevance, not recency, dominates ordering.
+    return groupUnits(rows, rankKeywordRows(rows), "keyword", normalizeLimit(limit, DEFAULT_LIMIT));
   }
 
   private async semanticSearch(
@@ -562,7 +648,7 @@ export class SqliteHandoffIndex implements SessionService {
          JOIN retrieval_units u ON u.id = f.unit_id
          JOIN sessions s ON s.session_ref = u.session_ref
          WHERE retrieval_units_fts MATCH ? ${toolWhere}
-         ORDER BY bm25(retrieval_units_fts), datetime(u.ended_at) DESC
+         ORDER BY bm25(retrieval_units_fts), u.ended_at DESC
          LIMIT ?`,
       )
       .all(ftsQuery, ...filters, normalizedLimit * MAX_MATCHES_PER_SESSION) as RetrievalUnitRow[];
@@ -581,7 +667,7 @@ export class SqliteHandoffIndex implements SessionService {
           AND v.model = ?
           AND v.content_hash = u.content_hash
          WHERE v.unit_id IS NULL ${toolWhere}
-         ORDER BY datetime(u.ended_at) DESC`,
+         ORDER BY u.ended_at DESC`,
       )
       .all(this.embeddingProvider.model, ...filters) as Array<{
         unit_id: string;
@@ -593,42 +679,69 @@ export class SqliteHandoffIndex implements SessionService {
       return;
     }
 
-    const vectors = await this.embeddingProvider.embedBatch(rows.map((row) => row.content));
-    const now = new Date().toISOString();
     const upsert = db.prepare(
       `INSERT INTO retrieval_unit_vectors
        (unit_id, model, dimensions, content_hash, vector, created_at)
        VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(unit_id) DO UPDATE SET
-         model = excluded.model,
+       ON CONFLICT(unit_id, model) DO UPDATE SET
          dimensions = excluded.dimensions,
          content_hash = excluded.content_hash,
          vector = excluded.vector,
          created_at = excluded.created_at`,
     );
 
-    const transaction = db.transaction(() => {
-      rows.forEach((row, index) => {
-        const vector = vectors[index];
-        upsert.run(
-          row.unit_id,
-          this.embeddingProvider.model,
-          vector.length,
-          row.content_hash,
-          serializeVector(vector),
-          now,
-        );
+    // Bounded batches keep memory flat on a first-time index of a large
+    // history, and each batch commits before the next one embeds.
+    const unitBatchSize = 64;
+    for (let start = 0; start < rows.length; start += unitBatchSize) {
+      const batch = rows.slice(start, start + unitBatchSize);
+      // Long windows are segmented to the model's sequence budget and
+      // mean-pooled, so content beyond the window's opening still shapes
+      // the unit's vector.
+      const segmented = batch.map((row) => splitTextForEmbedding(row.content));
+      const segmentVectors = await this.embeddingProvider.embedBatch(segmented.flat());
+
+      let cursor = 0;
+      const pooled = segmented.map((segments) => {
+        const slice = segmentVectors.slice(cursor, cursor + segments.length);
+        cursor += segments.length;
+        return poolVectors(slice);
       });
-    });
-    transaction();
+
+      const now = new Date().toISOString();
+      const transaction = db.transaction(() => {
+        batch.forEach((row, index) => {
+          const vector = pooled[index];
+          upsert.run(
+            row.unit_id,
+            this.embeddingProvider.model,
+            vector.length,
+            row.content_hash,
+            serializeVector(vector),
+            now,
+          );
+        });
+      });
+      transaction();
+    }
   }
 
   private async initialize(): Promise<void> {
     await mkdir(dirname(this.dbPath), { recursive: true });
-    this.db = new Database(this.dbPath);
-    this.db.pragma("journal_mode = WAL");
-    this.db.pragma("foreign_keys = ON");
-    createSchema(this.db);
+    try {
+      this.db = openDatabase(this.dbPath);
+    } catch {
+      // The index is derived data: a corrupt or schema-incompatible database
+      // is discarded and rebuilt from the transcript stores on next refresh.
+      await this.deleteDatabaseFiles();
+      this.db = openDatabase(this.dbPath);
+    }
+  }
+
+  private async deleteDatabaseFiles(): Promise<void> {
+    for (const suffix of ["", "-wal", "-shm"]) {
+      await rm(`${this.dbPath}${suffix}`, { force: true });
+    }
   }
 
   private getDb(): DatabaseHandle {
@@ -636,6 +749,29 @@ export class SqliteHandoffIndex implements SessionService {
       throw new Error("xtctx handoff index is closed");
     }
     return this.db;
+  }
+}
+
+function openDatabase(dbPath: string): DatabaseHandle {
+  const db = new Database(dbPath);
+  try {
+    db.pragma("journal_mode = WAL");
+    db.pragma("foreign_keys = ON");
+    const objectCount = (
+      db.prepare("SELECT COUNT(*) AS count FROM sqlite_master").get() as CountRow
+    ).count;
+    const version = db.pragma("user_version", { simple: true }) as number;
+    if (objectCount > 0 && version !== SCHEMA_VERSION) {
+      throw new Error(
+        `xtctx index schema version ${version} does not match supported version ${SCHEMA_VERSION}`,
+      );
+    }
+    createSchema(db);
+    db.pragma(`user_version = ${SCHEMA_VERSION}`);
+    return db;
+  } catch (error) {
+    db.close();
+    throw error;
   }
 }
 
@@ -673,9 +809,6 @@ function createSchema(db: DatabaseHandle): void {
     CREATE INDEX IF NOT EXISTS idx_messages_session_order
       ON messages(session_ref, timestamp, message_index, id);
 
-    CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts
-      USING fts5(session_ref UNINDEXED, tool UNINDEXED, role UNINDEXED, timestamp UNINDEXED, content);
-
     CREATE TABLE IF NOT EXISTS retrieval_units (
       id TEXT PRIMARY KEY,
       session_ref TEXT NOT NULL REFERENCES sessions(session_ref) ON DELETE CASCADE,
@@ -698,12 +831,13 @@ function createSchema(db: DatabaseHandle): void {
       USING fts5(unit_id UNINDEXED, session_ref UNINDEXED, tool UNINDEXED, content);
 
     CREATE TABLE IF NOT EXISTS retrieval_unit_vectors (
-      unit_id TEXT PRIMARY KEY REFERENCES retrieval_units(id) ON DELETE CASCADE,
+      unit_id TEXT NOT NULL REFERENCES retrieval_units(id) ON DELETE CASCADE,
       model TEXT NOT NULL,
       dimensions INTEGER NOT NULL,
       content_hash TEXT NOT NULL,
       vector BLOB NOT NULL,
-      created_at TEXT NOT NULL
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (unit_id, model)
     );
 
     CREATE INDEX IF NOT EXISTS idx_retrieval_unit_vectors_model
@@ -800,7 +934,7 @@ function groupUnits(
 ): SessionSummary[] {
   const timeRange = getTimeRange(rows.map((row) => row.ended_at));
   const scored = rows.map((row) => {
-    const keywordScore = keywordScores.get(row.unit_id) ?? 1;
+    const keywordScore = keywordScores.get(row.unit_id) ?? 0;
     const recencyScore = scoreRecency(row.ended_at, timeRange);
     const continuityScore = scoreContinuity(row.message_end_index, row.session_message_count);
     return {
@@ -1010,6 +1144,10 @@ function setSetting(db: DatabaseHandle, key: string, value: string): void {
      VALUES (?, ?)
      ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
   ).run(key, value);
+}
+
+function clearSetting(db: DatabaseHandle, key: string): void {
+  db.prepare("DELETE FROM settings WHERE key = ?").run(key);
 }
 
 function sourcePathFromMetadata(metadata: ConversationChunk["metadata"]): string | null {

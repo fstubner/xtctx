@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -42,8 +42,37 @@ class FixtureScraper implements ConversationScraper {
   }
 }
 
+class FailingScraper implements ConversationScraper {
+  readonly tool = "codex";
+
+  async detect(): Promise<boolean> {
+    return true;
+  }
+
+  getStorePaths(): string[] {
+    return ["fixture://codex"];
+  }
+
+  async *scrape(): AsyncIterable<ConversationChunk> {
+    throw new Error("boom: transcript store unreadable");
+  }
+
+  async *fullSync(): AsyncIterable<ConversationChunk> {
+    throw new Error("boom: transcript store unreadable");
+  }
+
+  async getLastScrapedPosition(): Promise<ScraperState> {
+    return { lastTimestamp: new Date(0) };
+  }
+
+  async saveScrapedPosition(_state: ScraperState): Promise<void> {
+    return;
+  }
+}
+
 class FixtureEmbeddingProvider implements EmbeddingProvider {
   readonly model = "fixture-embedding";
+  embeddedTexts = 0;
 
   async embed(text: string): Promise<Float32Array> {
     const [vector] = await this.embedBatch([text]);
@@ -51,6 +80,7 @@ class FixtureEmbeddingProvider implements EmbeddingProvider {
   }
 
   async embedBatch(texts: string[]): Promise<Float32Array[]> {
+    this.embeddedTexts += texts.length;
     return texts.map((text) => fixtureVector(text));
   }
 }
@@ -123,6 +153,146 @@ describe("SqliteHandoffIndex", () => {
     await index.close();
   });
 
+  it("keyword search ranks by relevance, not recency", async () => {
+    const scraper = new FixtureScraper([
+      chunk("relevant-session", 0, "user", "sqlite sqlite sqlite deep dive", "2026-05-01T10:00:00.000Z"),
+      chunk("relevant-session", 1, "assistant", "more sqlite internals and sqlite tuning", "2026-05-01T10:01:00.000Z"),
+      chunk("recent-session", 0, "user", "unrelated planning notes", "2026-05-20T10:00:00.000Z"),
+      chunk("recent-session", 1, "assistant", "a passing sqlite mention", "2026-05-20T10:01:00.000Z"),
+    ]);
+    const index = new SqliteHandoffIndex(join(tempDir, "xtctx.db"), tempDir, [
+      { tool: "codex", scraper },
+    ]);
+
+    const results = await index.searchSessions("sqlite", 5, undefined, "keyword");
+
+    expect(results.map((session) => session.session_ref)).toEqual([
+      "codex:relevant-session",
+      "codex:recent-session",
+    ]);
+
+    await index.close();
+  });
+
+  it("looks up a session by ref regardless of recency", async () => {
+    const scraper = new FixtureScraper([
+      chunk("lookup-session", 0, "user", "find me by ref"),
+    ]);
+    const index = new SqliteHandoffIndex(join(tempDir, "xtctx.db"), tempDir, [
+      { tool: "codex", scraper },
+    ]);
+
+    const found = await index.getSessionByRef("codex:lookup-session");
+    const missing = await index.getSessionByRef("codex:no-such-session");
+
+    expect(found?.session_ref).toBe("codex:lookup-session");
+    expect(found?.message_count).toBe(1);
+    expect(missing).toBeNull();
+
+    await index.close();
+  });
+
+  it("does not re-embed unchanged windows when a session is re-indexed", async () => {
+    const provider = new FixtureEmbeddingProvider();
+    const chunks = [
+      chunk("stable-session", 0, "user", "alpha sqlite message"),
+      chunk("stable-session", 1, "assistant", "beta vector message"),
+      chunk("stable-session", 2, "user", "gamma handoff message"),
+    ];
+    const dbPath = join(tempDir, "xtctx.db");
+    const options = { embeddingProvider: provider, windowSize: 2, windowStride: 1 };
+
+    const first = new SqliteHandoffIndex(dbPath, tempDir, [
+      { tool: "codex", scraper: new FixtureScraper(chunks) },
+    ], options);
+    await first.searchSessions("sqlite", 5, undefined, "vector");
+    await first.close();
+    const afterFirst = provider.embeddedTexts;
+
+    const second = new SqliteHandoffIndex(dbPath, tempDir, [
+      { tool: "codex", scraper: new FixtureScraper(chunks) },
+    ], options);
+    await second.searchSessions("sqlite", 5, undefined, "vector");
+    await second.close();
+
+    // The second search re-indexes identical content, so only the query
+    // itself should be embedded — never the unchanged windows.
+    expect(provider.embeddedTexts).toBe(afterFirst + 1);
+  });
+
+  it("re-indexing the same content leaves all counts unchanged", async () => {
+    const chunks = [
+      chunk("idem-session", 0, "user", "alpha message"),
+      chunk("idem-session", 1, "assistant", "beta message"),
+    ];
+    const dbPath = join(tempDir, "xtctx.db");
+
+    const first = new SqliteHandoffIndex(dbPath, tempDir, [
+      { tool: "codex", scraper: new FixtureScraper(chunks) },
+    ]);
+    await first.listRecentSessions(5);
+    const statusFirst = await first.getStatus();
+    await first.close();
+
+    const second = new SqliteHandoffIndex(dbPath, tempDir, [
+      { tool: "codex", scraper: new FixtureScraper(chunks) },
+    ]);
+    await second.listRecentSessions(5);
+    const statusSecond = await second.getStatus();
+    await second.close();
+
+    expect(statusSecond.sessions).toBe(statusFirst.sessions);
+    expect(statusSecond.messages).toBe(statusFirst.messages);
+    expect(statusSecond.retrieval_units).toBe(statusFirst.retrieval_units);
+  });
+
+  it("rebuilds a corrupt index database instead of crashing", async () => {
+    const dbPath = join(tempDir, "xtctx.db");
+    await writeFile(dbPath, "this is not a sqlite database", "utf-8");
+    const scraper = new FixtureScraper([chunk("recovered-session", 0, "user", "hello again")]);
+    const index = new SqliteHandoffIndex(dbPath, tempDir, [{ tool: "codex", scraper }]);
+
+    const recent = await index.listRecentSessions(5);
+
+    expect(recent).toHaveLength(1);
+    expect(recent[0].session_ref).toBe("codex:recovered-session");
+
+    await index.close();
+  });
+
+  it("rebuilds when the stored schema version does not match", async () => {
+    const dbPath = join(tempDir, "xtctx.db");
+    const Database = (await import("better-sqlite3")).default;
+    const legacy = new Database(dbPath);
+    legacy.exec("CREATE TABLE sessions (session_ref TEXT PRIMARY KEY)");
+    legacy.pragma("user_version = 999");
+    legacy.close();
+
+    const scraper = new FixtureScraper([chunk("fresh-session", 0, "user", "fresh start")]);
+    const index = new SqliteHandoffIndex(dbPath, tempDir, [{ tool: "codex", scraper }]);
+
+    const recent = await index.listRecentSessions(5);
+
+    expect(recent).toHaveLength(1);
+    expect(recent[0].session_ref).toBe("codex:fresh-session");
+
+    await index.close();
+  });
+
+  it("surfaces scraper failures in status instead of hiding them", async () => {
+    const index = new SqliteHandoffIndex(join(tempDir, "xtctx.db"), tempDir, [
+      { tool: "codex", scraper: new FailingScraper() },
+    ]);
+
+    await index.listRecentSessions(5);
+    const status = await index.getStatus();
+
+    const tool = status.tools.find((entry) => entry.tool === "codex");
+    expect(tool?.last_error).toContain("boom");
+
+    await index.close();
+  });
+
   it("semantic search embeds chronological transcript windows", async () => {
     const scraper = new FixtureScraper([
       chunk("semantic-session", 0, "user", "initial idea: use an external vector store"),
@@ -165,11 +335,12 @@ function chunk(
   messageIndex: number,
   role: ConversationChunk["role"],
   content: string,
+  timestamp = "2026-05-10T10:00:00.000Z",
 ): ConversationChunk {
   return {
     tool: "codex",
     sessionId,
-    timestamp: new Date("2026-05-10T10:00:00.000Z"),
+    timestamp: new Date(timestamp),
     role,
     content,
     metadata: {
