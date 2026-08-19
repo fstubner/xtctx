@@ -19,11 +19,20 @@ jobs:
         # workflows, so falling back to it silently stalls the whole chain:
         # no CI on the release branch, no auto-merge, no publish on release.
         # Fail loudly instead.
-        if: ${{ secrets.RELEASE_PLEASE_TOKEN == '' }}
+        #
+        # The check lives in `run`, not `if`: the `secrets` context is not
+        # available to step-level `if` expressions, and referencing it there
+        # makes the whole workflow file invalid — which took the release
+        # pipeline down rather than guarding it.
+        env:
+          RELEASE_PLEASE_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
         run: |
-          echo "RELEASE_PLEASE_TOKEN is not configured. Without it, the release PR," \
-               "auto-merge, and publish workflows will never trigger." >&2
-          exit 1
+          if [ -z "$RELEASE_PLEASE_TOKEN" ]; then
+            echo "RELEASE_PLEASE_TOKEN is not configured. Without it, the release PR," \
+                 "auto-merge, and publish workflows will never trigger." >&2
+            exit 1
+          fi
+          echo "RELEASE_PLEASE_TOKEN is configured."
 
       - name: Run Release Please
         id: release
