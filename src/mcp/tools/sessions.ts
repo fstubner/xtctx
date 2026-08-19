@@ -102,11 +102,11 @@ function formatRecentSessionsMarkdown(
       lines.push(`- Source: ${session.source_path}`);
     }
     if (session.preview) {
-      lines.push(`- Preview: ${session.preview}`);
+      lines.push(`- Preview: ${inlineSafe(session.preview)}`);
     }
     for (const match of session.matches ?? []) {
       lines.push(
-        `- Match ${match.message_start_index}-${match.message_end_index}: ${match.preview}`,
+        `- Match ${match.message_start_index}-${match.message_end_index}: ${inlineSafe(match.preview)}`,
       );
     }
     lines.push("");
@@ -145,6 +145,16 @@ function formatSessionDetailMarkdown(
   }
 
   return lines.join("\n").trim();
+}
+
+/**
+ * Previews are untrusted transcript text rendered inline in a list, where
+ * fencing would be unreadable. Collapsing them to a single line is what makes
+ * them safe: content that cannot start a line cannot forge the `###` headings
+ * or `~~~` fences the reading agent treats as structure.
+ */
+function inlineSafe(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
 }
 
 /**
