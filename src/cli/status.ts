@@ -58,6 +58,12 @@ export async function renderStatusBlock(services: ProjectServices): Promise<stri
       `  ${marker} ${tool.tool.padEnd(13)} ${tool.detected ? "detected" : "not detected"}; ` +
         `${tool.indexed_sessions} sessions; hook: ${hook}${error}`,
     );
+    // `.xtctx/config.yaml` is committable, so a cloned repo can point a
+    // scraper at any directory on disk. Overrides stay legal but visible.
+    const custom = customStorePaths(definition, tool.store_paths);
+    for (const path of custom) {
+      lines.push(`      custom store path (not the ${tool.tool} default): ${path}`);
+    }
   }
 
   lines.push("");
@@ -103,4 +109,27 @@ function managedTargets(projectRoot: string): Array<{ label: string; path: strin
     { label: "cursor", path: join(projectRoot, ".cursor", "rules", "xtctx.mdc") },
     { label: "copilot", path: join(projectRoot, ".github", "copilot-instructions.md") },
   ];
+}
+
+/** Store paths that differ from the tool's built-in default location. */
+function customStorePaths(
+  definition: (typeof SUPPORTED_TOOLS)[number] | undefined,
+  storePaths: string[],
+): string[] {
+  if (!definition) {
+    return [];
+  }
+
+  let fallback: string;
+  try {
+    fallback = normalizePath(definition.defaultStorePath());
+  } catch {
+    return [];
+  }
+
+  return storePaths.filter((path) => normalizePath(path) !== fallback);
+}
+
+function normalizePath(value: string): string {
+  return value.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
 }

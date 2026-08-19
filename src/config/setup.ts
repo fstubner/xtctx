@@ -1,6 +1,7 @@
 import { mkdir, readFile, rm, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { writeFileAtomic } from "../utils/atomic-file.js";
+import { MARKERS, countManagedBlocks, removeManagedBlocks } from "./managed-block.js";
 import { stringify as stringifyYaml } from "yaml";
 import {
   isGlobalOnlyMcpTool,
@@ -14,11 +15,6 @@ import {
   type SkillSelection,
 } from "./skills.js";
 import { SUPPORTED_TOOLS, type HookMode } from "../tools/sources.js";
-
-const MARKERS = {
-  begin: "<!-- xtctx:begin -->",
-  end: "<!-- xtctx:end -->",
-};
 
 export interface SetupOptions {
   projectPath?: string;
@@ -419,42 +415,6 @@ async function upsertManagedBlock(
   return writeIfChanged(filePath, content);
 }
 
-function removeManagedBlocks(content: string): string {
-  const normalized = normalizeNewlines(content);
-  const pattern = new RegExp(
-    `${escapeRegExp(MARKERS.begin)}[\\s\\S]*?${escapeRegExp(MARKERS.end)}\\n?`,
-    "g",
-  );
-  const parts = normalized.split(pattern);
-  if (parts.length === 1) {
-    return normalized;
-  }
-
-  // Collapse whitespace only at the splice seams — never inside user
-  // content, which the managed block promises to preserve.
-  let result = parts[0];
-  for (let index = 1; index < parts.length; index += 1) {
-    const left = result.replace(/\n+$/, "");
-    const right = parts[index].replace(/^\n+/, "");
-    if (!left) {
-      result = right;
-    } else if (!right) {
-      result = left;
-    } else {
-      result = `${left}\n\n${right}`;
-    }
-  }
-  return result;
-}
-
-function countManagedBlocks(content: string): number {
-  const pattern = new RegExp(
-    `${escapeRegExp(MARKERS.begin)}[\\s\\S]*?${escapeRegExp(MARKERS.end)}`,
-    "g",
-  );
-  return content.match(pattern)?.length ?? 0;
-}
-
 function findStaleReferences(content: string): string[] {
   const stale: Array<{ label: string; pattern: RegExp }> = [
     { label: "xtctx serve", pattern: /\bxtctx\s+serve\b/ },
@@ -525,14 +485,6 @@ function printSetupResult(result: SetupResult): void {
   for (const failure of result.failures) {
     process.stdout.write(`  error   ${failure}\n`);
   }
-}
-
-function normalizeNewlines(input: string): string {
-  return input.replace(/\r\n/g, "\n");
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -1,15 +1,11 @@
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { writeFileAtomic } from "../utils/atomic-file.js";
+import { normalizeNewlines, removeManagedBlocks } from "./managed-block.js";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { removeMcpServerConfigs } from "./mcp-config.js";
 import { BUILT_IN_SKILL_ID, removeSyncedSkillsForTools } from "./skills.js";
 import { SUPPORTED_TOOLS, getToolDefinition, type ToolId } from "../tools/sources.js";
-
-const MARKERS = {
-  begin: "<!-- xtctx:begin -->",
-  end: "<!-- xtctx:end -->",
-};
 
 const TOOL_ALIASES: Record<string, ToolId> = {
   claude: "claude-code",
@@ -394,48 +390,12 @@ async function removeClaudeHook(hooksPath: string): Promise<boolean> {
   return true;
 }
 
-function removeManagedBlocks(content: string): string {
-  const normalized = normalizeNewlines(content);
-  const pattern = new RegExp(
-    `${escapeRegExp(MARKERS.begin)}[\\s\\S]*?${escapeRegExp(MARKERS.end)}\\n?`,
-    "g",
-  );
-  const parts = normalized.split(pattern);
-  if (parts.length === 1) {
-    return normalized;
-  }
-
-  // Collapse whitespace only at the splice seams — never inside user
-  // content, which the managed block promises to preserve.
-  let result = parts[0];
-  for (let index = 1; index < parts.length; index += 1) {
-    const left = result.replace(/\n+$/, "");
-    const right = parts[index].replace(/^\n+/, "");
-    if (!left) {
-      result = right;
-    } else if (!right) {
-      result = left;
-    } else {
-      result = `${left}\n\n${right}`;
-    }
-  }
-  return result;
-}
-
 async function readUtf8IfExists(filePath: string): Promise<string | null> {
   try {
     return await readFile(filePath, "utf-8");
   } catch {
     return null;
   }
-}
-
-function normalizeNewlines(input: string): string {
-  return input.replace(/\r\n/g, "\n");
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
