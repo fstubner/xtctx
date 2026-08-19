@@ -29,8 +29,7 @@ export async function runSetup(options: SetupCliOptions = {}): Promise<void> {
     includeGlobalMcp: options.includeGlobalMcp,
   });
 
-  const hasCriticalFailure = result.warnings.some((w) => w.includes("Failed to"));
-  if (hasCriticalFailure) {
+  if (result.failures.length > 0) {
     process.exitCode = 1;
   }
 }

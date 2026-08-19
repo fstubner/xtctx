@@ -23,12 +23,13 @@ describe("runSetup CLI wrapper", () => {
     vi.restoreAllMocks();
   });
 
-  it("does not set process.exitCode when setup succeeds without critical warnings", async () => {
+  it("does not set process.exitCode when setup succeeds with only warnings", async () => {
     vi.mocked(setup).mockResolvedValue({
       projectRoot: "/some/root",
       configPath: "/some/root/.xtctx/config.yaml",
       writes: [],
       warnings: ["Some harmless warning"],
+      failures: [],
     });
 
     await runSetup({ yes: true });
@@ -36,12 +37,13 @@ describe("runSetup CLI wrapper", () => {
     expect(process.exitCode).toBeUndefined();
   });
 
-  it("sets process.exitCode to 1 when setup has critical 'Failed to' warnings", async () => {
+  it("sets process.exitCode to 1 when setup reports a structured failure", async () => {
     vi.mocked(setup).mockResolvedValue({
       projectRoot: "/some/root",
       configPath: "/some/root/.xtctx/config.yaml",
       writes: [],
-      warnings: ["Failed to write MCP config for zed"],
+      warnings: [],
+      failures: ["could not write MCP config for zed"],
     });
 
     await runSetup({ yes: true });

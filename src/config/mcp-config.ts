@@ -1,7 +1,9 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { parse as parseToml, stringify as stringifyToml } from "@iarna/toml";
+import { writeFileAtomic } from "../utils/atomic-file.js";
 import { errorMessage } from "../utils/errors.js";
 
 /**
@@ -26,6 +28,8 @@ export interface McpSyncResult {
   created: boolean;
   skipped: boolean;
   warning?: string;
+  /** True when the config could not be read, parsed, or written at all. */
+  failed?: boolean;
 }
 
 export interface McpSyncSummary {
@@ -284,16 +288,33 @@ async function writeMcpConfig(
     }
 
     let existing: Record<string, unknown> | null = null;
+    let hadComments = false;
     if (existingContent !== null) {
       try {
         existing = parseConfig(existingContent, format);
       } catch (error) {
-        return failedMcpSync(
-          tool,
-          configPath,
-          scope,
-          `Failed to parse existing MCP config; leaving it unchanged: ${errorMessage(error)}`,
-        );
+        // VS Code-family configs are JSONC in practice: retry with comments
+        // stripped before declaring the file unparsable.
+        if (format === "json") {
+          try {
+            existing = JSON.parse(stripJsonComments(existingContent)) as Record<string, unknown>;
+            hadComments = true;
+          } catch {
+            return failedMcpSync(
+              tool,
+              configPath,
+              scope,
+              `Failed to parse existing MCP config; leaving it unchanged: ${errorMessage(error)}`,
+            );
+          }
+        } else {
+          return failedMcpSync(
+            tool,
+            configPath,
+            scope,
+            `Failed to parse existing MCP config; leaving it unchanged: ${errorMessage(error)}`,
+          );
+        }
       }
     }
 
@@ -312,8 +333,27 @@ async function writeMcpConfig(
       };
     }
 
-    await mkdir(dirname(configPath), { recursive: true });
-    await writeFile(configPath, content, "utf-8");
+    if (hadComments) {
+      // Rewriting would destroy the user's comments. If our entries are
+      // already present and identical the file is effectively up to date;
+      // otherwise leave it alone and say what to do.
+      if (existing && entriesUpToDate(existing, rootKey, serverEntries)) {
+        return { tool, path: configPath, scope, updated: false, created: false, skipped: true };
+      }
+      return {
+        tool,
+        path: configPath,
+        scope,
+        updated: false,
+        created: false,
+        skipped: true,
+        warning:
+          `MCP config at ${configPath} contains comments, which xtctx will not rewrite. ` +
+          `Add the xtctx server entry manually or remove the comments so xtctx can manage it.`,
+      };
+    }
+
+    await writeFileAtomic(configPath, content);
 
     return {
       tool,
@@ -333,6 +373,59 @@ function parseConfig(raw: string, format: "json" | "toml"): Record<string, unkno
     return parseToml(raw) as Record<string, unknown>;
   }
   return JSON.parse(raw) as Record<string, unknown>;
+}
+
+/** Remove // and /* *\/ comments outside strings (JSONC tolerance). */
+function stripJsonComments(raw: string): string {
+  let out = "";
+  let inString = false;
+  let escaped = false;
+  for (let index = 0; index < raw.length; index += 1) {
+    const char = raw[index];
+    if (inString) {
+      out += char;
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      out += char;
+      continue;
+    }
+    if (char === "/" && raw[index + 1] === "/") {
+      while (index < raw.length && raw[index] !== "\n") index += 1;
+      out += "\n";
+      continue;
+    }
+    if (char === "/" && raw[index + 1] === "*") {
+      index += 2;
+      while (index < raw.length && !(raw[index] === "*" && raw[index + 1] === "/")) index += 1;
+      index += 1;
+      continue;
+    }
+    out += char;
+  }
+  return out;
+}
+
+function entriesUpToDate(
+  existing: Record<string, unknown>,
+  rootKey: string,
+  serverEntries: Record<string, unknown>,
+): boolean {
+  const root = existing[rootKey];
+  if (!root || typeof root !== "object" || Array.isArray(root)) {
+    return false;
+  }
+  return Object.entries(serverEntries).every(([name, entry]) =>
+    isDeepStrictEqual((root as Record<string, unknown>)[name], entry),
+  );
 }
 
 function serializeConfig(
@@ -395,6 +488,7 @@ function failedMcpSync(
     created: false,
     skipped: false,
     warning,
+    failed: true,
   };
 }
 
@@ -595,8 +689,7 @@ async function removeMcpConfig(
     const content = serializeConfig(updated, format);
 
     if (normalizeNewlines(existingContent) !== normalizeNewlines(content)) {
-      await mkdir(dirname(configPath), { recursive: true });
-      await writeFile(configPath, content, "utf-8");
+      await writeFileAtomic(configPath, content);
     }
 
     return {

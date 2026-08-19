@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { readdir, readFile, rm, stat, writeFile, mkdir } from "node:fs/promises";
-import { dirname, join, relative, resolve } from "node:path";
+import { readdir, readFile, rm, stat, mkdir } from "node:fs/promises";
+import { join, relative, resolve } from "node:path";
+import { writeFileAtomic } from "../utils/atomic-file.js";
 import { parse as parseYaml } from "yaml";
 import { SUPPORTED_TOOLS, type SkillSyncMode, type ToolId } from "../tools/sources.js";
 
@@ -508,8 +509,7 @@ async function writeIfChanged(filePath: string, content: string): Promise<boolea
     return false;
   }
 
-  await mkdir(dirname(filePath), { recursive: true });
-  await writeFile(filePath, normalized, "utf-8");
+  await writeFileAtomic(filePath, normalized);
   return true;
 }
 

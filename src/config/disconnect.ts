@@ -1,5 +1,6 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { readFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import { writeFileAtomic } from "../utils/atomic-file.js";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { removeMcpServerConfigs } from "./mcp-config.js";
 import { BUILT_IN_SKILL_ID, removeSyncedSkillsForTools } from "./skills.js";
@@ -65,6 +66,7 @@ export function describeDisconnectPlan(options: DisconnectOptions = {}): {
     writes.push(...plannedMcpWrites(projectRoot, tool, options.homeDir));
 
     if (tool === "claude-code") {
+      writes.push({ path: join(projectRoot, ".claude", "settings.json"), kind: "hook:claude-code" });
       writes.push({ path: join(projectRoot, ".claude", "hooks.json"), kind: "hook:claude-code" });
     }
 
@@ -119,11 +121,18 @@ export async function disconnectProject(options: DisconnectOptions = {}): Promis
   writes.push(...(await removeSyncedSkillsForTools(projectRoot, tools)));
 
   if (tools.includes("claude-code")) {
-    const hooksPath = join(projectRoot, ".claude", "hooks.json");
+    const settingsPath = join(projectRoot, ".claude", "settings.json");
     writes.push({
-      path: hooksPath,
+      path: settingsPath,
       kind: "hook:claude-code",
-      changed: await removeClaudeHook(hooksPath),
+      changed: await removeClaudeHookFromSettings(settingsPath),
+    });
+    const legacyHooksPath = join(projectRoot, ".claude", "hooks.json");
+    writes.push({
+      path: legacyHooksPath,
+      kind: "hook:claude-code",
+      changed: await removeClaudeHook(legacyHooksPath),
+      note: "legacy hook file",
     });
   }
 
@@ -201,8 +210,7 @@ async function disableToolsInProjectConfig(configPath: string, tools: ToolId[]):
   }
 
   config.tools = currentTools;
-  await mkdir(dirname(configPath), { recursive: true });
-  await writeFile(configPath, stringifyYaml(config), "utf-8");
+  await writeFileAtomic(configPath, stringifyYaml(config));
   return true;
 }
 
@@ -304,8 +312,52 @@ async function removeManagedBlocksFromFile(filePath: string): Promise<boolean> {
     return false;
   }
 
-  await mkdir(dirname(filePath), { recursive: true });
-  await writeFile(filePath, repaired ? `${repaired}\n` : "", "utf-8");
+  await writeFileAtomic(filePath, repaired ? `${repaired}\n` : "");
+  return true;
+}
+
+/** Strip xtctx SessionStart matcher groups from .claude/settings.json. */
+async function removeClaudeHookFromSettings(settingsPath: string): Promise<boolean> {
+  const raw = await readUtf8IfExists(settingsPath);
+  if (raw === null) {
+    return false;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    return false;
+  }
+
+  if (!isRecord(parsed) || !isRecord(parsed.hooks)) {
+    return false;
+  }
+
+  const sessionStart = Array.isArray(parsed.hooks.SessionStart) ? parsed.hooks.SessionStart : [];
+  const kept = sessionStart
+    .map((group) => {
+      if (!isRecord(group) || !Array.isArray(group.hooks)) {
+        return group;
+      }
+      const hooks = group.hooks.filter(
+        (hook) =>
+          !isRecord(hook) ||
+          typeof hook.command !== "string" ||
+          !hook.command.includes("xtctx --hook session-start"),
+      );
+      return hooks.length === group.hooks.length ? group : { ...group, hooks };
+    })
+    .filter(
+      (group) => !isRecord(group) || !Array.isArray(group.hooks) || group.hooks.length > 0,
+    );
+
+  if (JSON.stringify(kept) === JSON.stringify(sessionStart)) {
+    return false;
+  }
+
+  parsed.hooks.SessionStart = kept;
+  await writeFileAtomic(settingsPath, JSON.stringify(parsed, null, 2) + "\n");
   return true;
 }
 
@@ -338,8 +390,7 @@ async function removeClaudeHook(hooksPath: string): Promise<boolean> {
   }
 
   parsed.hooks.SessionStart = nextSessionStart;
-  await mkdir(dirname(hooksPath), { recursive: true });
-  await writeFile(hooksPath, JSON.stringify(parsed, null, 2) + "\n", "utf-8");
+  await writeFileAtomic(hooksPath, JSON.stringify(parsed, null, 2) + "\n");
   return true;
 }
 
@@ -349,7 +400,26 @@ function removeManagedBlocks(content: string): string {
     `${escapeRegExp(MARKERS.begin)}[\\s\\S]*?${escapeRegExp(MARKERS.end)}\\n?`,
     "g",
   );
-  return normalized.replace(pattern, "").replace(/\n{3,}/g, "\n\n");
+  const parts = normalized.split(pattern);
+  if (parts.length === 1) {
+    return normalized;
+  }
+
+  // Collapse whitespace only at the splice seams — never inside user
+  // content, which the managed block promises to preserve.
+  let result = parts[0];
+  for (let index = 1; index < parts.length; index += 1) {
+    const left = result.replace(/\n+$/, "");
+    const right = parts[index].replace(/^\n+/, "");
+    if (!left) {
+      result = right;
+    } else if (!right) {
+      result = left;
+    } else {
+      result = `${left}\n\n${right}`;
+    }
+  }
+  return result;
 }
 
 async function readUtf8IfExists(filePath: string): Promise<string | null> {

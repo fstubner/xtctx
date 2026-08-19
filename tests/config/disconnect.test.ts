@@ -87,6 +87,16 @@ describe("disconnectProject", () => {
 
   it("removes Claude Code startup hooks without touching unrelated hooks", async () => {
     await setupProject({ projectPath: projectRoot, homeDir, yes: true });
+    // Seed a user hook group in settings.json alongside the xtctx one, plus a
+    // legacy hooks.json with a foreign entry and a stale xtctx entry.
+    const settingsPath = join(projectRoot, ".claude", "settings.json");
+    const settingsBefore = JSON.parse(await readFile(settingsPath, "utf-8")) as {
+      hooks: { SessionStart: unknown[] };
+    };
+    settingsBefore.hooks.SessionStart.push({
+      hooks: [{ type: "command", command: "echo keep-user" }],
+    });
+    await writeFile(settingsPath, JSON.stringify(settingsBefore, null, 2), "utf-8");
     await mkdir(join(projectRoot, ".claude"), { recursive: true });
     await writeFile(
       join(projectRoot, ".claude", "hooks.json"),
@@ -106,6 +116,15 @@ describe("disconnectProject", () => {
     );
 
     await disconnectProject({ projectPath: projectRoot, homeDir, tool: "claude-code" });
+
+    const settings = JSON.parse(await readFile(settingsPath, "utf-8")) as {
+      hooks: { SessionStart: Array<{ hooks: Array<{ command: string }> }> };
+    };
+    const commands = settings.hooks.SessionStart.flatMap((group) =>
+      Array.isArray(group.hooks) ? group.hooks.map((hook) => hook.command) : [],
+    );
+    expect(commands).toContain("echo keep-user");
+    expect(commands.some((command) => command.includes("xtctx --hook session-start"))).toBe(false);
 
     const hooks = JSON.parse(await readFile(join(projectRoot, ".claude", "hooks.json"), "utf-8")) as {
       hooks: { SessionStart: Array<{ command: string }> };

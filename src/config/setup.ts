@@ -1,5 +1,6 @@
-import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { mkdir, readFile, rm, stat } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import { writeFileAtomic } from "../utils/atomic-file.js";
 import { stringify as stringifyYaml } from "yaml";
 import {
   isGlobalOnlyMcpTool,
@@ -33,6 +34,8 @@ export interface SetupResult {
   configPath: string;
   writes: Array<{ path: string; kind: string; changed: boolean }>;
   warnings: string[];
+  /** Hard failures (unreadable/unwritable configs); setup exits nonzero. */
+  failures: string[];
 }
 
 export interface PlannedSetupWrite {
@@ -60,6 +63,7 @@ export async function setupProject(options: SetupOptions = {}): Promise<SetupRes
   const configPath = join(xtctxDir, "config.yaml");
   const writes: SetupResult["writes"] = [];
   const warnings: string[] = [];
+  const failures: string[] = [];
 
   if (options.repair) {
     await rm(join(xtctxDir, ".store"), { recursive: true, force: true });
@@ -98,7 +102,9 @@ export async function setupProject(options: SetupOptions = {}): Promise<SetupRes
       kind: `mcp:${file.tool}`,
       changed: file.updated || file.created,
     });
-    if (file.warning) {
+    if (file.failed && file.warning) {
+      failures.push(file.warning);
+    } else if (file.warning) {
       warnings.push(file.warning);
     }
   }
@@ -119,12 +125,12 @@ export async function setupProject(options: SetupOptions = {}): Promise<SetupRes
   }
 
   writes.push({
-    path: join(projectRoot, ".claude", "hooks.json"),
+    path: join(projectRoot, ".claude", "settings.json"),
     kind: "hook:claude-code",
     changed: await installClaudeHook(projectRoot),
   });
 
-  return { projectRoot, configPath, writes, warnings };
+  return { projectRoot, configPath, writes, warnings, failures };
 }
 
 export function describeSetupPlan(
@@ -149,7 +155,7 @@ export function describeSetupPlan(
     { path: join(projectRoot, "GEMINI.md"), kind: "memory:antigravity" },
     { path: join(projectRoot, ".cursor", "rules", "xtctx.mdc"), kind: "memory:cursor" },
     { path: join(projectRoot, ".github", "copilot-instructions.md"), kind: "memory:copilot" },
-    { path: join(projectRoot, ".claude", "hooks.json"), kind: "hook:claude-code" },
+    { path: join(projectRoot, ".claude", "settings.json"), kind: "hook:claude-code" },
   ];
 
   for (const skillId of skillIds) {
@@ -323,24 +329,77 @@ function renderManagedBlock(input: {
   ].join("\n");
 }
 
+const CLAUDE_HOOK_MARKER = "xtctx --hook session-start";
+// Claude Code runs hooks with cwd = project root, so the command stays
+// path-independent — no shell-quoted absolute path to get injection wrong.
+const CLAUDE_HOOK_COMMAND = "npx -y xtctx --hook session-start --tool claude-code";
+
 async function installClaudeHook(projectRoot: string): Promise<boolean> {
-  const hooksPath = join(projectRoot, ".claude", "hooks.json");
-  const command = `npx -y xtctx --hook session-start --tool claude-code --project "${projectRoot.replace(/"/g, '\\"')}"`;
-  const existing = await readJsonIfExists(hooksPath);
+  // Claude Code reads hooks from .claude/settings.json (matcher-group shape).
+  // Earlier xtctx versions wrote a flat array to .claude/hooks.json, which
+  // Claude Code never loads — migrate those entries out.
+  const legacyChanged = await removeLegacyClaudeHook(join(projectRoot, ".claude", "hooks.json"));
+
+  const settingsPath = join(projectRoot, ".claude", "settings.json");
+  const existing = await readJsonIfExists(settingsPath);
   const root = isRecord(existing) ? existing : {};
   const hooks = isRecord(root.hooks) ? root.hooks : {};
   const sessionStart = Array.isArray(hooks.SessionStart) ? hooks.SessionStart : [];
   const alreadyInstalled = sessionStart.some(
-    (entry) => isRecord(entry) && typeof entry.command === "string" && entry.command.includes("xtctx --hook session-start"),
+    (group) =>
+      isRecord(group) &&
+      Array.isArray(group.hooks) &&
+      group.hooks.some(
+        (hook) =>
+          isRecord(hook) &&
+          typeof hook.command === "string" &&
+          hook.command.includes(CLAUDE_HOOK_MARKER),
+      ),
   );
 
   if (alreadyInstalled) {
+    return legacyChanged;
+  }
+
+  hooks.SessionStart = [
+    ...sessionStart,
+    { hooks: [{ type: "command", command: CLAUDE_HOOK_COMMAND }] },
+  ];
+  root.hooks = hooks;
+  const changed = await writeIfChanged(settingsPath, JSON.stringify(root, null, 2) + "\n");
+  return changed || legacyChanged;
+}
+
+async function removeLegacyClaudeHook(hooksPath: string): Promise<boolean> {
+  const existing = await readJsonIfExists(hooksPath);
+  if (!isRecord(existing) || !isRecord(existing.hooks)) {
     return false;
   }
 
-  hooks.SessionStart = [...sessionStart, { type: "command", command }];
-  root.hooks = hooks;
-  return writeIfChanged(hooksPath, JSON.stringify(root, null, 2) + "\n");
+  const hooks = existing.hooks;
+  const sessionStart = Array.isArray(hooks.SessionStart) ? hooks.SessionStart : [];
+  const kept = sessionStart.filter(
+    (entry) =>
+      !(
+        isRecord(entry) &&
+        typeof entry.command === "string" &&
+        entry.command.includes(CLAUDE_HOOK_MARKER)
+      ),
+  );
+  if (kept.length === sessionStart.length) {
+    return false;
+  }
+
+  const otherHookKeys = Object.keys(hooks).filter((key) => key !== "SessionStart");
+  const otherRootKeys = Object.keys(existing).filter((key) => key !== "hooks");
+  if (kept.length === 0 && otherHookKeys.length === 0 && otherRootKeys.length === 0) {
+    // The file held nothing but the entry we wrote; remove it entirely.
+    await rm(hooksPath, { force: true });
+    return true;
+  }
+
+  hooks.SessionStart = kept;
+  return writeIfChanged(hooksPath, JSON.stringify(existing, null, 2) + "\n");
 }
 
 async function upsertManagedBlock(
@@ -350,7 +409,11 @@ async function upsertManagedBlock(
 ): Promise<boolean> {
   const existing = await readUtf8IfExists(filePath);
   const repaired = existing ? removeManagedBlocks(existing).trimEnd() : "";
-  const prefix = prelude && !repaired.startsWith(prelude.trimEnd()) ? prelude : "";
+  // A file that already opens with YAML frontmatter keeps it — prepending
+  // the prelude again would produce a second, invalid frontmatter block.
+  const hasFrontmatter = repaired.startsWith("---");
+  const prefix =
+    prelude && !hasFrontmatter && !repaired.startsWith(prelude.trimEnd()) ? prelude : "";
   const separator = repaired.length > 0 ? "\n\n" : "";
   const content = `${prefix}${repaired}${separator}${block}`;
   return writeIfChanged(filePath, content);
@@ -362,7 +425,26 @@ function removeManagedBlocks(content: string): string {
     `${escapeRegExp(MARKERS.begin)}[\\s\\S]*?${escapeRegExp(MARKERS.end)}\\n?`,
     "g",
   );
-  return normalized.replace(pattern, "").replace(/\n{3,}/g, "\n\n");
+  const parts = normalized.split(pattern);
+  if (parts.length === 1) {
+    return normalized;
+  }
+
+  // Collapse whitespace only at the splice seams — never inside user
+  // content, which the managed block promises to preserve.
+  let result = parts[0];
+  for (let index = 1; index < parts.length; index += 1) {
+    const left = result.replace(/\n+$/, "");
+    const right = parts[index].replace(/^\n+/, "");
+    if (!left) {
+      result = right;
+    } else if (!right) {
+      result = left;
+    } else {
+      result = `${left}\n\n${right}`;
+    }
+  }
+  return result;
 }
 
 function countManagedBlocks(content: string): number {
@@ -387,15 +469,25 @@ function findStaleReferences(content: string): string[] {
 }
 
 async function writeIfChanged(filePath: string, content: string): Promise<boolean> {
-  const normalized = normalizeNewlines(content);
   const existing = await readUtf8IfExists(filePath);
-  if (existing !== null && normalizeNewlines(existing) === normalized) {
+  // Preserve the existing file's dominant line endings instead of silently
+  // converting a CRLF-authored file to LF.
+  const finalContent =
+    existing !== null && isCrlfDominant(existing)
+      ? content.replace(/\r?\n/g, "\r\n")
+      : content;
+  if (existing !== null && existing === finalContent) {
     return false;
   }
 
-  await mkdir(dirname(filePath), { recursive: true });
-  await writeFile(filePath, normalized, "utf-8");
+  await writeFileAtomic(filePath, finalContent);
   return true;
+}
+
+function isCrlfDominant(content: string): boolean {
+  const crlf = content.match(/\r\n/g)?.length ?? 0;
+  const lf = content.match(/\n/g)?.length ?? 0;
+  return crlf > 0 && crlf * 2 > lf;
 }
 
 async function readUtf8IfExists(filePath: string): Promise<string | null> {
@@ -429,6 +521,9 @@ function printSetupResult(result: SetupResult): void {
   }
   for (const warning of result.warnings) {
     process.stdout.write(`  warning ${warning}\n`);
+  }
+  for (const failure of result.failures) {
+    process.stdout.write(`  error   ${failure}\n`);
   }
 }
 
