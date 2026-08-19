@@ -16,6 +16,7 @@ import type { OpenCodeChunk } from "@xtctx/types/scraper";
 interface SessionFixture {
   id: string;
   title?: string;
+  directory?: string;
   time_created: number;
   messages: MessageFixture[];
 }
@@ -73,7 +74,7 @@ function buildOpenCodeDb(dbPath: string, sessions: SessionFixture[]): void {
 
   const insSession = db.prepare(
     `INSERT INTO session (id, project_id, workspace_id, parent_id, slug, directory, path, title, version, share_url, time_created, time_updated, time_compacting, time_archived)
-     VALUES (?, 'p1', NULL, NULL, 's', '/tmp', NULL, ?, '0.1', NULL, ?, ?, NULL, NULL)`,
+     VALUES (?, 'p1', NULL, NULL, 's', ?, NULL, ?, '0.1', NULL, ?, ?, NULL, NULL)`,
   );
   const insMessage = db.prepare(
     `INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?)`,
@@ -83,7 +84,7 @@ function buildOpenCodeDb(dbPath: string, sessions: SessionFixture[]): void {
   );
 
   for (const s of sessions) {
-    insSession.run(s.id, s.title ?? "untitled", s.time_created, s.time_created);
+    insSession.run(s.id, s.directory ?? "/tmp", s.title ?? "untitled", s.time_created, s.time_created);
     for (const m of s.messages) {
       const msgData: Record<string, unknown> = {
         id: m.id,
@@ -119,6 +120,45 @@ describe("OpenCodeScraper", () => {
   afterEach(async () => {
     await rm(rootDir, { recursive: true, force: true });
     await rm(stateDir, { recursive: true, force: true });
+  });
+
+  it("scopes sessions to the project root when provided", async () => {
+    buildOpenCodeDb(dbPath, [
+      {
+        id: "ses-in",
+        directory: "/work/myproj",
+        time_created: 1_750_000_000_000,
+        messages: [
+          {
+            id: "msg-in",
+            role: "user",
+            time_created: 1_750_000_000_000,
+            parts: [{ id: "prt-in", time_created: 1_750_000_000_000, data: { type: "text", text: "inside" } }],
+          },
+        ],
+      },
+      {
+        id: "ses-out",
+        directory: "/work/otherproj",
+        time_created: 1_750_000_000_000,
+        messages: [
+          {
+            id: "msg-out",
+            role: "user",
+            time_created: 1_750_000_000_000,
+            parts: [{ id: "prt-out", time_created: 1_750_000_000_000, data: { type: "text", text: "outside" } }],
+          },
+        ],
+      },
+    ]);
+
+    const scraper = new OpenCodeScraper(dbPath, stateDir, "/work/myproj");
+    const chunks: OpenCodeChunk[] = [];
+    for await (const chunk of scraper.fullSync()) chunks.push(chunk);
+
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0].content).toBe("inside");
+    expect(chunks[0].sessionId).toBe("ses-in");
   });
 
   it("returns no chunks when database file is missing", async () => {

@@ -116,7 +116,8 @@ export const SUPPORTED_TOOLS: ToolSourceDefinition[] = [
     id: "opencode",
     label: "opencode",
     defaultStorePath: defaultOpenCodeStorePath,
-    createScraper: (storePath, stateDir) => new OpenCodeScraper(storePath, stateDir),
+    createScraper: (storePath, stateDir, projectRoot) =>
+      new OpenCodeScraper(storePath, stateDir, projectRoot),
     memoryTargets: ["AGENTS.md"],
     hookMode: "instruction-only",
     skillSync: {
@@ -128,7 +129,8 @@ export const SUPPORTED_TOOLS: ToolSourceDefinition[] = [
     id: "copilot-cli",
     label: "GitHub Copilot CLI",
     defaultStorePath: defaultCopilotCliSessionPath,
-    createScraper: (storePath, stateDir) => new CopilotCliScraper(storePath, stateDir),
+    createScraper: (storePath, stateDir, projectRoot) =>
+      new CopilotCliScraper(storePath, stateDir, projectRoot),
     memoryTargets: [join(".github", "copilot-instructions.md")],
     hookMode: "mcp-only",
     skillSync: {
