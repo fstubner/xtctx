@@ -76,7 +76,12 @@ export function createSearchSessionsHandler(service: SessionService) {
       return { query, mode, sessions };
     }
 
-    return formatRecentSessionsMarkdown(sessions, `## Search Results: ${query}`);
+    // Echo a bounded form of the query: a 10k-character query came back
+    // verbatim in the heading, burning the calling agent's context.
+    return formatRecentSessionsMarkdown(
+      sessions,
+      `## Search Results: ${inlineSafe(truncateQueryEcho(query))}`,
+    );
   };
 }
 
@@ -155,6 +160,14 @@ function formatSessionDetailMarkdown(
  */
 function inlineSafe(value: string): string {
   return value.replace(/\s+/g, " ").trim();
+}
+
+const MAX_QUERY_ECHO_CHARS = 200;
+
+function truncateQueryEcho(query: string): string {
+  return query.length <= MAX_QUERY_ECHO_CHARS
+    ? query
+    : `${query.slice(0, MAX_QUERY_ECHO_CHARS)}…`;
 }
 
 /**

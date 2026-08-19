@@ -110,6 +110,12 @@ const MAX_LIMIT = 100;
 const DEFAULT_WINDOW_SIZE = 8;
 const DEFAULT_WINDOW_STRIDE = 4;
 const MAX_MATCHES_PER_SESSION = 3;
+/**
+ * Minimum raw cosine similarity for a retrieval window to count as a semantic
+ * match. Unrelated sentence-transformer pairs sit near 0; related ones are
+ * comfortably above this.
+ */
+const MIN_SEMANTIC_COSINE = 0.15;
 const SOURCE_CURSOR_OVERLAP_MS = 1_000;
 
 export class SqliteHandoffIndex implements SessionService {
@@ -634,14 +640,17 @@ export class SqliteHandoffIndex implements SessionService {
     const timeRange = getTimeRange(rows.map((row) => row.ended_at));
     const scored = rows
       .map((row) => {
-        const semanticScore = normalizeCosine(
-          cosineSimilarity(queryVector, deserializeVector(row.vector, row.dimensions)),
+        const rawCosine = cosineSimilarity(
+          queryVector,
+          deserializeVector(row.vector, row.dimensions),
         );
+        const semanticScore = normalizeCosine(rawCosine);
         const keywordScore = keywordScores.get(row.unit_id) ?? 0;
         const recencyScore = scoreRecency(row.ended_at, timeRange);
         const continuityScore = scoreContinuity(row.message_end_index, row.session_message_count);
         return {
           row,
+          rawCosine,
           score: blendScores(mode, semanticScore, keywordScore, recencyScore, continuityScore),
           semanticScore,
           keywordScore,
@@ -649,6 +658,12 @@ export class SqliteHandoffIndex implements SessionService {
           continuityScore,
         };
       })
+      // Require actual evidence. Cosine normalises to ~0.5 for unrelated
+      // content, so recency and continuity alone were enough to return the
+      // entire corpus for a query matching nothing — formatted exactly like a
+      // real hit. A unit qualifies on semantic similarity or a keyword match;
+      // "no matching sessions" is a more useful answer than a nearest vector.
+      .filter((item) => item.rawCosine >= MIN_SEMANTIC_COSINE || item.keywordScore > 0)
       .sort((left, right) => right.score - left.score);
 
     return groupScoredUnits(scored, mode, normalizedLimit);

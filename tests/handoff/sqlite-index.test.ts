@@ -174,6 +174,31 @@ describe("SqliteHandoffIndex", () => {
     await index.close();
   });
 
+  it("returns nothing for a hybrid query with no relevance to the corpus", async () => {
+    // Cosine similarity normalises to ~0.5 for unrelated content, so with
+    // recency and continuity added every session scored 0.49-0.76 and was
+    // returned formatted exactly like a real hit — the calling agent cannot
+    // tell "nearest vector" from "actually relevant".
+    const scraper = new FixtureScraper([
+      chunk("corpus-session", 0, "user", "sqlite vector handoff notes"),
+      chunk("corpus-session", 1, "assistant", "chronological windows"),
+    ]);
+    const index = new SqliteHandoffIndex(
+      join(tempDir, "xtctx.db"),
+      tempDir,
+      [{ tool: "codex", scraper }],
+      { embeddingProvider: new FixtureEmbeddingProvider(), windowSize: 2, windowStride: 1 },
+    );
+
+    const nonsense = await index.searchSessions("SECRETLEAKCANARY", 5, undefined, "hybrid");
+    const real = await index.searchSessions("sqlite vector", 5, undefined, "hybrid");
+
+    expect(nonsense).toEqual([]);
+    expect(real.map((session) => session.session_ref)).toEqual(["codex:corpus-session"]);
+
+    await index.close();
+  });
+
   it("does not match on xtctx's own window scaffolding", async () => {
     // Retrieval windows are wrapped in "Session: …", "Turn 1/2 |
     // message_index=0 | user @ …" headers that give the embedding model
