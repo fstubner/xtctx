@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -159,6 +159,21 @@ describe("OpenCodeScraper", () => {
     expect(chunks).toHaveLength(1);
     expect(chunks[0].content).toBe("inside");
     expect(chunks[0].sessionId).toBe("ses-in");
+  });
+
+  it("reports a corrupt database instead of looking empty", async () => {
+    // A store that exists but cannot be opened is a broken tool, not a
+    // pristine one. Swallowing it made `status` read "detected, 0 sessions",
+    // indistinguishable from a fresh install, so a corrupt store could go
+    // unnoticed indefinitely.
+    await writeFile(dbPath, "this is not a sqlite database", "utf-8");
+    const scraper = new OpenCodeScraper(dbPath, stateDir);
+
+    expect(await scraper.detect()).toBe(true);
+    await expect(async () => {
+      const chunks: OpenCodeChunk[] = [];
+      for await (const chunk of scraper.fullSync()) chunks.push(chunk);
+    }).rejects.toThrow(/opencode database/i);
   });
 
   it("returns no chunks when database file is missing", async () => {

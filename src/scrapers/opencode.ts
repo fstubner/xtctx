@@ -133,9 +133,13 @@ export class OpenCodeScraper extends AbstractScraper<OpenCodeChunk> {
     let db: import("better-sqlite3").Database;
     try {
       db = new Database(this.opencodeDbPath, { readonly: true, fileMustExist: true });
-    } catch {
-      // ACCEPTED_DEGRADATIONS.missingDatabase
-      return;
+    } catch (err) {
+      // The file exists (checked above), so failing to open it is a broken
+      // store, not an absent one. Reporting it as absent made a corrupt
+      // database read as a pristine install in status.
+      throw new Error(
+        `[${SCRAPER_NAME}] opencode database at ${this.opencodeDbPath} could not be opened: ${(err as Error).message}`,
+      );
     }
 
     try {
@@ -165,11 +169,15 @@ export class OpenCodeScraper extends AbstractScraper<OpenCodeChunk> {
             .all() as Omit<SessionRow, "directory">[]
         ).map((row) => ({ ...row, directory: null }));
       } catch (err) {
-        warnDrift(
-          this.opencodeDbPath,
-          `session table query failed: ${(err as Error).message}`,
-          0,
-        );
+        const message = (err as Error).message;
+        if (/not a database|file is encrypted|malformed|corrupt/i.test(message)) {
+          // Corruption, not schema drift — surface it rather than reporting
+          // an empty store.
+          throw new Error(
+            `[${SCRAPER_NAME}] opencode database at ${this.opencodeDbPath} is unreadable: ${message}`,
+          );
+        }
+        warnDrift(this.opencodeDbPath, `session table query failed: ${message}`, 0);
         return;
       }
     }
