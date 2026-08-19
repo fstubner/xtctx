@@ -134,6 +134,60 @@ describe("CodexCliScraper", () => {
     expect(chunks[1].content).toBe("codex second");
   });
 
+  it("keeps messageIndex stable when compacted events fall below the cutoff", async () => {
+    await writeFile(
+      join(tempDir, "session-compacted.jsonl"),
+      [
+        sessionMeta("compacted-session", "2026-02-24T09:59:00Z"),
+        JSON.stringify({
+          timestamp: "2026-02-24T10:00:00Z",
+          type: "compacted",
+          payload: { summary: "earlier turns summarized" },
+        }),
+        assistantMessage("after compaction", "2026-02-24T11:00:00Z"),
+      ].join("\n") + "\n",
+      "utf-8",
+    );
+
+    const full: CodexChunk[] = [];
+    for await (const chunk of scraper.fullSync()) full.push(chunk);
+    const incremental: CodexChunk[] = [];
+    for await (const chunk of scraper.scrape(new Date("2026-02-24T10:30:00Z"))) {
+      incremental.push(chunk);
+    }
+
+    const fullAfter = full.find((chunk) => chunk.content === "after compaction");
+    const incrementalAfter = incremental.find((chunk) => chunk.content === "after compaction");
+    expect(fullAfter?.metadata.messageIndex).toBe(1);
+    expect(incrementalAfter?.metadata.messageIndex).toBe(1);
+  });
+
+  it("preserves approval mode and sandbox state across partial turn_context updates", async () => {
+    await writeFile(
+      join(tempDir, "session-context.jsonl"),
+      [
+        sessionMeta("context-session", "2026-02-24T09:59:00Z"),
+        turnContext("auto-edit", "workspace-write"),
+        // A later turn_context with an unknown policy and no sandbox_policy
+        // must not clobber the known state.
+        JSON.stringify({
+          timestamp: "2026-02-24T09:59:30Z",
+          type: "turn_context",
+          payload: { approval_policy: "yolo-mode" },
+        }),
+        assistantMessage("still sandboxed", "2026-02-24T10:00:00Z"),
+      ].join("\n") + "\n",
+      "utf-8",
+    );
+
+    const chunks: CodexChunk[] = [];
+    for await (const chunk of scraper.fullSync()) chunks.push(chunk);
+
+    const target = chunks.find((chunk) => chunk.content === "still sandboxed");
+    expect(target?.metadata.approvalMode).toBe("auto-edit");
+    expect(target?.metadata.sandboxed).toBe(true);
+  });
+
   it("skips system-injected response_item user messages", async () => {
     const chunks: CodexChunk[] = [];
     for await (const chunk of scraper.fullSync()) {

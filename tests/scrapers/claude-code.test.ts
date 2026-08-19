@@ -37,6 +37,74 @@ describe("ClaudeCodeScraper", () => {
     expect(await scraper.detect()).toBe(true);
   });
 
+  it("assigns stable messageIndex across full and incremental scrapes", async () => {
+    const projectDir = join(tempDir, "index-stability");
+    await mkdir(projectDir, { recursive: true });
+    await writeFile(
+      join(projectDir, "session-idx.jsonl"),
+      [
+        '{"type":"human","content":"first","timestamp":"2026-02-24T10:00:00Z"}',
+        '{"type":"assistant","content":"","timestamp":"2026-02-24T10:00:01Z"}',
+        '{"type":"human","content":"third","timestamp":"2026-02-24T10:00:02Z"}',
+      ].join("\n") + "\n",
+    );
+
+    const full: ClaudeCodeChunk[] = [];
+    for await (const chunk of scraper.fullSync()) full.push(chunk);
+    const incremental: ClaudeCodeChunk[] = [];
+    for await (const chunk of scraper.scrape(new Date("2026-02-24T10:00:01.500Z"))) {
+      incremental.push(chunk);
+    }
+
+    const fullThird = full.find((chunk) => chunk.content === "third");
+    const incrementalThird = incremental.find((chunk) => chunk.content === "third");
+    expect(fullThird?.metadata.messageIndex).toBe(2);
+    expect(incrementalThird?.metadata.messageIndex).toBe(2);
+  });
+
+  it("keeps records with missing timestamps on full sync", async () => {
+    const origWarn = console.warn;
+    console.warn = () => {};
+    try {
+      const projectDir = join(tempDir, "missing-ts");
+      await mkdir(projectDir, { recursive: true });
+      await writeFile(
+        join(projectDir, "session-ts.jsonl"),
+        '{"type":"human","content":"no timestamp here"}\n',
+      );
+
+      const chunks: ClaudeCodeChunk[] = [];
+      for await (const chunk of scraper.fullSync()) chunks.push(chunk);
+
+      expect(chunks.some((chunk) => chunk.content === "no timestamp here")).toBe(true);
+    } finally {
+      console.warn = origWarn;
+    }
+  });
+
+  it("continues past an unreadable transcript file", async () => {
+    const warnings: string[] = [];
+    const origWarn = console.warn;
+    console.warn = (...args) => warnings.push(args.join(" "));
+    try {
+      const projectDir = join(tempDir, "with-bad-file");
+      // A directory named *.jsonl passes the extension filter and fails to stream.
+      await mkdir(join(projectDir, "aaa-bad.jsonl"), { recursive: true });
+      await writeFile(
+        join(projectDir, "good.jsonl"),
+        '{"type":"human","content":"still scraped","timestamp":"2026-02-24T10:00:00Z"}\n',
+      );
+
+      const chunks: ClaudeCodeChunk[] = [];
+      for await (const chunk of scraper.fullSync()) chunks.push(chunk);
+
+      expect(chunks.some((chunk) => chunk.content === "still scraped")).toBe(true);
+      expect(warnings.some((warning) => warning.includes("unreadable"))).toBe(true);
+    } finally {
+      console.warn = origWarn;
+    }
+  });
+
   it("scrapes conversation chunks from JSONL", async () => {
     const chunks: ClaudeCodeChunk[] = [];
 

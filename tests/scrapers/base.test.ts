@@ -1,4 +1,8 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it, expect } from "vitest";
+import { ScraperStateManager } from "@xtctx/scrapers/base";
 import { estimateTokens, toDate } from "@xtctx/scrapers/base";
 
 describe("estimateTokens", () => {
@@ -40,5 +44,37 @@ describe("toDate", () => {
   it("returns sentinel date(0) for invalid inputs", () => {
     expect(toDate(null).getTime()).toBe(0);
     expect(toDate("invalid-date").getTime()).toBe(0);
+  });
+});
+
+describe("ScraperStateManager", () => {
+  it("round-trips saved positions", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "xtctx-state-"));
+    try {
+      const manager = new ScraperStateManager(dir);
+      const saved = new Date("2026-05-10T10:00:00.000Z");
+      await manager.save("codex", { lastTimestamp: saved });
+
+      const state = await manager.load("codex");
+      expect(state.lastTimestamp.getTime()).toBe(saved.getTime());
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("resets an invalid persisted timestamp to epoch instead of Invalid Date", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "xtctx-state-"));
+    try {
+      await writeFile(join(dir, "codex-state.json"), '{"lastTimestamp":"garbage"}', "utf-8");
+
+      const state = await new ScraperStateManager(dir).load("codex");
+
+      // An Invalid Date poisons every cutoff comparison (all false), which
+      // re-emits the entire history on every scrape forever.
+      expect(Number.isNaN(state.lastTimestamp.getTime())).toBe(false);
+      expect(state.lastTimestamp.getTime()).toBe(0);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

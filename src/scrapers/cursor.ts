@@ -1,7 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import Database from "better-sqlite3";
+import type Database from "better-sqlite3";
 import { glob } from "glob";
 import type { CursorChunk } from "../types/scraper.js";
 import { AbstractScraper, estimateTokens, toDate } from "./base.js";
@@ -97,10 +97,21 @@ export class CursorScraper extends AbstractScraper<CursorChunk> {
   }
 
   private async *readAllMessages(since: Date): AsyncIterable<CursorChunk> {
+    // Dynamic import keeps better-sqlite3 an optional runtime dependency,
+    // matching the copilot and opencode scrapers.
+    let DatabaseCtor: typeof Database;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      DatabaseCtor = ((await import("better-sqlite3")) as any).default as typeof Database;
+    } catch {
+      // Native module unavailable — treat the source as absent.
+      return;
+    }
+
     const workspacePaths = await this.resolveWorkspaceDatabasePaths();
 
     for (const wsPath of workspacePaths) {
-      const composerRefs = this.readWorkspaceComposers(wsPath);
+      const composerRefs = this.readWorkspaceComposers(DatabaseCtor, wsPath);
       if (composerRefs.length === 0) {
         continue;
       }
@@ -112,7 +123,7 @@ export class CursorScraper extends AbstractScraper<CursorChunk> {
 
       let globalDb: Database.Database | null = null;
       try {
-        globalDb = new Database(globalPath, { readonly: true, fileMustExist: true });
+        globalDb = new DatabaseCtor(globalPath, { readonly: true, fileMustExist: true });
         yield* this.readComposerMessages(globalDb, composerRefs, since, wsPath);
       } catch (err) {
         // Global storage unreadable — treat as schema drift and warn.
@@ -128,11 +139,14 @@ export class CursorScraper extends AbstractScraper<CursorChunk> {
     }
   }
 
-  private readWorkspaceComposers(wsDbPath: string): WorkspaceComposerRef[] {
+  private readWorkspaceComposers(
+    DatabaseCtor: typeof Database,
+    wsDbPath: string,
+  ): WorkspaceComposerRef[] {
     let db: Database.Database | null = null;
 
     try {
-      db = new Database(wsDbPath, { readonly: true, fileMustExist: true });
+      db = new DatabaseCtor(wsDbPath, { readonly: true, fileMustExist: true });
     } catch {
       // File missing / unopenable — treat as absent workspace, not drift.
       return [];
@@ -173,11 +187,10 @@ export class CursorScraper extends AbstractScraper<CursorChunk> {
     } catch (err) {
       // The ItemTable is a required workspace-storage contract — the db
       // opened but a query against it failed, meaning Cursor's internal
-      // format changed. Throw so callers surface the drift instead of
-      // silently returning zero chunks.
-      throw new Error(
-        `[${SCRAPER_NAME}] ItemTable unreadable at ${wsDbPath}: ${(err as Error).message}`,
-      );
+      // format changed. Warn loudly, but do not abort the remaining
+      // workspaces over one broken database.
+      warnDrift(wsDbPath, `ItemTable unreadable: ${(err as Error).message}`, 0);
+      return [];
     } finally {
       db?.close();
     }
@@ -294,7 +307,7 @@ export class CursorScraper extends AbstractScraper<CursorChunk> {
         }
 
         const timestamp = toDate(bubble.createdAt);
-        if (timestamp <= since) {
+        if (since.getTime() > 0 && timestamp <= since) {
           messageIndex++;
           continue;
         }

@@ -100,7 +100,7 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
         messageIndex: toMessageIndex(value.messageIndex),
         tokenEstimate: estimateTokens(content),
         referencedFiles: [],
-        approvalMode: normalizeApprovalMode(toStringValue(value.approvalMode)),
+        approvalMode: normalizeApprovalMode(toStringValue(value.approvalMode)) ?? "suggest",
         sandboxed: toBoolean(value.sandboxed),
         layer: toMessageIndex(value.layer),
       },
@@ -121,6 +121,7 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
     const files = await this.resolveJsonlFiles();
 
     for (const filePath of files) {
+      try {
       const sessionIdFromFile = inferSessionId(filePath);
       const reader = createInterface({
         input: createReadStream(filePath, { encoding: "utf8" }),
@@ -199,8 +200,9 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
             approvalMode =
               normalizeApprovalMode(toStringValue(payload.approval_policy)) ?? approvalMode;
             const sandboxPolicy = payload.sandbox_policy;
-            sandboxed =
-              isRecord(sandboxPolicy) && toStringValue(sandboxPolicy.type) !== "none";
+            if (isRecord(sandboxPolicy)) {
+              sandboxed = toStringValue(sandboxPolicy.type) !== "none";
+            }
           }
           continue;
         }
@@ -241,7 +243,7 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
           }
 
           const timestamp = toDate(parsed.timestamp ?? parsed.created_at ?? parsed.createdAt);
-          if (timestamp <= since) {
+          if (since.getTime() > 0 && timestamp <= since) {
             messageIndex++;
             continue;
           }
@@ -272,7 +274,7 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
 
           if (content) {
             const timestamp = toDate(parsed.timestamp ?? parsed.created_at ?? parsed.createdAt);
-            if (timestamp > since) {
+            if (since.getTime() === 0 || timestamp > since) {
               yield this.parseRaw({
                 sessionId,
                 messageIndex,
@@ -283,8 +285,10 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
                 sandboxed,
                 layer: 1,
               });
-              messageIndex++;
             }
+            // Consume the index below the cutoff too, so chunk identity is
+            // stable between full and incremental scrapes.
+            messageIndex++;
           }
           continue;
         }
@@ -334,7 +338,7 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
         }
 
         const timestamp = toDate(parsed.timestamp ?? parsed.created_at ?? parsed.createdAt);
-        if (timestamp <= since) {
+        if (since.getTime() > 0 && timestamp <= since) {
           messageIndex++;
           continue;
         }
@@ -349,6 +353,10 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
           sandboxed,
         });
         messageIndex++;
+      }
+      } catch (err) {
+        // One unreadable file must not abort the remaining session files.
+        warnDrift(filePath, `unreadable transcript file: ${(err as Error).message}`, 0);
       }
     }
   }
@@ -416,14 +424,18 @@ function normalizeRole(value?: string): CodexChunk["role"] {
   return ROLE_MAP[value.toLowerCase()] ?? "system";
 }
 
-function normalizeApprovalMode(value?: string): ApprovalMode {
+function normalizeApprovalMode(value?: string): ApprovalMode | null {
   switch (value) {
+    case "suggest":
+      return "suggest";
     case "auto-edit":
       return "auto-edit";
     case "full-auto":
       return "full-auto";
     default:
-      return "suggest";
+      // Unknown/future policy values keep the previously observed mode
+      // rather than silently downgrading the record to "suggest".
+      return null;
   }
 }
 

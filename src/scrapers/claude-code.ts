@@ -84,7 +84,7 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
 
   parseRaw(raw: unknown): ClaudeCodeChunk {
     const obj = raw as Record<string, unknown>;
-    const timestamp = new Date((obj.timestamp as string) || 0);
+    const timestamp = parseRecordTimestamp(obj.timestamp);
     const content = extractContent(obj);
     const type = (obj.type as string) || "unknown";
     const role = extractRole(obj, type);
@@ -131,98 +131,116 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
           continue;
         }
 
-        const sessionId = file.replace(".jsonl", "");
+        const sessionId = file.replace(/\.jsonl$/, "");
         const filePath = join(projectDir, file);
-        const reader = createInterface({
-          input: createReadStream(filePath, { encoding: "utf8" }),
-          crlfDelay: Infinity,
-        });
-
-        let messageIndex = 0;
-        let lineNo = 0;
-        for await (const line of reader) {
-          lineNo++;
-          if (!line.trim()) {
-            continue;
-          }
-
-          let obj: Record<string, unknown>;
-          try {
-            obj = JSON.parse(line) as Record<string, unknown>;
-          } catch (err) {
-            // ACCEPTED_DEGRADATIONS.malformedJsonlLine, but warn so the
-            // mutation test can see drift instead of data silently vanishing.
-            warnDrift(
-              `${filePath}:${lineNo}`,
-              `line is not valid JSON: ${(err as Error).message}`,
-              1,
-            );
-            continue;
-          }
-
-          if (NON_MESSAGE_TYPES.has(String(obj.type))) {
-            continue;
-          }
-
-          // Strict-mode schema check: warn (but still emit) on shape surprise.
-          if (!("type" in obj)) {
-            warnDrift(
-              `${filePath}:${lineNo}`,
-              "record is missing required 'type' field — likely renamed",
-              1,
-            );
-          } else if (typeof obj.type !== "string" || !(obj.type in ROLE_MAP)) {
-            warnDrift(
-              `${filePath}:${lineNo}`,
-              `unknown 'type' value ${JSON.stringify(obj.type)}`,
-              1,
-            );
-          }
-
-          if (
-            "content" in obj &&
-            obj.content !== undefined &&
-            typeof obj.content !== "string"
-          ) {
-            warnDrift(
-              `${filePath}:${lineNo}`,
-              `expected 'content' to be a string, got ${describeType(obj.content)}`,
-              1,
-            );
-          }
-
-          if (!("timestamp" in obj)) {
-            warnDrift(
-              `${filePath}:${lineNo}`,
-              "record is missing 'timestamp' field",
-              1,
-            );
-          } else if (typeof obj.timestamp !== "string") {
-            warnDrift(
-              `${filePath}:${lineNo}`,
-              `expected 'timestamp' string, got ${describeType(obj.timestamp)}`,
-              1,
-            );
-          }
-
-          const timestamp = new Date((obj.timestamp as string) ?? 0);
-
-          if (timestamp <= since) {
-            messageIndex += 1;
-            continue;
-          }
-
-          obj.sessionId = sessionId;
-          obj.messageIndex = messageIndex;
-          const chunk = this.parseRaw(obj);
-          if (!chunk.content.trim()) {
-            continue;
-          }
-
-          messageIndex += 1;
-          yield chunk;
+        try {
+          yield* this.readSessionFile(filePath, sessionId, since);
+        } catch (err) {
+          // One unreadable file must not abort the remaining files/projects.
+          warnDrift(filePath, `unreadable transcript file: ${(err as Error).message}`, 0);
         }
       }
+    }
+  }
+
+  private async *readSessionFile(
+    filePath: string,
+    sessionId: string,
+    since: Date,
+  ): AsyncIterable<ClaudeCodeChunk> {
+    const reader = createInterface({
+      input: createReadStream(filePath, { encoding: "utf8" }),
+      crlfDelay: Infinity,
+    });
+
+    let messageIndex = 0;
+    let lineNo = 0;
+    for await (const line of reader) {
+      lineNo++;
+      if (!line.trim()) {
+        continue;
+      }
+
+      let obj: Record<string, unknown>;
+      try {
+        obj = JSON.parse(line) as Record<string, unknown>;
+      } catch (err) {
+        // ACCEPTED_DEGRADATIONS.malformedJsonlLine, but warn so the
+        // mutation test can see drift instead of data silently vanishing.
+        warnDrift(
+          `${filePath}:${lineNo}`,
+          `line is not valid JSON: ${(err as Error).message}`,
+          1,
+        );
+        continue;
+      }
+
+      if (NON_MESSAGE_TYPES.has(String(obj.type))) {
+        continue;
+      }
+
+      // Strict-mode schema check: warn (but still emit) on shape surprise.
+      if (!("type" in obj)) {
+        warnDrift(
+          `${filePath}:${lineNo}`,
+          "record is missing required 'type' field — likely renamed",
+          1,
+        );
+      } else if (typeof obj.type !== "string" || !(obj.type in ROLE_MAP)) {
+        warnDrift(
+          `${filePath}:${lineNo}`,
+          `unknown 'type' value ${JSON.stringify(obj.type)}`,
+          1,
+        );
+      }
+
+      if (
+        "content" in obj &&
+        obj.content !== undefined &&
+        typeof obj.content !== "string"
+      ) {
+        warnDrift(
+          `${filePath}:${lineNo}`,
+          `expected 'content' to be a string, got ${describeType(obj.content)}`,
+          1,
+        );
+      }
+
+      if (!("timestamp" in obj)) {
+        warnDrift(
+          `${filePath}:${lineNo}`,
+          "record is missing 'timestamp' field",
+          1,
+        );
+      } else if (typeof obj.timestamp !== "string") {
+        warnDrift(
+          `${filePath}:${lineNo}`,
+          `expected 'timestamp' string, got ${describeType(obj.timestamp)}`,
+          1,
+        );
+      }
+
+      const timestamp = parseRecordTimestamp(obj.timestamp);
+
+      // Every message-shaped record consumes an index, whether or not it is
+      // emitted, so chunk identity is identical between full and incremental
+      // scrapes (chunk ids hash the index).
+      const currentIndex = messageIndex;
+      messageIndex += 1;
+
+      // A zero `since` means full sync: emit even epoch-sentinel timestamps.
+      if (since.getTime() > 0 && timestamp <= since) {
+        continue;
+      }
+
+      obj.sessionId = sessionId;
+      obj.messageIndex = currentIndex;
+      const chunk = this.parseRaw(obj);
+      if (!chunk.content.trim()) {
+        continue;
+      }
+
+      yield chunk;
     }
   }
 
@@ -237,6 +255,15 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
       return normalized === encodedProject || normalized.startsWith(`${encodedProject}--`);
     });
   }
+}
+
+/**
+ * Missing or unparseable timestamps become the epoch sentinel rather than an
+ * Invalid Date, which would poison cutoff comparisons and toISOString().
+ */
+function parseRecordTimestamp(value: unknown): Date {
+  const parsed = new Date((value as string) || 0);
+  return Number.isNaN(parsed.getTime()) ? new Date(0) : parsed;
 }
 
 function extractRole(
