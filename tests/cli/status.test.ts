@@ -37,7 +37,9 @@ describe("status", () => {
       const status = await renderStatusBlock(services);
 
       expect(status).toContain("Skills:");
-      expect(status).toContain("No sessions are indexed yet");
+      // This fixture deliberately drifts a skill target, so the closing hint
+      // must point at repair rather than at indexing.
+      expect(status).toContain("Next     Wiring has drifted. Run: xtctx setup --repair");
       expect(status).toContain("xtctx-handoff");
       expect(status).toContain("claude-code native-skill xtctx-handoff");
       expect(status).toContain("drift         cursor rule-adapter xtctx-handoff");

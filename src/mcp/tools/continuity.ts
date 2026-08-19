@@ -1,4 +1,5 @@
 import type { SessionService } from "../../handoff/types.js";
+import { sanitizeErrorMessage } from "../../utils/errors.js";
 
 interface ContinuityStatusParams {
   format?: "markdown" | "json";
@@ -15,10 +16,15 @@ export function createContinuityStatusHandler(service: SessionService) {
       // The markdown branch below omits them for the same reason.
       return {
         ...status,
+        embedding_error: status.embedding_error
+          ? sanitizeErrorMessage(status.embedding_error)
+          : null,
         tools: status.tools.map((tool) => ({
           tool: tool.tool,
           detected: tool.detected,
-          last_error: tool.last_error,
+          // Scrape errors quote the store path they failed on, which is
+          // machine-wide (home directory layout) like store_paths above.
+          last_error: tool.last_error ? sanitizeErrorMessage(tool.last_error) : null,
           indexed_sessions: tool.indexed_sessions,
           indexed_messages: tool.indexed_messages,
           last_indexed_at: tool.last_indexed_at,
@@ -46,7 +52,9 @@ export function createContinuityStatusHandler(service: SessionService) {
 
     for (const tool of status.tools) {
       const detected = tool.detected ? "detected" : "not detected";
-      const error = tool.last_error ? `, last scrape error: ${tool.last_error}` : "";
+      const error = tool.last_error
+        ? `, last scrape error: ${sanitizeErrorMessage(tool.last_error)}`
+        : "";
       lines.push(
         `- ${tool.tool}: ${detected}, ${tool.indexed_sessions} sessions, ` +
           `${tool.indexed_messages} messages${error}`,

@@ -46,9 +46,6 @@ export async function renderStatusBlock(services: ProjectServices): Promise<stri
     `Data     ${status.sessions} sessions, ${status.messages} messages, ` +
       `${status.retrieval_units} retrieval windows, ${status.vectorized_units} vectorized`,
   );
-  if (status.last_scan_at === null && status.sessions === 0) {
-    lines.push("Next     No sessions are indexed yet. Ask a configured agent to call xtctx_recent_sessions.");
-  }
   lines.push("");
   lines.push("Tools:");
 
@@ -99,6 +96,24 @@ export async function renderStatusBlock(services: ProjectServices): Promise<stri
       details.push(`stale: ${file.staleReferences.join(", ")}`);
     }
     lines.push(`  ${state.padEnd(12)} ${file.label} ${file.path}${details.length ? ` (${details.join("; ")})` : ""}`);
+  }
+
+  // Status always ends with one concrete next step, as ux-walkthrough.md
+  // promises. Repairing wiring outranks indexing advice: a drifted managed
+  // file or missing skill target is why an agent would see nothing at all.
+  const needsRepair =
+    !configPresent ||
+    managed.some((file) => file.exists && (file.blockCount !== 1 || file.staleReferences.length > 0)) ||
+    skills.selected.some((skill) => !skill.exists) ||
+    skills.targets.some((target) => target.state !== "ok");
+
+  lines.push("");
+  if (needsRepair) {
+    lines.push("Next     Wiring has drifted. Run: xtctx setup --repair");
+  } else if (status.sessions === 0) {
+    lines.push("Next     No sessions are indexed yet. Ask a configured agent to call xtctx_recent_sessions.");
+  } else {
+    lines.push("Next     Handoff is wired. Ask a configured agent to call xtctx_recent_sessions.");
   }
 
   return lines.join("\n");
