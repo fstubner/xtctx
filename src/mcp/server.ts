@@ -11,9 +11,10 @@ import {
   createRecentSessionsHandler,
   createSearchSessionsHandler,
   createSessionDetailHandler,
+  ToolInputError,
   type SessionService,
 } from "./tools/sessions.js";
-import { errorMessage } from "../utils/errors.js";
+import { errorMessage, sanitizeErrorMessage } from "../utils/errors.js";
 import { readXtctxPackage } from "../utils/package-info.js";
 
 const { version: SERVER_VERSION } = readXtctxPackage(import.meta.url);
@@ -191,9 +192,13 @@ export function createMcpServer(dependencies: McpToolDependencies = {}): Server 
       const result = await handler(params);
       return formatCallToolResult(result);
     } catch (error) {
+      const text =
+        error instanceof ToolInputError
+          ? `Invalid arguments for ${name}: ${error.message}`
+          : `Tool ${name} failed: ${sanitizeErrorMessage(errorMessage(error))}`;
       return {
         isError: true,
-        content: [{ type: "text", text: `Tool ${name} failed: ${errorMessage(error)}` }],
+        content: [{ type: "text", text }],
       };
     }
   });
@@ -201,8 +206,14 @@ export function createMcpServer(dependencies: McpToolDependencies = {}): Server 
   return server;
 }
 
-export async function startMcpServer(dependencies: McpToolDependencies = {}): Promise<void> {
+export async function startMcpServer(
+  dependencies: McpToolDependencies = {},
+  onClose?: () => void,
+): Promise<void> {
   const server = createMcpServer(dependencies);
+  if (onClose) {
+    server.onclose = onClose;
+  }
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }
@@ -216,9 +227,10 @@ function asToolParams(value: unknown): ToolParams {
 }
 
 function missingDependency(dependency: string): ToolHandler {
-  return async () => ({
-    error: `Tool is unavailable because ${dependency} is not configured.`,
-  });
+  return async () => {
+    // Thrown (not returned) so the client sees isError, not a success shape.
+    throw new Error(`Tool is unavailable because ${dependency} is not configured.`);
+  };
 }
 
 function formatCallToolResult(result: unknown): {
@@ -231,8 +243,10 @@ function formatCallToolResult(result: unknown): {
   } = {
     content: [
       {
+        // Compact JSON: object results are also sent as structuredContent,
+        // so pretty-printing the text copy would double the payload twice.
         type: "text",
-        text: typeof result === "string" ? result : JSON.stringify(result, null, 2),
+        text: typeof result === "string" ? result : JSON.stringify(result),
       },
     ],
   };

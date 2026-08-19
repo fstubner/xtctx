@@ -10,7 +10,20 @@ export function createContinuityStatusHandler(service: SessionService) {
     const status = await service.getStatus();
 
     if (params.format === "json") {
-      return status;
+      // Deliberate allowlist: store_paths are machine-wide absolute paths
+      // (home directory layout) that the model-facing surface must not leak.
+      // The markdown branch below omits them for the same reason.
+      return {
+        ...status,
+        tools: status.tools.map((tool) => ({
+          tool: tool.tool,
+          detected: tool.detected,
+          last_error: tool.last_error,
+          indexed_sessions: tool.indexed_sessions,
+          indexed_messages: tool.indexed_messages,
+          last_indexed_at: tool.last_indexed_at,
+        })),
+      };
     }
 
     const lines = [
@@ -30,9 +43,10 @@ export function createContinuityStatusHandler(service: SessionService) {
 
     for (const tool of status.tools) {
       const detected = tool.detected ? "detected" : "not detected";
+      const error = tool.last_error ? `, last scrape error: ${tool.last_error}` : "";
       lines.push(
         `- ${tool.tool}: ${detected}, ${tool.indexed_sessions} sessions, ` +
-          `${tool.indexed_messages} messages`,
+          `${tool.indexed_messages} messages${error}`,
       );
     }
 
