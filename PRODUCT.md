@@ -63,5 +63,8 @@ no durable memory, no write-back tools, no cloud anything.
   atomic, merge-preserving, and never clobber unparsable user content.
 - Transcript content handed to a model is untrusted data; the MCP layer
   fences it and never grows write capabilities.
-- Everything runs local. The single network dependency is the one-time
-  embedding-model download from Hugging Face.
+- Everything runs local, and nothing is ever sent off the machine. Two
+  network dependencies exist, both narrow: the one-time embedding-model
+  download from Hugging Face, and loopback-only HTTPS calls to Antigravity's
+  local language server (127.0.0.1, exact-PID + CSRF matched; certificate
+  verification is off because the server is self-signed).

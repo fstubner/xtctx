@@ -98,6 +98,33 @@ describe("disconnectProject", () => {
     await expect(
       readFile(join(projectRoot, ".claude", "settings.json"), "utf-8"),
     ).rejects.toThrow();
+    // A rules file reduced to xtctx's own frontmatter is still an xtctx rule
+    // Cursor would keep loading.
+    await expect(
+      readFile(join(projectRoot, ".cursor", "rules", "xtctx.mdc"), "utf-8"),
+    ).rejects.toThrow();
+    // --all removes the synced-skill source too, as the walkthrough claims.
+    await expect(
+      readFile(join(projectRoot, ".xtctx", "skills", "xtctx-handoff", "SKILL.md"), "utf-8"),
+    ).rejects.toThrow();
+  });
+
+  it("labels a rewritten config as updated, not removed", async () => {
+    await setupProject({ projectPath: projectRoot, homeDir, yes: true });
+
+    const result = await disconnectProject({
+      projectPath: projectRoot,
+      homeDir,
+      tool: "claude-code",
+    });
+
+    const configWrite = result.writes.find((write) => write.kind === "config");
+    // config.yaml survives with tools flipped to disabled; reporting it as
+    // "removed" while it is still on disk is a false statement to the user.
+    expect(configWrite?.action).toBe("updated");
+    await expect(
+      readFile(join(projectRoot, ".xtctx", "config.yaml"), "utf-8"),
+    ).resolves.toContain("enabled: false");
   });
 
   it("preserves CRLF user content when removing managed blocks", async () => {

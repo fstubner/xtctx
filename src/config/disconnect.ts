@@ -1,4 +1,4 @@
-import { readFile, rm } from "node:fs/promises";
+import { readFile, rm, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { writeFileAtomic } from "../utils/atomic-file.js";
 import { matchLineEndings, normalizeNewlines, removeManagedBlocks } from "./managed-block.js";
@@ -32,7 +32,14 @@ export interface DisconnectOptions {
 export interface DisconnectResult {
   projectRoot: string;
   tools: ToolId[];
-  writes: Array<{ path: string; kind: string; changed: boolean; note?: string }>;
+  writes: Array<{
+    path: string;
+    kind: string;
+    changed: boolean;
+    /** What happened to the file. Defaults to "removed" for real removals. */
+    action?: "removed" | "updated";
+    note?: string;
+  }>;
   warnings: string[];
 }
 
@@ -92,6 +99,9 @@ export async function disconnectProject(options: DisconnectOptions = {}): Promis
   writes.push({
     path: configPath,
     kind: "config",
+    // config.yaml is rewritten with the tools disabled, never deleted — it is
+    // the record that xtctx was disconnected.
+    action: "updated",
     changed: await disableToolsInProjectConfig(configPath, tools),
   });
 
@@ -115,6 +125,22 @@ export async function disconnectProject(options: DisconnectOptions = {}): Promis
   }
 
   writes.push(...(await removeSyncedSkillsForTools(projectRoot, tools)));
+
+  if (options.all === true) {
+    // Nothing is left managing skills, so the synced source and the ignore
+    // file setup wrote are xtctx's own scaffolding, not user content.
+    // Transcript data under .xtctx/state is deliberately untouched.
+    for (const path of [
+      join(projectRoot, ".xtctx", "skills"),
+      join(projectRoot, ".xtctx", ".gitignore"),
+    ]) {
+      writes.push({
+        path,
+        kind: "skill-source",
+        changed: await removeIfPresent(path),
+      });
+    }
+  }
 
   if (tools.includes("claude-code")) {
     const settingsPath = join(projectRoot, ".claude", "settings.json");
@@ -147,7 +173,7 @@ export function printDisconnectResult(result: DisconnectResult): void {
   process.stdout.write(`Project: ${result.projectRoot}\n`);
   process.stdout.write(`Tools: ${result.tools.join(", ")}\n`);
   for (const write of result.writes) {
-    const marker = write.changed ? "removed" : "ok";
+    const marker = write.changed ? (write.action ?? "removed") : "ok";
     const note = write.note ? ` (${write.note})` : "";
     process.stdout.write(`  ${marker.padEnd(8)} ${write.kind} ${write.path}${note}\n`);
   }
@@ -308,9 +334,11 @@ async function removeManagedBlocksFromFile(filePath: string): Promise<boolean> {
     return false;
   }
 
-  if (!repaired) {
-    // The file held nothing but the xtctx block, so setup created it and
-    // disconnect owns removing it rather than leaving an empty file behind.
+  if (!repaired || isOnlyFrontmatter(repaired)) {
+    // The file held nothing but the xtctx block — or the YAML frontmatter
+    // xtctx itself wrote above it, which Cursor would keep loading as an
+    // xtctx rule. Either way setup created it and disconnect owns removing
+    // it, rather than leaving a stub behind.
     await rm(filePath, { force: true });
     return true;
   }
@@ -318,6 +346,26 @@ async function removeManagedBlocksFromFile(filePath: string): Promise<boolean> {
   // Put the author's line endings back: removal must not reformat the file.
   await writeFileAtomic(filePath, matchLineEndings(`${repaired}\n`, existing));
   return true;
+}
+
+async function removeIfPresent(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+  } catch {
+    return false;
+  }
+  await rm(path, { recursive: true, force: true });
+  return true;
+}
+
+/** True when nothing survives but a single YAML frontmatter block. */
+function isOnlyFrontmatter(content: string): boolean {
+  const trimmed = content.trim();
+  if (!trimmed.startsWith("---")) {
+    return false;
+  }
+  const end = trimmed.indexOf("\n---", 3);
+  return end !== -1 && trimmed.slice(end + 4).trim().length === 0;
 }
 
 /** Strip xtctx SessionStart matcher groups from .claude/settings.json. */
