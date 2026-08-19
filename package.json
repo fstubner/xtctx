@@ -30,7 +30,7 @@
     "landing:preview": "npm --prefix landing run preview",
     "prepack": "npm run build",
     "smoke:cli": "node dist/src/cli/index.js --help",
-    "verify:release": "npm run lint && npm test && npm run test:security && npm run security:checklist && npm audit --omit=dev && npm --prefix landing audit --omit=dev && npm run test:drift && npm run build && npm run demo:public && npm run landing:build && npm run smoke:cli"
+    "verify:release": "npm run lint && npm test && npm run test:security && npm run security:checklist && npm audit --omit=dev && npm --prefix landing audit && npm run test:drift && npm run build && npm pack --dry-run && npm run demo:public && npm run landing:build && npm run smoke:cli"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",
