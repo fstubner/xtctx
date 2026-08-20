@@ -27,12 +27,33 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const outDir = join(repoRoot, "tests", "drift", "fingerprints");
 const write = process.argv.includes("--write");
 
-/** Sample caps: a fingerprint needs breadth of shape, not volume. */
-const MAX_FILES = 8;
+/**
+ * Sample caps: a fingerprint needs breadth of shape, not volume.
+ *
+ * Files are sampled newest-first and the union of their shapes is recorded.
+ * Both parts matter. Newest-first because the current format is the one drift
+ * detection cares about; a union over a wide sample because otherwise the
+ * fingerprint changes with whichever files happened to be picked, and a
+ * fingerprint that churns on an unchanged store is another alarm nobody reads.
+ */
+const MAX_FILES = 30;
 const MAX_RECORDS_PER_FILE = 400;
 
-const home = process.env.USERPROFILE ?? process.env.HOME ?? "";
-const appData = process.env.APPDATA ?? join(home, "AppData", "Roaming");
+// Resolve store locations through the product's own helpers rather than
+// repeating them here. A second copy of path logic is how the demo ended up
+// building a store the scraper refused to read, and how opencode's real
+// database stayed invisible on this machine.
+let storePaths;
+try {
+  storePaths = await import("../dist/src/tools/sources.js");
+} catch {
+  console.error(
+    "dist is missing — run `npm run build` first.\n" +
+      "This script deliberately reuses the product's own store-path resolution\n" +
+      "instead of duplicating it, so it needs the built output.",
+  );
+  process.exit(1);
+}
 
 /** Type name of a value — the only thing recorded about it. */
 function typeOf(value) {
@@ -44,13 +65,33 @@ function typeOf(value) {
   return typeof value;
 }
 
+const UUID_KEY = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const OPAQUE_KEY = /^[0-9a-f]{16,}$/i;
+const SCHEMA_KEY = /^[A-Za-z0-9_$.:@-]{1,64}$/;
+
+/**
+ * A field name is safe to record; a map key is not.
+ *
+ * Some of these objects are dictionaries keyed by data rather than by schema —
+ * cursor stores per-file state under the file's URI, so a naive walk wrote
+ * absolute paths from unrelated private projects straight into a committed
+ * fingerprint. Anything that does not look like an identifier, plus ids that
+ * do, collapse to `*`: the shape underneath is still recorded, the key is not.
+ */
+function schemaKey(key) {
+  if (!SCHEMA_KEY.test(key)) return "*";
+  if (UUID_KEY.test(key) || OPAQUE_KEY.test(key)) return "*";
+  return key;
+}
+
 /** Flatten an object into "path: type" entries, one level of arrays. */
 function shapeOf(value, prefix = "", out = new Set(), depth = 0) {
   if (depth > 4 || value === null || typeof value !== "object" || Array.isArray(value)) {
     if (prefix) out.add(`${prefix}: ${typeOf(value)}`);
     return out;
   }
-  for (const [key, inner] of Object.entries(value)) {
+  for (const [rawKey, inner] of Object.entries(value)) {
+    const key = schemaKey(rawKey);
     const path = prefix ? `${prefix}.${key}` : key;
     if (inner !== null && typeof inner === "object" && !Array.isArray(inner)) {
       shapeOf(inner, path, out, depth + 1);
@@ -76,15 +117,30 @@ async function* walk(dir, depth = 0) {
   }
 }
 
+/** Newest-first, deterministic for a given store. */
+async function newestFiles(root, matcher, limit) {
+  const candidates = [];
+  for await (const file of walk(root)) {
+    if (!matcher(file)) continue;
+    let mtime = 0;
+    try {
+      mtime = (await stat(file)).mtimeMs;
+    } catch {
+      continue;
+    }
+    candidates.push({ file, mtime });
+  }
+  candidates.sort((a, b) => b.mtime - a.mtime || a.file.localeCompare(b.file));
+  return candidates.slice(0, limit).map((entry) => entry.file);
+}
+
 async function jsonlFingerprint(root, matcher) {
   if (!existsSync(root)) return null;
   const byType = new Map();
   let files = 0;
   let records = 0;
 
-  for await (const file of walk(root)) {
-    if (!matcher(file)) continue;
-    if (files >= MAX_FILES) break;
+  for (const file of await newestFiles(root, matcher, MAX_FILES)) {
     files += 1;
     let text;
     try {
@@ -185,17 +241,124 @@ async function sqliteFingerprint(dbPath, jsonColumns = []) {
   }
 }
 
+/**
+ * Cursor and VS Code Copilot keep conversation state in key/value SQLite
+ * tables, so the interesting shape is inside JSON *values* selected by key
+ * rather than in columns. Keys carry ids (`bubbleId:<composer>:<bubble>`),
+ * so they are grouped by prefix and the ids themselves are never recorded.
+ */
+async function keyValueFingerprint(dbPath, table, keyColumn, valueColumn, prefixes) {
+  if (!existsSync(dbPath)) return null;
+  let Database;
+  try {
+    Database = (await import("better-sqlite3")).default;
+  } catch {
+    return null;
+  }
+
+  let db;
+  try {
+    db = new Database(dbPath, { readonly: true, fileMustExist: true });
+  } catch {
+    return null;
+  }
+
+  try {
+    const tables = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table'")
+      .all()
+      .map((row) => row.name);
+    if (!tables.includes(table)) return null;
+
+    const byPrefix = {};
+    for (const prefix of prefixes) {
+      const fields = new Set();
+      let rows = [];
+      try {
+        rows = db
+          .prepare(`SELECT "${valueColumn}" AS v FROM "${table}" WHERE "${keyColumn}" LIKE ? LIMIT 25`)
+          .all(`${prefix}%`);
+      } catch {
+        continue;
+      }
+      for (const row of rows) {
+        const raw = typeof row.v === "string" ? row.v : row.v?.toString?.("utf-8");
+        if (!raw) continue;
+        let parsed;
+        try {
+          parsed = JSON.parse(raw);
+        } catch {
+          continue;
+        }
+        const sample = Array.isArray(parsed) ? parsed[0] : parsed;
+        for (const entry of shapeOf(sample)) fields.add(entry);
+      }
+      if (fields.size > 0) byPrefix[prefix] = [...fields].sort();
+    }
+
+    return Object.keys(byPrefix).length > 0
+      ? { kind: "sqlite-kv", table, keysByPrefix: byPrefix }
+      : null;
+  } finally {
+    db.close();
+  }
+}
+
+/** Merge several fingerprints into one record, dropping the empty ones. */
+function combine(parts) {
+  const present = Object.entries(parts).filter(([, value]) => value !== null);
+  return present.length > 0 ? Object.fromEntries(present) : null;
+}
+
+async function cursorFingerprint() {
+  const workspaceRoot = storePaths.defaultCursorStorePath();
+  if (!existsSync(workspaceRoot)) return null;
+
+  // Message bodies live in globalStorage, a sibling of workspaceStorage.
+  const globalDb = join(dirname(workspaceRoot), "globalStorage", "state.vscdb");
+
+  let workspace = null;
+  for await (const file of walk(workspaceRoot, 0)) {
+    if (!file.endsWith("state.vscdb")) continue;
+    workspace = await keyValueFingerprint(file, "ItemTable", "key", "value", [
+      "composer.composerData",
+    ]);
+    if (workspace) break;
+  }
+
+  return combine({
+    workspaceStorage: workspace,
+    globalStorage: await keyValueFingerprint(globalDb, "cursorDiskKV", "key", "value", [
+      "composerData:",
+      "bubbleId:",
+    ]),
+  });
+}
+
 const TOOLS = {
   "claude-code": () =>
-    jsonlFingerprint(join(home, ".claude", "projects"), (f) => f.endsWith(".jsonl")),
-  codex: () => jsonlFingerprint(join(home, ".codex", "sessions"), (f) => f.endsWith(".jsonl")),
+    jsonlFingerprint(storePaths.defaultClaudeProjectsDir(), (f) => f.endsWith(".jsonl")),
+  codex: () => jsonlFingerprint(storePaths.defaultCodexSessionsPath(), (f) => f.endsWith(".jsonl")),
   "copilot-cli": () =>
-    jsonlFingerprint(join(home, ".copilot", "session-state"), (f) => f.endsWith("events.jsonl")),
+    jsonlFingerprint(storePaths.defaultCopilotCliSessionPath(), (f) => f.endsWith("events.jsonl")),
   opencode: () =>
-    sqliteFingerprint(join(appData, "opencode", "opencode.db"), [
+    sqliteFingerprint(storePaths.defaultOpenCodeStorePath(), [
       { table: "message", column: "data" },
       { table: "part", column: "data" },
     ]),
+  cursor: cursorFingerprint,
+  copilot: async () => {
+    const root = storePaths.defaultCopilotHistoryPath();
+    if (!existsSync(root)) return null;
+    for await (const file of walk(root, 0)) {
+      if (!file.endsWith("state.vscdb")) continue;
+      const found = await keyValueFingerprint(file, "ItemTable", "key", "value", [
+        "interactive.sessions",
+      ]);
+      if (found) return found;
+    }
+    return null;
+  },
 };
 
 const captured = {};
@@ -262,5 +425,4 @@ if (changed > 0 && !write) {
   );
 }
 
-await stat(outDir);
 process.exit(changed > 0 && !write ? EXIT_CHANGED : 0);
