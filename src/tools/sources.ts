@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { AntigravityScraper } from "../scrapers/antigravity.js";
 import { ClaudeCodeScraper } from "../scrapers/claude-code.js";
@@ -194,20 +195,39 @@ export function defaultAntigravityStorePath(): string {
   return join(home, ".gemini", "antigravity");
 }
 
+/**
+ * opencode does not always store where its host platform suggests: on a
+ * Windows machine here it writes to `~/.local/share/opencode/opencode.db`, the
+ * XDG location, while the conventional guess was `%APPDATA%\opencode`. A real
+ * store with nine sessions was invisible to xtctx as a result, and silently —
+ * a wrong default path reports "not detected" forever rather than failing.
+ *
+ * So the conventional location is preferred but not assumed: whichever
+ * candidate actually exists wins, and the conventional one is the fallback so
+ * status still names the path a user would expect.
+ */
 export function defaultOpenCodeStorePath(): string {
   const home = process.env.USERPROFILE ?? process.env.HOME ?? "";
+  const xdgDataHome = process.env.XDG_DATA_HOME ?? join(home, ".local", "share");
+  const xdg = join(xdgDataHome, "opencode", "opencode.db");
 
+  let conventional: string;
   if (process.platform === "win32") {
     const appData = process.env.APPDATA ?? join(home, "AppData", "Roaming");
-    return join(appData, "opencode", "opencode.db");
+    conventional = join(appData, "opencode", "opencode.db");
+  } else if (process.platform === "linux") {
+    conventional = xdg;
+  } else {
+    conventional = join(home, "Library", "Application Support", "opencode", "opencode.db");
   }
 
-  if (process.platform === "linux") {
-    const xdgDataHome = process.env.XDG_DATA_HOME ?? join(home, ".local", "share");
-    return join(xdgDataHome, "opencode", "opencode.db");
+  for (const candidate of [conventional, xdg]) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
   }
 
-  return join(home, "Library", "Application Support", "opencode", "opencode.db");
+  return conventional;
 }
 
 export function defaultCopilotCliSessionPath(): string {
