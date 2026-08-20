@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   AntigravityScraper,
   parseAntigravityRuntimeSteps,
+  listConversationFileIds,
   parsePosixListeningPorts,
   parseWindowsListeningPorts,
   type AntigravityRuntimeClient,
@@ -427,5 +428,48 @@ describe("listening-port discovery", () => {
       "language_ 4242 felix   21u  IPv4 0x1234      0t0  TCP 127.0.0.1:52010 (LISTEN)",
     ].join("\n");
     expect(parsePosixListeningPorts(lsof)).toEqual([52010]);
+  });
+});
+
+/**
+ * Antigravity migrated its conversation store from protobuf `.pb` files to
+ * SQLite `.db` files, keeping the cascade id as the file name. Enumeration
+ * only looked for `.pb`, so every session written after the migration was
+ * skipped — 117 of them on the machine where this was found, with no error:
+ * the runtime simply was not asked about them.
+ */
+describe("listConversationFileIds", () => {
+  let dir = "";
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "xtctx-agconv-"));
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  async function write(...names: string[]): Promise<void> {
+    for (const name of names) {
+      await writeFile(join(dir, name), "", "utf-8");
+    }
+  }
+
+  it("enumerates sessions from both the protobuf and SQLite stores", async () => {
+    await write("aaa.pb", "bbb.db");
+
+    expect((await listConversationFileIds(dir)).sort()).toEqual(["aaa", "bbb"]);
+  });
+
+  it("reports a session once when both stores hold it", async () => {
+    await write("ccc.pb", "ccc.db");
+
+    expect(await listConversationFileIds(dir)).toEqual(["ccc"]);
+  });
+
+  it("ignores files that are neither store", async () => {
+    await write("notes.txt", "ddd.db");
+
+    expect(await listConversationFileIds(dir)).toEqual(["ddd"]);
   });
 });
