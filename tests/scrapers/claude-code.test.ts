@@ -105,6 +105,61 @@ describe("ClaudeCodeScraper", () => {
     }
   });
 
+  /**
+   * Drift warnings are the one signal the product promises instead of silent
+   * data loss, so they have to stay readable. A record type Claude Code added
+   * without telling us appears in every transcript, and warning per record
+   * turned that into 344 warnings and 74KB of stderr in a single scan — the
+   * signal was still there and nobody could see it.
+   */
+  it("warns once per kind of surprise, not once per record", async () => {
+    const warnings: string[] = [];
+    const origWarn = console.warn;
+    console.warn = (...args) => warnings.push(args.join(" "));
+    try {
+      const projectDir = join(tempDir, "repeated-surprise");
+      await mkdir(projectDir, { recursive: true });
+      await writeFile(
+        join(projectDir, "noisy.jsonl"),
+        Array.from(
+          { length: 25 },
+          (_, i) =>
+            `{"type":"wibble","content":"x","timestamp":"2026-02-24T10:00:0${i % 10}Z"}`,
+        ).join("\n") + "\n",
+      );
+
+      const chunks: ClaudeCodeChunk[] = [];
+      for await (const chunk of scraper.fullSync()) chunks.push(chunk);
+
+      const unknownType = warnings.filter((warning) => warning.includes("wibble"));
+      expect(unknownType).toHaveLength(1);
+      expect(unknownType[0]).toContain("25");
+    } finally {
+      console.warn = origWarn;
+    }
+  });
+
+  it("does not treat a mode record as drift", async () => {
+    const warnings: string[] = [];
+    const origWarn = console.warn;
+    console.warn = (...args) => warnings.push(args.join(" "));
+    try {
+      const projectDir = join(tempDir, "mode-records");
+      await mkdir(projectDir, { recursive: true });
+      await writeFile(
+        join(projectDir, "modes.jsonl"),
+        '{"type":"mode","mode":"normal","sessionId":"abc"}\n',
+      );
+
+      const chunks: ClaudeCodeChunk[] = [];
+      for await (const chunk of scraper.fullSync()) chunks.push(chunk);
+
+      expect(warnings).toEqual([]);
+    } finally {
+      console.warn = origWarn;
+    }
+  });
+
   it("scrapes conversation chunks from JSONL", async () => {
     const chunks: ClaudeCodeChunk[] = [];
 

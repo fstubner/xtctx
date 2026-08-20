@@ -36,16 +36,45 @@ const NON_MESSAGE_TYPES = new Set([
   "attachment",
   "custom-title",
   "last-prompt",
+  // Session mode markers (`{"type":"mode","mode":"normal",…}`). Bookkeeping,
+  // no conversational content — and frequent: 169 of them in a single
+  // transcript here, each previously reported twice as drift.
+  "mode",
   "pr-link",
   "progress",
   "queue-operation",
 ]);
 
-function warnDrift(sourcePath: string, surprise: string, recordsAffected: number): void {
-  console.warn(
-    `[${SCRAPER_NAME}] schema-drift surprise at ${sourcePath}: ${surprise} ` +
-      `(records affected: ${recordsAffected})`,
-  );
+/**
+ * Drift warnings, collected per scan and reported once per kind.
+ *
+ * Warning per record made the signal useless the moment a surprise was common
+ * rather than rare: one new record type Claude Code started writing produced
+ * 344 warnings and 74KB of stderr in a single scan, dumped into the host's log.
+ * The product promises to warn rather than silently drop, so what matters is
+ * that each distinct surprise is seen — not that it is repeated per record.
+ */
+class DriftLog {
+  private readonly surprises = new Map<string, { firstLocation: string; records: number }>();
+
+  record(location: string, surprise: string): void {
+    const seen = this.surprises.get(surprise);
+    if (seen) {
+      seen.records += 1;
+      return;
+    }
+    this.surprises.set(surprise, { firstLocation: location, records: 1 });
+  }
+
+  flush(): void {
+    for (const [surprise, { firstLocation, records }] of this.surprises) {
+      console.warn(
+        `[${SCRAPER_NAME}] schema-drift surprise at ${firstLocation}: ${surprise} ` +
+          `(records affected: ${records})`,
+      );
+    }
+    this.surprises.clear();
+  }
 }
 
 export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
@@ -120,6 +149,22 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
       ? encodePathForToolDirectory(this.projectRoot).toLowerCase()
       : null;
 
+    // Collected across the whole scan and reported once per kind. `finally`
+    // so a consumer that stops early still gets the warnings for what it read.
+    const drift = new DriftLog();
+    try {
+      yield* this.readProjects(projectDirs, encodedProject, since, drift);
+    } finally {
+      drift.flush();
+    }
+  }
+
+  private async *readProjects(
+    projectDirs: string[],
+    encodedProject: string | null,
+    since: Date,
+    drift: DriftLog,
+  ): AsyncIterable<ClaudeCodeChunk> {
     for (const projectHash of this.filterProjectDirs(projectDirs)) {
       const projectDir = join(this.claudeProjectsDir, projectHash);
       const exactDirectory =
@@ -140,10 +185,10 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
         const sessionId = file.replace(/\.jsonl$/, "");
         const filePath = join(projectDir, file);
         try {
-          yield* this.readSessionFile(filePath, sessionId, since, exactDirectory);
+          yield* this.readSessionFile(filePath, sessionId, since, exactDirectory, drift);
         } catch (err) {
           // One unreadable file must not abort the remaining files/projects.
-          warnDrift(filePath, `unreadable transcript file: ${(err as Error).message}`, 0);
+          drift.record(filePath, `unreadable transcript file: ${(err as Error).message}`);
         }
       }
     }
@@ -154,6 +199,7 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
     sessionId: string,
     since: Date,
     exactDirectory: boolean,
+    drift: DriftLog,
   ): AsyncIterable<ClaudeCodeChunk> {
     const reader = createInterface({
       input: createReadStream(filePath, { encoding: "utf8" }),
@@ -174,11 +220,10 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
       } catch (err) {
         // ACCEPTED_DEGRADATIONS.malformedJsonlLine, but warn so the
         // mutation test can see drift instead of data silently vanishing.
-        warnDrift(
+        drift.record(
           `${filePath}:${lineNo}`,
           `line is not valid JSON: ${(err as Error).message}`,
-          1,
-        );
+          );
         continue;
       }
 
@@ -192,17 +237,15 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
 
       // Strict-mode schema check: warn (but still emit) on shape surprise.
       if (!("type" in obj)) {
-        warnDrift(
+        drift.record(
           `${filePath}:${lineNo}`,
           "record is missing required 'type' field — likely renamed",
-          1,
-        );
+          );
       } else if (typeof obj.type !== "string" || !(obj.type in ROLE_MAP)) {
-        warnDrift(
+        drift.record(
           `${filePath}:${lineNo}`,
           `unknown 'type' value ${JSON.stringify(obj.type)}`,
-          1,
-        );
+          );
       }
 
       if (
@@ -210,25 +253,22 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
         obj.content !== undefined &&
         typeof obj.content !== "string"
       ) {
-        warnDrift(
+        drift.record(
           `${filePath}:${lineNo}`,
           `expected 'content' to be a string, got ${describeType(obj.content)}`,
-          1,
-        );
+          );
       }
 
       if (!("timestamp" in obj)) {
-        warnDrift(
+        drift.record(
           `${filePath}:${lineNo}`,
           "record is missing 'timestamp' field",
-          1,
-        );
+          );
       } else if (typeof obj.timestamp !== "string") {
-        warnDrift(
+        drift.record(
           `${filePath}:${lineNo}`,
           `expected 'timestamp' string, got ${describeType(obj.timestamp)}`,
-          1,
-        );
+          );
       }
 
       const timestamp = parseRecordTimestamp(obj.timestamp);
