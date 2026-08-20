@@ -227,3 +227,52 @@ describe("runCanary", () => {
     expect(result.counts.assistant).toBe(1);
   });
 });
+
+describe("missing credentials", () => {
+  it("is reported as a distinct condition, not as scraper drift", async () => {
+    // A canary that cannot run and a canary whose scraper broke are different
+    // facts. Conflating them filed a "scraper may be broken" issue every
+    // night for a repo that simply had no API key configured — and an alarm
+    // that is always wrong is one nobody reads when it is finally right.
+    const { MissingCredentialsError, isMissingCredentials } = await import(
+      // @ts-expect-error - .mjs has no .d.mts companion; treated as JS here.
+      "../../scripts/drift-canary.mjs"
+    );
+
+    const err = new MissingCredentialsError("ANTHROPIC_API_KEY is not set");
+
+    expect(isMissingCredentials(err)).toBe(true);
+    expect(isMissingCredentials(new Error("scraper returned zero chunks"))).toBe(false);
+  });
+
+  it("surfaces through runCanary so the caller can skip rather than fail", async () => {
+    const { runCanary: run, isMissingCredentials } = await import(
+      // @ts-expect-error - .mjs has no .d.mts companion; treated as JS here.
+      "../../scripts/drift-canary.mjs"
+    );
+
+    let caught: unknown;
+    try {
+      await run({
+        tool: "claude-code",
+        prompt: "anything",
+        sandboxHome: "/tmp/does-not-matter",
+        stateDir: "/tmp/does-not-matter",
+        invokers: {
+          "claude-code": async () => {
+            const { MissingCredentialsError } = await import(
+              // @ts-expect-error - .mjs has no .d.mts companion.
+              "../../scripts/drift-canary.mjs"
+            );
+            throw new MissingCredentialsError("ANTHROPIC_API_KEY is not set");
+          },
+        },
+        scraperFactories: { "claude-code": () => fakeScraper([]) },
+      });
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(isMissingCredentials(caught)).toBe(true);
+  });
+});

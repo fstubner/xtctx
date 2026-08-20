@@ -92,7 +92,7 @@ jobs:
           echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
 
       - name: Build issue body on failure
-        if: steps.canary.outputs.exit_code != '0' && github.event_name == 'schedule'
+        if: steps.canary.outputs.exit_code != '0' && steps.canary.outputs.exit_code != '78' && github.event_name == 'schedule'
         run: |
           {
             echo "The nightly drift canary for \`${{ matrix.tool }}\` failed."
@@ -114,7 +114,7 @@ jobs:
 
       - name: Check for an existing open drift issue
         id: existing
-        if: steps.canary.outputs.exit_code != '0' && github.event_name == 'schedule'
+        if: steps.canary.outputs.exit_code != '0' && steps.canary.outputs.exit_code != '78' && github.event_name == 'schedule'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -123,7 +123,7 @@ jobs:
           echo "number=${existing}" >> "$GITHUB_OUTPUT"
 
       - name: Open drift issue (if none already open)
-        if: steps.canary.outputs.exit_code != '0' && github.event_name == 'schedule' && steps.existing.outputs.number == ''
+        if: steps.canary.outputs.exit_code != '0' && steps.canary.outputs.exit_code != '78' && github.event_name == 'schedule' && steps.existing.outputs.number == ''
         uses: peter-evans/create-issue-from-file@e8ef132d6df98ed982188e460ebb3b5d4ef3a9cd # v5
         with:
           title: "drift: ${{ matrix.tool }} scraper may be broken"
@@ -133,14 +133,27 @@ jobs:
             canary
 
       - name: Comment on existing drift issue
-        if: steps.canary.outputs.exit_code != '0' && github.event_name == 'schedule' && steps.existing.outputs.number != ''
+        if: steps.canary.outputs.exit_code != '0' && steps.canary.outputs.exit_code != '78' && github.event_name == 'schedule' && steps.existing.outputs.number != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh issue comment ${{ steps.existing.outputs.number }} --body-file issue-body.md
 
+      # 78 means the canary could not run at all — no API key — which is a
+      # configuration gap, not upstream drift. Surfaced as a warning so it is
+      # visible in the run summary without turning the nightly job red and
+      # without filing an issue that says the scraper is broken.
+      - name: Note that the canary was skipped
+        if: steps.canary.outputs.exit_code == '78'
+        run: |
+          echo "::warning title=drift canary skipped::${{ matrix.tool }} did not run — its API key is not configured, so no drift signal exists for this tool tonight."
+          cat canary-stderr.log || true
+
       - name: Fail job on canary failure
         # exit_code is empty when the canary step was skipped by a scoped dispatch.
-        if: steps.canary.outputs.exit_code != '' && steps.canary.outputs.exit_code != '0'
+        if: >
+          steps.canary.outputs.exit_code != '' &&
+          steps.canary.outputs.exit_code != '0' &&
+          steps.canary.outputs.exit_code != '78'
         run: |
           echo "canary exited ${{ steps.canary.outputs.exit_code }}"
           exit 1

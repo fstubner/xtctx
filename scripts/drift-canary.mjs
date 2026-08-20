@@ -29,6 +29,30 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
+/**
+ * Exit code meaning "the canary could not run", as distinct from "the canary
+ * ran and something is wrong". 78 is EX_CONFIG by convention.
+ *
+ * These are different facts and the nightly workflow treats them differently:
+ * conflating them filed a "scraper may be broken" issue every night for a
+ * repo that simply had no API key configured, and an alarm that is always
+ * wrong is one nobody reads on the night it is finally right.
+ */
+export const EXIT_SKIPPED = 78;
+
+/** Thrown when a required API key is absent, so no invocation was attempted. */
+export class MissingCredentialsError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "MissingCredentialsError";
+  }
+}
+
+/** Structural check, so the class identity survives module duplication. */
+export function isMissingCredentials(error) {
+  return Boolean(error) && error.name === "MissingCredentialsError";
+}
+
 // -----------------------------------------------------------------------------
 // CLI argument parsing
 // -----------------------------------------------------------------------------
@@ -165,7 +189,7 @@ function pathExists(p) {
  */
 export async function invokeClaudeCode({ sandboxHome, prompt, timeoutMs }) {
   if (!process.env.ANTHROPIC_API_KEY) {
-    throw new Error(
+    throw new MissingCredentialsError(
       "ANTHROPIC_API_KEY is not set — export it to run the claude-code canary.",
     );
   }
@@ -215,7 +239,7 @@ export async function invokeClaudeCode({ sandboxHome, prompt, timeoutMs }) {
  */
 export async function invokeCodex({ sandboxHome, prompt, timeoutMs }) {
   if (!process.env.OPENAI_API_KEY) {
-    throw new Error(
+    throw new MissingCredentialsError(
       "OPENAI_API_KEY is not set — export it to run the codex canary.",
     );
   }
@@ -420,6 +444,14 @@ async function main() {
     );
     return 1;
   } catch (err) {
+    if (isMissingCredentials(err)) {
+      // Not drift: the canary never got to look. Exiting distinctly lets the
+      // workflow say so without filing a "scraper may be broken" issue, which
+      // it otherwise did every night for a repo with no API key configured.
+      console.error(`[${args.tool}] SKIPPED: ${err.message}`);
+      return EXIT_SKIPPED;
+    }
+
     console.error(`[${args.tool}] ERROR: ${err.message}`);
     if (err.stderr) console.error(`stderr:\n${err.stderr}`);
     console.error(
