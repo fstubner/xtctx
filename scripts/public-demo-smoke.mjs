@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,7 +19,10 @@ const cliPath = join(repoRoot, "dist", "src", "cli", "index.js");
 
 await assertBuilt();
 
-const tempRoot = await mkdtemp(join(tmpdir(), "xtctx-public-demo-"));
+// realpath: macOS temp directories are symlinks (/var -> /private/var), and
+// the server resolves its own root canonically, so an un-resolved root here
+// builds a synthetic store under a path the scraper will never match.
+const tempRoot = await realpath(await mkdtemp(join(tmpdir(), "xtctx-public-demo-")));
 const projectRoot = join(tempRoot, "project");
 const homeDir = join(tempRoot, "home");
 const claudeStore = join(tempRoot, "stores", "claude-code");
