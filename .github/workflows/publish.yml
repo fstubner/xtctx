@@ -77,17 +77,32 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Checkout
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
-
+      # Deliberately no checkout. `npx xtctx` inside the repo resolves the
+      # *local* package — package.json declares the `xtctx` bin as
+      # dist/src/cli/index.js, which is unbuilt here — so the smoke reported
+      # `sh: 1: xtctx: not found` while the published package was perfectly
+      # fine. Worse than the false alarm: with a built dist present it would
+      # have exercised the working tree and passed without ever touching the
+      # registry, which is the one thing this job exists to check.
       - name: Setup Node
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: 24
 
       - name: Smoke the published package from the registry
+        working-directory: ${{ runner.temp }}
+        env:
+          # The tag is the source of truth for what was just released; reading
+          # a version out of the repo would mean checking the repo out again.
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
-          version=$(node -p 'require("./package.json").version')
+          version="${RELEASE_TAG#xtctx-v}"
+          version="${version#v}"
+          if [ -z "$version" ]; then
+            echo "Could not derive a version from tag '$RELEASE_TAG'." >&2
+            exit 1
+          fi
+
           echo "Waiting for xtctx@${version} to be visible on the registry..."
           for attempt in 1 2 3 4 5 6; do
             if npm view "xtctx@${version}" version >/dev/null 2>&1; then
@@ -99,5 +114,11 @@ jobs:
             fi
             sleep 20
           done
+
           npx -y "xtctx@${version}" --help
-          npx -y "xtctx@${version}" --version
+          installed=$(npx -y "xtctx@${version}" --version)
+          echo "installed version: ${installed}"
+          if [ "$installed" != "$version" ]; then
+            echo "Published package reports '${installed}', expected '${version}'." >&2
+            exit 1
+          fi
