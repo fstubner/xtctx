@@ -143,10 +143,35 @@ const DEFAULT_WINDOW_STRIDE = 4;
 const MAX_MATCHES_PER_SESSION = 3;
 /**
  * Minimum raw cosine similarity for a retrieval window to count as a semantic
- * match. Unrelated sentence-transformer pairs sit near 0; related ones are
+ * match.
+ *
+ * Unrelated sentence-transformer pairs sit near 0; related ones are
  * comfortably above this.
  */
 const MIN_SEMANTIC_COSINE = 0.15;
+
+/**
+ * How similar the *best* window has to be before a query counts as having
+ * found anything semantically.
+ *
+ * The per-window floor above cannot do this job. Raising it high enough to
+ * reject a nonsense query — which cleared 0.15 on 927 of 1,145 windows, 81% of
+ * the corpus — also discards genuine mid-range matches, and pure vector search
+ * has no keyword hits to fall back on: at a 0.35 per-window floor the eval
+ * lost recall@5 from 0.70 to 0.50.
+ *
+ * Whether a query found anything is a property of the query, not of each
+ * window. So when nothing clears this bar, semantic matches are dropped
+ * wholesale and only keyword hits remain — usually meaning "no matching
+ * sessions", which is the honest answer. When something does clear it, the
+ * weaker windows around it are kept.
+ *
+ * The value is bounded from both sides and the gap is narrow: gibberish tops
+ * out near 0.31 against this index, genuine queries reach 0.44-0.59, and the
+ * ranking eval starts losing vector recall above 0.32. If it needs to move,
+ * move it against the eval rather than against one query.
+ */
+const MIN_CONFIDENT_COSINE = 0.32;
 /**
  * Weight of the recency/continuity tie-break in the relevance modes. Small
  * enough that it only ever separates candidates that are otherwise equal.
@@ -786,24 +811,44 @@ export class SqliteHandoffIndex implements SessionService {
       // a more useful answer than a nearest vector.
       .filter((item) => item.rawCosine >= MIN_SEMANTIC_COSINE || item.keywordScore > 0);
 
-    // Rescale cosine across this query's surviving candidates before blending.
-    // Mapping [-1,1] onto [0,1] globally left every candidate bunched near
-    // 0.5, so the semantic term barely varied while recency swung across its
-    // whole range — recency effectively outranked relevance. Measured on the
-    // ranking eval, this one change took hybrid from MRR 0.488 / recall@5
-    // 0.65 to 0.621 / 0.85.
-    const cosines = candidates.map((item) => item.rawCosine);
+    // Nothing here is actually similar to the query — keep only what matched
+    // on words. For a query that means nothing to this corpus that leaves
+    // nothing at all, which is the answer.
+    const bestCosine = candidates.reduce((best, item) => Math.max(best, item.rawCosine), 0);
+    const semanticallyConfident = bestCosine >= MIN_CONFIDENT_COSINE;
+    const surviving = semanticallyConfident
+      ? candidates
+      : candidates.filter((item) => item.keywordScore > 0);
+
+    if (surviving.length === 0) {
+      return [];
+    }
+
+    // Ordering and reporting are two different jobs, and conflating them is
+    // what made the score meaningless.
+    //
+    // Ordering wants contrast: rescaling this query's survivors onto [0,1]
+    // spreads them out and measurably ranks better (hybrid MRR 0.566 -> 0.613
+    // on the eval). Reporting wants an absolute: the rescale forces the best
+    // survivor to exactly 1.0 however weak it is, so three nonsense words
+    // scored 0.901 against a real query's 0.872 and an agent had no way to
+    // tell a find from a shrug.
+    //
+    // So candidates are ranked on the rescaled value and reported with the
+    // cosine itself.
+    const cosines = surviving.map((item) => item.rawCosine);
     const lowest = Math.min(...cosines);
     const highest = Math.max(...cosines);
     const spread = highest - lowest;
 
-    const scored = candidates
+    const scored = surviving
       .map((item) => {
         // A lone survivor is the best match by definition, not the worst.
         const semanticScore = spread > 0 ? (item.rawCosine - lowest) / spread : 1;
         return {
           ...item,
           semanticScore,
+          relevance: Math.max(0, Math.min(1, item.rawCosine)),
           score: blendScores(
             mode,
             semanticScore,
@@ -1172,6 +1217,10 @@ function groupUnits(
     return {
       row,
       score: blendScores("keyword", 0, keywordScore, recencyScore, continuityScore),
+      // Deliberately no relevance: keyword scores are reciprocal rank, so the
+      // top FTS hit is 1.0 whatever it actually matched. Reporting that as a
+      // strength of match is the same lie the cosine rescale was telling.
+      relevance: undefined,
       semanticScore: 0,
       keywordScore,
       recencyScore,
@@ -1185,6 +1234,7 @@ function groupScoredUnits(
   scored: Array<{
     row: RetrievalUnitRow;
     score: number;
+    relevance: number | undefined;
     semanticScore: number;
     keywordScore: number;
     recencyScore: number;
@@ -1193,6 +1243,10 @@ function groupScoredUnits(
   retrieval: SessionSearchMode,
   limit: number,
 ): SessionSummary[] {
+  // `score` orders; `relevance` is what the caller is told. Kept apart here so
+  // the ranking the eval measures and the number an agent reads about a match
+  // can each be the right thing.
+  const ranks = new Map<string, number>();
   const sessions = new Map<string, SessionSummary>();
 
   for (const item of scored) {
@@ -1203,10 +1257,15 @@ function groupScoredUnits(
       if ((existing.matches?.length ?? 0) < MAX_MATCHES_PER_SESSION) {
         existing.matches = [...(existing.matches ?? []), match];
       }
-      existing.score = Math.max(existing.score ?? 0, item.score);
+      existing.score =
+        item.relevance === undefined
+          ? existing.score
+          : Math.max(existing.score ?? 0, item.relevance);
+      ranks.set(item.row.session_ref, Math.max(ranks.get(item.row.session_ref) ?? 0, item.score));
       continue;
     }
 
+    ranks.set(item.row.session_ref, item.score);
     sessions.set(item.row.session_ref, {
       session_ref: item.row.session_ref,
       tool: item.row.tool,
@@ -1215,7 +1274,7 @@ function groupScoredUnits(
       message_count: item.row.session_message_count,
       preview: item.row.session_preview ?? previewText(item.row.content),
       source_path: item.row.source_path ?? undefined,
-      score: item.score,
+      score: item.relevance,
       retrieval,
       matches: [match],
     });
@@ -1225,7 +1284,9 @@ function groupScoredUnits(
     }
   }
 
-  return [...sessions.values()].sort((left, right) => (right.score ?? 0) - (left.score ?? 0));
+  return [...sessions.values()].sort(
+    (left, right) => (ranks.get(right.session_ref) ?? 0) - (ranks.get(left.session_ref) ?? 0),
+  );
 }
 
 function formatMatch(item: {

@@ -692,3 +692,67 @@ describe("vectorization time budget", () => {
     await index.close();
   });
 });
+
+/**
+ * The reported score used to be the candidate's rank within its own query, not
+ * how good the match was: every query's best survivor was rescaled to exactly
+ * 1.0, so three nonsense words scored 0.901 against a genuine query's 0.872.
+ * An agent reading that number had no way to tell a find from a shrug.
+ */
+describe("search scores mean similarity", () => {
+  let tempDir = "";
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "xtctx-score-"));
+  });
+
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  /** Places the document on one axis and the query at a chosen angle to it. */
+  class AngledEmbeddingProvider {
+    readonly model = "angled-test-model";
+
+    constructor(private readonly queryCosine: number) {}
+
+    async embed(text: string): Promise<Float32Array> {
+      const [vector] = await this.embedBatch([text]);
+      return vector;
+    }
+
+    async embedBatch(texts: string[]): Promise<Float32Array[]> {
+      return texts.map((text) =>
+        text.includes("QUERY")
+          ? Float32Array.from([this.queryCosine, Math.sqrt(1 - this.queryCosine ** 2)])
+          : Float32Array.from([1, 0]),
+      );
+    }
+  }
+
+  async function searchWith(queryCosine: number) {
+    const index = new SqliteHandoffIndex(
+      join(tempDir, `score-${queryCosine}.db`),
+      tempDir,
+      [{ tool: "codex", scraper: new FixtureScraper([chunk("scored", 0, "user", "indexed body")]) }],
+      { embeddingProvider: new AngledEmbeddingProvider(queryCosine), refreshBudgetMs: 5_000 },
+    );
+
+    const results = await index.searchSessions("QUERY", 5, undefined, "vector");
+    await index.close();
+    return results;
+  }
+
+  it("reports the similarity itself, not the best survivor rescaled to 1", async () => {
+    const results = await searchWith(0.6);
+
+    expect(results).toHaveLength(1);
+    expect(results[0].score).toBeCloseTo(0.6, 2);
+  });
+
+  it("finds nothing when nothing is actually similar", async () => {
+    // Below the confidence bar: the nearest vector is not a match just because
+    // it is the nearest.
+    expect(await searchWith(0.2)).toEqual([]);
+  });
+});

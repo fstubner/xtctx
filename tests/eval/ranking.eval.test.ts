@@ -116,10 +116,20 @@ describe("retrieval ranking", () => {
         tool,
         scraper: new CorpusScraper(tool, chunks),
       })),
+      // Serving a tool call bounds scanning and vectorizing so an agent is
+      // never left waiting on a whole machine's history. This harness is
+      // measuring ranking quality, not that tradeoff, so it removes the
+      // bounds: a truncated index would score the corpus it happened to
+      // finish rather than the corpus under test.
+      { refreshBudgetMs: 600_000, vectorBudgetMs: 600_000 },
     );
 
-    // Warm the index (and the embedding model) once.
+    // Warm the index, then the embedding model and the vectors. `vector` mode
+    // rather than the default: hybrid deliberately answers from keyword while
+    // the model is still loading, so warming through it would leave the model
+    // cold and measure the fallback instead of the ranking.
     await index.listRecentSessions(1);
+    await index.searchSessions("warm the embedding model", 1, undefined, "vector");
   }, 600_000);
 
   afterAll(async () => {
