@@ -1,0 +1,26 @@
+{
+  "kind": "jsonl",
+  "filesSampled": 8,
+  "recordsSampled": 24,
+  "recordTypes": {
+    "response_item": [
+      "payload.content: array<object>",
+      "payload.role: string",
+      "payload.type: string",
+      "timestamp: string",
+      "type: string"
+    ],
+    "session_meta": [
+      "payload.cli_version: string",
+      "payload.cwd: string",
+      "payload.id: string",
+      "payload.instructions: string",
+      "payload.model_provider: string",
+      "payload.originator: string",
+      "payload.source: string",
+      "payload.timestamp: string",
+      "timestamp: string",
+      "type: string"
+    ]
+  }
+}
