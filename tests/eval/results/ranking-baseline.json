@@ -1,0 +1,20 @@
+{
+  "hybrid": {
+    "queries": 20,
+    "mrr": 0.484,
+    "recallAt5": 0.65,
+    "top1": 0.3
+  },
+  "vector": {
+    "queries": 20,
+    "mrr": 0.426,
+    "recallAt5": 0.65,
+    "top1": 0.3
+  },
+  "keyword": {
+    "queries": 20,
+    "mrr": 0.435,
+    "recallAt5": 0.85,
+    "top1": 0.2
+  }
+}
