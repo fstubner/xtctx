@@ -5,6 +5,21 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.11.3](https://github.com/fstubner/xtctx/compare/xtctx-v0.11.2...xtctx-v0.11.3) (2026-08-20)
+
+
+### Bug Fixes
+
+* **ci:** enable auto-merge with the PAT so the release chain continues ([a057317](https://github.com/fstubner/xtctx/commit/a057317a9ecb4a7f6435989b13b328fdc9c35480))
+* **demo:** keep embedding verification in-process, not through the spawned server ([4cc2365](https://github.com/fstubner/xtctx/commit/4cc236510e351aa5b12a7ccbe62f521f2ebecd14))
+* **demo:** use the real path encoder instead of a drifted copy ([b261f60](https://github.com/fstubner/xtctx/commit/b261f609ca82559408a096b860c7fe8b5719c1d5))
+* **runtime:** resolve the project root through symlinks ([8d48637](https://github.com/fstubner/xtctx/commit/8d486376a2509c2070482b6da5bf722bfb8cf132))
+
+
+### Tests
+
+* canonicalise temp roots and raise the suite timeout for CI runners ([eb9def3](https://github.com/fstubner/xtctx/commit/eb9def3446d90016441d5096efb5b346299074fe))
+
 ## [0.11.2](https://github.com/fstubner/xtctx/compare/xtctx-v0.11.1...xtctx-v0.11.2) (2026-08-19)
 
 
