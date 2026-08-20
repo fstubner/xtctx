@@ -6,6 +6,7 @@ import { glob } from "glob";
 import type { CodexChunk } from "../types/scraper.js";
 import { AbstractScraper, estimateTokens, toDate } from "./base.js";
 import { pathMatchesProject } from "../utils/project-scope.js";
+import { recordDrift, withDriftReport } from "./drift-log.js";
 
 const SCRAPER_NAME = "codex";
 
@@ -34,11 +35,8 @@ const KNOWN_EVENT_TYPES = new Set([
   "compacted",
 ]);
 
-function warnDrift(sourcePath: string, surprise: string, recordsAffected: number): void {
-  console.warn(
-    `[${SCRAPER_NAME}] schema-drift surprise at ${sourcePath}: ${surprise} ` +
-      `(records affected: ${recordsAffected})`,
-  );
+function warnDrift(sourcePath: string, surprise: string, _recordsAffected: number): void {
+  recordDrift(SCRAPER_NAME, sourcePath, surprise);
 }
 
 const ROLE_MAP: Record<string, CodexChunk["role"]> = {
@@ -78,11 +76,11 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
   async *scrape(since?: Date): AsyncIterable<CodexChunk> {
     const state = await this.getLastScrapedPosition();
     const cutoff = since ?? state.lastTimestamp;
-    yield* this.readAllSessions(cutoff);
+    yield* withDriftReport(SCRAPER_NAME, this.readAllSessions(cutoff));
   }
 
   async *fullSync(): AsyncIterable<CodexChunk> {
-    yield* this.readAllSessions(new Date(0));
+    yield* withDriftReport(SCRAPER_NAME, this.readAllSessions(new Date(0)));
   }
 
   parseRaw(raw: unknown): CodexChunk {

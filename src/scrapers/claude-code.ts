@@ -5,6 +5,7 @@ import { createInterface } from "node:readline";
 import type { ChunkMetadata, ClaudeCodeChunk } from "../types/scraper.js";
 import { AbstractScraper, estimateTokens } from "./base.js";
 import { encodePathForToolDirectory, pathMatchesProject } from "../utils/project-scope.js";
+import { recordDrift, withDriftReport } from "./drift-log.js";
 
 const SCRAPER_NAME = "claude-code";
 
@@ -45,38 +46,6 @@ const NON_MESSAGE_TYPES = new Set([
   "queue-operation",
 ]);
 
-/**
- * Drift warnings, collected per scan and reported once per kind.
- *
- * Warning per record made the signal useless the moment a surprise was common
- * rather than rare: one new record type Claude Code started writing produced
- * 344 warnings and 74KB of stderr in a single scan, dumped into the host's log.
- * The product promises to warn rather than silently drop, so what matters is
- * that each distinct surprise is seen — not that it is repeated per record.
- */
-class DriftLog {
-  private readonly surprises = new Map<string, { firstLocation: string; records: number }>();
-
-  record(location: string, surprise: string): void {
-    const seen = this.surprises.get(surprise);
-    if (seen) {
-      seen.records += 1;
-      return;
-    }
-    this.surprises.set(surprise, { firstLocation: location, records: 1 });
-  }
-
-  flush(): void {
-    for (const [surprise, { firstLocation, records }] of this.surprises) {
-      console.warn(
-        `[${SCRAPER_NAME}] schema-drift surprise at ${firstLocation}: ${surprise} ` +
-          `(records affected: ${records})`,
-      );
-    }
-    this.surprises.clear();
-  }
-}
-
 export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
   readonly tool = "claude-code";
 
@@ -104,11 +73,11 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
   async *scrape(since?: Date): AsyncIterable<ClaudeCodeChunk> {
     const state = await this.getLastScrapedPosition();
     const cutoff = since ?? state.lastTimestamp;
-    yield* this.readAllSessions(cutoff);
+    yield* withDriftReport(SCRAPER_NAME, this.readAllSessions(cutoff));
   }
 
   async *fullSync(): AsyncIterable<ClaudeCodeChunk> {
-    yield* this.readAllSessions(new Date(0));
+    yield* withDriftReport(SCRAPER_NAME, this.readAllSessions(new Date(0)));
   }
 
   parseRaw(raw: unknown): ClaudeCodeChunk {
@@ -149,21 +118,13 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
       ? encodePathForToolDirectory(this.projectRoot).toLowerCase()
       : null;
 
-    // Collected across the whole scan and reported once per kind. `finally`
-    // so a consumer that stops early still gets the warnings for what it read.
-    const drift = new DriftLog();
-    try {
-      yield* this.readProjects(projectDirs, encodedProject, since, drift);
-    } finally {
-      drift.flush();
-    }
+    yield* this.readProjects(projectDirs, encodedProject, since);
   }
 
   private async *readProjects(
     projectDirs: string[],
     encodedProject: string | null,
     since: Date,
-    drift: DriftLog,
   ): AsyncIterable<ClaudeCodeChunk> {
     for (const projectHash of this.filterProjectDirs(projectDirs)) {
       const projectDir = join(this.claudeProjectsDir, projectHash);
@@ -185,10 +146,14 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
         const sessionId = file.replace(/\.jsonl$/, "");
         const filePath = join(projectDir, file);
         try {
-          yield* this.readSessionFile(filePath, sessionId, since, exactDirectory, drift);
+          yield* this.readSessionFile(filePath, sessionId, since, exactDirectory);
         } catch (err) {
           // One unreadable file must not abort the remaining files/projects.
-          drift.record(filePath, `unreadable transcript file: ${(err as Error).message}`);
+          recordDrift(
+            SCRAPER_NAME,
+            filePath,
+            `unreadable transcript file: ${(err as Error).message}`,
+        );
         }
       }
     }
@@ -199,7 +164,6 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
     sessionId: string,
     since: Date,
     exactDirectory: boolean,
-    drift: DriftLog,
   ): AsyncIterable<ClaudeCodeChunk> {
     const reader = createInterface({
       input: createReadStream(filePath, { encoding: "utf8" }),
@@ -220,10 +184,11 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
       } catch (err) {
         // ACCEPTED_DEGRADATIONS.malformedJsonlLine, but warn so the
         // mutation test can see drift instead of data silently vanishing.
-        drift.record(
+        recordDrift(
+          SCRAPER_NAME,
           `${filePath}:${lineNo}`,
           `line is not valid JSON: ${(err as Error).message}`,
-          );
+        );
         continue;
       }
 
@@ -237,15 +202,17 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
 
       // Strict-mode schema check: warn (but still emit) on shape surprise.
       if (!("type" in obj)) {
-        drift.record(
+        recordDrift(
+          SCRAPER_NAME,
           `${filePath}:${lineNo}`,
           "record is missing required 'type' field — likely renamed",
-          );
+        );
       } else if (typeof obj.type !== "string" || !(obj.type in ROLE_MAP)) {
-        drift.record(
+        recordDrift(
+          SCRAPER_NAME,
           `${filePath}:${lineNo}`,
           `unknown 'type' value ${JSON.stringify(obj.type)}`,
-          );
+        );
       }
 
       if (
@@ -253,22 +220,25 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
         obj.content !== undefined &&
         typeof obj.content !== "string"
       ) {
-        drift.record(
+        recordDrift(
+          SCRAPER_NAME,
           `${filePath}:${lineNo}`,
           `expected 'content' to be a string, got ${describeType(obj.content)}`,
-          );
+        );
       }
 
       if (!("timestamp" in obj)) {
-        drift.record(
+        recordDrift(
+          SCRAPER_NAME,
           `${filePath}:${lineNo}`,
           "record is missing 'timestamp' field",
-          );
+        );
       } else if (typeof obj.timestamp !== "string") {
-        drift.record(
+        recordDrift(
+          SCRAPER_NAME,
           `${filePath}:${lineNo}`,
           `expected 'timestamp' string, got ${describeType(obj.timestamp)}`,
-          );
+        );
       }
 
       const timestamp = parseRecordTimestamp(obj.timestamp);

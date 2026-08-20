@@ -5,6 +5,7 @@ import { createInterface } from "node:readline";
 import type { CopilotCliChunk } from "../types/scraper.js";
 import { pathMatchesProject } from "../utils/project-scope.js";
 import { AbstractScraper, estimateTokens, toDate } from "./base.js";
+import { recordDrift, withDriftReport } from "./drift-log.js";
 
 const SCRAPER_NAME = "copilot-cli";
 
@@ -48,11 +49,8 @@ const EVENT_TYPE_ROLE_MAP: Record<string, CopilotCliChunk["role"]> = {
   "system.message": "system",
 };
 
-function warnDrift(sourcePath: string, surprise: string, recordsAffected: number): void {
-  console.warn(
-    `[${SCRAPER_NAME}] schema-drift surprise at ${sourcePath}: ${surprise} ` +
-      `(records affected: ${recordsAffected})`,
-  );
+function warnDrift(sourcePath: string, surprise: string, _recordsAffected: number): void {
+  recordDrift(SCRAPER_NAME, sourcePath, surprise);
 }
 
 export class CopilotCliScraper extends AbstractScraper<CopilotCliChunk> {
@@ -82,11 +80,11 @@ export class CopilotCliScraper extends AbstractScraper<CopilotCliChunk> {
   async *scrape(since?: Date): AsyncIterable<CopilotCliChunk> {
     const state = await this.getLastScrapedPosition();
     const cutoff = since ?? state.lastTimestamp;
-    yield* this.readAllSessions(cutoff);
+    yield* withDriftReport(SCRAPER_NAME, this.readAllSessions(cutoff));
   }
 
   async *fullSync(): AsyncIterable<CopilotCliChunk> {
-    yield* this.readAllSessions(new Date(0));
+    yield* withDriftReport(SCRAPER_NAME, this.readAllSessions(new Date(0)));
   }
 
   private async *readAllSessions(since: Date): AsyncIterable<CopilotCliChunk> {
