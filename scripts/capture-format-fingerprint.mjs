@@ -19,7 +19,7 @@
  */
 import { readdir, readFile, mkdir, writeFile, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const EXIT_CHANGED = 10;
@@ -102,8 +102,8 @@ function shapeOf(value, prefix = "", out = new Set(), depth = 0) {
   return out;
 }
 
-async function* walk(dir, depth = 0) {
-  if (depth > 6) return;
+async function* walk(dir, depth = 0, maxDepth = 6) {
+  if (depth > maxDepth) return;
   let entries;
   try {
     entries = await readdir(dir, { withFileTypes: true });
@@ -112,15 +112,15 @@ async function* walk(dir, depth = 0) {
   }
   for (const entry of entries) {
     const full = join(dir, entry.name);
-    if (entry.isDirectory()) yield* walk(full, depth + 1);
+    if (entry.isDirectory()) yield* walk(full, depth + 1, maxDepth);
     else yield full;
   }
 }
 
 /** Newest-first, deterministic for a given store. */
-async function newestFiles(root, matcher, limit) {
+async function newestFiles(root, matcher, limit, maxDepth = 6) {
   const candidates = [];
-  for await (const file of walk(root)) {
+  for await (const file of walk(root, 0, maxDepth)) {
     if (!matcher(file)) continue;
     let mtime = 0;
     try {
@@ -335,6 +335,75 @@ async function cursorFingerprint() {
   });
 }
 
+/**
+ * Antigravity is the odd one out: its conversations are protobuf read through
+ * a localhost runtime API rather than parsed off disk, so there is no on-disk
+ * record shape to fingerprint for them. What the scraper does depend on
+ * statically is the directory layout it detects on, and the `<artifact>.
+ * metadata.json` sidecar convention under `brain/` — so that is what is
+ * recorded.
+ *
+ * Artifact file names are chosen by the model and describe the user's work, so
+ * only their extensions are kept.
+ */
+async function antigravityFingerprint() {
+  const root = storePaths.defaultAntigravityStorePath();
+  if (!existsSync(root)) return null;
+
+  let entries;
+  try {
+    entries = await readdir(root, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  const layout = entries
+    .map((entry) => `${schemaKey(entry.name)}${entry.isDirectory() ? "/" : ""}`)
+    .sort();
+
+  // Depth matters: `brain/` is not only artifacts, it also holds a large
+  // dependency tree, and walking it whole is both slow and picks up files the
+  // scraper never looks at. The scraper reads `brain/<session>/<artifact>` and
+  // `conversations/<file>`, so the fingerprint stops there too.
+  const extensionsIn = async (dir, maxDepth) => {
+    const found = new Set();
+    // Censused over the whole directory rather than the newest sample: a
+    // format migration shows up as an old extension sitting alongside a new
+    // one, and a newest-first window is exactly what would hide it.
+    for (const file of await newestFiles(join(root, dir), () => true, 5000, maxDepth)) {
+      // Compound suffixes matter here (`.md.metadata.json` is the convention
+      // the scraper keys on), so take everything from the first dot.
+      const name = basename(file);
+      const dot = name.indexOf(".");
+      found.add(dot === -1 ? "(none)" : name.slice(dot));
+    }
+    return [...found].sort();
+  };
+
+  const sidecar = new Set();
+  let files = 0;
+  for (const file of await newestFiles(
+    join(root, "brain"),
+    (f) => f.endsWith(".metadata.json"),
+    MAX_FILES,
+    1,
+  )) {
+    files += 1;
+    try {
+      for (const entry of shapeOf(JSON.parse(await readFile(file, "utf-8")))) sidecar.add(entry);
+    } catch {
+      continue;
+    }
+  }
+
+  return {
+    kind: "directory",
+    layout,
+    brainArtifactExtensions: await extensionsIn("brain", 1),
+    conversationExtensions: await extensionsIn("conversations", 0),
+    artifactMetadata: { filesSampled: files, fields: [...sidecar].sort() },
+  };
+}
+
 const TOOLS = {
   "claude-code": () =>
     jsonlFingerprint(storePaths.defaultClaudeProjectsDir(), (f) => f.endsWith(".jsonl")),
@@ -347,6 +416,7 @@ const TOOLS = {
       { table: "part", column: "data" },
     ]),
   cursor: cursorFingerprint,
+  antigravity: antigravityFingerprint,
   copilot: async () => {
     const root = storePaths.defaultCopilotHistoryPath();
     if (!existsSync(root)) return null;
