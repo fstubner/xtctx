@@ -74,6 +74,16 @@ export interface SessionService {
    * is the worse failure — the agent concludes the history is not there.
    */
   getIndexProgress?(): IndexProgress;
+  /**
+   * Recent sessions from the index as it already stands, without scanning.
+   *
+   * `listRecentSessions` will start a scan of every transcript store on the
+   * machine and wait several seconds for it. That is the right trade inside a
+   * tool call the agent is already waiting on, and the wrong one in the
+   * SessionStart hook, which runs before the user's first turn and would add
+   * that delay to every agent startup.
+   */
+  listIndexedSessions?(limit: number): Promise<SessionSummary[]>;
 }
 
 export interface IndexProgress {

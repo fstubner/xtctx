@@ -260,6 +260,29 @@ export class SqliteHandoffIndex implements SessionService {
     return rows.map(formatSessionRow);
   }
 
+  /**
+   * What is already indexed, with no scan and no waiting.
+   *
+   * The SessionStart hook runs before the user has typed anything, so it
+   * cannot afford the scan `listRecentSessions` starts — even bounded, that
+   * is four seconds added to every agent startup. Priming with slightly
+   * stale context instantly beats priming with fresh context late.
+   */
+  async listIndexedSessions(limit: number): Promise<SessionSummary[]> {
+    await this.initialized;
+    const db = this.getDb();
+    const rows = db
+      .prepare(
+        `SELECT session_ref, tool, started_at, last_activity_at, message_count, preview, source_path,
+                git_branch, git_commit
+         FROM sessions
+         ORDER BY last_activity_at DESC
+         LIMIT ?`,
+      )
+      .all(normalizeLimit(limit, DEFAULT_LIMIT)) as SessionRow[];
+
+    return rows.map(formatSessionRow);
+  }
   async getSessionByRef(sessionRef: string): Promise<SessionSummary | null> {
     await this.refresh({ sessionRef });
     const db = this.getDb();
