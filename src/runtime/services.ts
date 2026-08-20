@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { SqliteHandoffIndex } from "../handoff/sqlite-index.js";
@@ -19,8 +19,28 @@ export interface ProjectServices {
   sessions: SessionService;
 }
 
+/**
+ * Resolve a project root through any symlinks.
+ *
+ * Every scraper attributes a session by comparing a path another tool
+ * recorded — and those tools record `process.cwd()`, which the OS reports
+ * canonically. On macOS the temp directory and plenty of ordinary home
+ * layouts are symlinks (`/var` -> `/private/var`), so a root given as the
+ * symlinked path matches nothing any tool ever wrote, and the project
+ * silently scrapes zero sessions. Falls back to the lexical path when the
+ * directory does not exist yet.
+ */
+async function canonicalProjectRoot(projectPath: string): Promise<string> {
+  const resolved = resolve(projectPath);
+  try {
+    return await realpath(resolved);
+  } catch {
+    return resolved;
+  }
+}
+
 export async function createProjectServices(projectPath?: string): Promise<ProjectServices> {
-  const projectRoot = resolve(projectPath ?? process.cwd());
+  const projectRoot = await canonicalProjectRoot(projectPath ?? process.cwd());
   const xtctxDir = join(projectRoot, ".xtctx");
   const stateDir = join(xtctxDir, "state");
   const dbPath = join(stateDir, "xtctx.db");

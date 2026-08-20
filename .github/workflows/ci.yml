@@ -12,7 +12,54 @@ permissions:
   contents: read
 
 jobs:
-  test-and-build:
+  # Everything whose behaviour depends on the host OS: path handling and
+  # store-directory encoding (Claude Code encodes a POSIX root with a leading
+  # separator and a Windows one with a drive letter), the better-sqlite3
+  # native build, and the CLI entry point. Running only on Linux previously
+  # let a bug ship that made every macOS and Linux project scrape zero
+  # sessions, because the fixtures and the developer's machine are Windows.
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Unit and integration tests
+        run: |
+          npm test
+          npm run test:integration
+
+      - name: Drift canary
+        run: npm run test:drift
+
+      - name: Build package
+        run: npm run build
+
+      - name: CLI smoke check
+        run: npm run smoke:cli
+
+      - name: Public demo smoke
+        run: npm run demo:public
+
+  # OS-independent gates: linting, security, dependency audits, the landing
+  # site, and packaging. Running these once keeps the matrix cheap.
+  checks:
     runs-on: ubuntu-latest
 
     steps:
@@ -34,11 +81,8 @@ jobs:
       - name: Install landing dependencies
         run: npm --prefix landing ci
 
-      - name: Unit and integration tests
-        run: |
-          npm run lint
-          npm test
-          npm run test:integration
+      - name: Lint
+        run: npm run lint
 
       - name: Root security tests and checklist
         run: |
@@ -51,17 +95,27 @@ jobs:
         # dependency of a static site), so --omit=dev would audit nothing.
         run: npm --prefix landing audit
 
-      - name: Drift canary
-        run: npm run test:drift
-
-      - name: Build package
-        run: npm run build
-
       - name: Build landing
         run: npm --prefix landing run build
 
-      - name: CLI smoke check
-        run: npm run smoke:cli
-
       - name: Package dry run
         run: npm pack --dry-run
+
+  # Aggregate gate. Branch protection on `main` requires a check named
+  # `test-and-build`, so that name has to keep reporting — splitting the old
+  # single job into `test` + `checks` silently removed it and would have
+  # blocked every future pull request, not just the one that made the change.
+  # Depending on the matrix here also makes each platform effectively
+  # required, without editing repository settings to do it.
+  test-and-build:
+    if: always()
+    needs: [test, checks]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify every job succeeded
+        run: |
+          echo "test=${{ needs.test.result }} checks=${{ needs.checks.result }}"
+          if [ "${{ needs.test.result }}" != "success" ] || [ "${{ needs.checks.result }}" != "success" ]; then
+            echo "One or more required jobs did not succeed." >&2
+            exit 1
+          fi

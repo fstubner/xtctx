@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,8 +15,12 @@ describe("status", () => {
   let homeDir = "";
 
   beforeEach(async () => {
-    projectRoot = await mkdtemp(join(tmpdir(), "xtctx-status-project-"));
-    homeDir = await mkdtemp(join(tmpdir(), "xtctx-status-home-"));
+    // realpath: the CLI canonicalises the project root, and the temp dir is a
+    // symlink on macOS (/var -> /private/var) and an 8.3 short path on
+    // Windows (RUNNER~1). Comparing against the raw mkdtemp path asserts a
+    // form the product deliberately no longer reports.
+    projectRoot = await realpath(await mkdtemp(join(tmpdir(), "xtctx-status-project-")));
+    homeDir = await realpath(await mkdtemp(join(tmpdir(), "xtctx-status-home-")));
   });
 
   afterEach(async () => {

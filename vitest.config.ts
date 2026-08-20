@@ -6,6 +6,12 @@ export default defineConfig({
     globals: true,
     root: ".",
     include: ["tests/**/*.test.ts"],
+    // The scraper and drift suites build real SQLite databases and JSONL
+    // stores on disk per case. Vitest's 5s default is comfortable locally but
+    // marginal on CI runners — the opencode mutation battery came in at
+    // 5392ms on windows-latest — and a timeout there reads as a product
+    // failure rather than a slow machine.
+    testTimeout: 30_000,
     coverage: {
       provider: "v8",
       include: ["src/**/*.ts"],
