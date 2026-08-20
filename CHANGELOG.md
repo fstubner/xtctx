@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.11.5](https://github.com/fstubner/xtctx/compare/xtctx-v0.11.4...xtctx-v0.11.5) (2026-08-20)
+
+
+### Dependencies
+
+* update runtime and dev dependencies, holding back TypeScript 7 ([b347cfd](https://github.com/fstubner/xtctx/commit/b347cfd79073f90782d58a0e9ff500f1da349e3e))
+
 ## [0.11.4](https://github.com/fstubner/xtctx/compare/xtctx-v0.11.3...xtctx-v0.11.4) (2026-08-20)
 
 
