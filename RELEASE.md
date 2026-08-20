@@ -43,3 +43,35 @@ the transcript index, which is derived data).
 - [ ] `npm run demo:public` passes against the released build
 - [ ] Landing site footer shows the new version (synced by release-please;
       see `landing/src/data/site.ts`)
+
+## Watching for upstream format drift
+
+xtctx reads transcript files that seven other tools write, so the risk that
+matters between releases is one of those tools changing its on-disk shape.
+Three signals cover it, cheapest first:
+
+**Nightly, free — `upstream-watch`.** Checks npm for releases of the tracked
+tools against `.github/upstream-versions.json` and opens one issue when a
+version moves. It never claims anything is broken; it marks the moment a
+format *could* have changed, which is the only time checking is worth doing.
+Deduped across all issue states, so a release is reported once.
+
+**On demand, free — `npm run capture:formats`.** Fingerprints the real stores
+on your machine and diffs them against `tests/drift/fingerprints/`. Records
+field names and types only, never transcript content, so the output is safe to
+commit. Run it after updating a tool and using it once:
+
+```bash
+npm run capture:formats            # report the diff
+npm run capture:formats -- --write # accept the new shape
+```
+
+**On demand, costs API credit — the `drift-canary` workflow.** Runs the real
+CLIs against real stores and asserts the scrapers still produce chunks. The
+strongest signal and the only one that proves the scraper works end to end.
+Dispatch it manually when `upstream-watch` fires; it is one short prompt per
+tool. Without `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` configured it exits 78
+and reports that it was skipped rather than filing a false drift issue.
+
+After confirming a new version is fine, record it in
+`.github/upstream-versions.json` so the watch stops reporting it.

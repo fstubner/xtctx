@@ -1,0 +1,98 @@
+name: upstream-watch
+
+# Free drift signal. The drift canary proves whether a scraper still works but
+# costs an API call per tool per run, and transcript formats do not change
+# nightly — they change when a tool ships a release. So this watches npm and
+# says when it is worth looking, without credentials or spend.
+#
+# It never claims anything is broken. Confirming that is `npm run
+# capture:formats` against a real store, or a manual dispatch of drift-canary.
+
+on:
+  schedule:
+    - cron: "30 6 * * *" # 06:30 UTC daily, after the canary window
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      - name: Check tracked upstream versions
+        id: check
+        run: |
+          set +e
+          node scripts/check-upstream-versions.mjs | tee upstream-report.txt
+          echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Build issue body
+        if: steps.check.outputs.exit_code == '10'
+        run: |
+          {
+            echo "A tool whose on-disk transcript format xtctx reads has published a new release."
+            echo ""
+            echo "This is **not** evidence that anything is broken — it is the point at which a format *could* have changed, which is the only time it is worth checking."
+            echo ""
+            echo '```'
+            cat upstream-report.txt
+            echo '```'
+            echo ""
+            echo "### What to do"
+            echo ""
+            echo "1. Update the tool locally, use it once so it writes a transcript."
+            echo "2. \`npm run capture:formats\` — compares the real on-disk shape against \`tests/drift/fingerprints/\`. It records field names and types only, never transcript content."
+            echo "3. If the shape changed, check the matching scraper in \`src/scrapers/\`."
+            echo "4. Record the new versions in \`.github/upstream-versions.json\` and \`npm run capture:formats -- --write\`."
+            echo ""
+            echo "For a stronger signal, dispatch the \`drift-canary\` workflow manually — it runs the real CLI against a real store, and costs one short API call per tool."
+            echo ""
+            echo "**Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          } > issue-body.md
+
+      # Dedupe on the exact version pair in the title, and across *all* states:
+      # a closed issue means the human already looked at that release, so
+      # reopening it nightly would recreate the noise this replaces.
+      - name: Check whether this release was already reported
+        id: existing
+        if: steps.check.outputs.exit_code == '10'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          title="upstream: tracked coding tool released — check transcript formats"
+          found=$(gh issue list --state all --search "\"$title\" in:title" --json number,title,state \
+            | jq -r --arg t "$title" '[.[] | select(.title == $t)] | length')
+          echo "count=${found}" >> "$GITHUB_OUTPUT"
+
+      - name: Open an issue
+        if: steps.check.outputs.exit_code == '10' && steps.existing.outputs.count == '0'
+        uses: peter-evans/create-issue-from-file@e8ef132d6df98ed982188e460ebb3b5d4ef3a9cd # v5
+        with:
+          title: "upstream: tracked coding tool released — check transcript formats"
+          content-filepath: issue-body.md
+          labels: |
+            drift
+            upstream
+
+      - name: Note when a release is pending but already reported
+        if: steps.check.outputs.exit_code == '10' && steps.existing.outputs.count != '0'
+        run: |
+          echo "::notice title=upstream release pending::A tracked tool is ahead of .github/upstream-versions.json, and an issue already exists. Not filing again."
+
+      - name: Fail on check errors
+        # 0 = current, 10 = something moved (handled above). Anything else is
+        # the check itself failing, which should be visible rather than quiet.
+        if: steps.check.outputs.exit_code != '0' && steps.check.outputs.exit_code != '10'
+        run: |
+          echo "upstream check exited ${{ steps.check.outputs.exit_code }}" >&2
+          exit 1

@@ -1,0 +1,14 @@
+{
+  "_comment": "Last upstream versions whose on-disk transcript formats xtctx is known to handle. The nightly upstream-watch workflow compares npm against this file and opens an issue when a tracked tool publishes a new release — a free signal for when a format *could* have changed, without spending API credit invoking the tools. Update these after checking formats (npm run capture:formats).",
+  "packages": {
+    "@anthropic-ai/claude-code": "2.1.237",
+    "@openai/codex": "0.148.0",
+    "opencode-ai": "1.18.19",
+    "@github/copilot": "1.0.80"
+  },
+  "_untracked": {
+    "cursor": "not distributed on npm — format changes ship with the Cursor app",
+    "copilot (VS Code)": "not on npm — ships inside the VS Code extension",
+    "antigravity": "not on npm — ships with the Antigravity app"
+  }
+}
