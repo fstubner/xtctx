@@ -1,0 +1,43 @@
+{
+  "kind": "directory",
+  "layout": [
+    "agyhub_summaries_proto.pb",
+    "annotations/",
+    "antigravity_state.pbtxt",
+    "bin/",
+    "brain/",
+    "browser_recordings/",
+    "builtin/",
+    "conversations/",
+    "crashes/",
+    "html_artifacts/",
+    "installation_id",
+    "knowledge/",
+    "mcp/",
+    "mcp_config.json",
+    "scratch/",
+    "skills/"
+  ],
+  "brainArtifactExtensions": [
+    ".gitignore",
+    ".html",
+    ".json",
+    ".md",
+    ".md.metadata.json",
+    ".png",
+    ".webm"
+  ],
+  "conversationExtensions": [
+    ".db",
+    ".pb"
+  ],
+  "artifactMetadata": {
+    "filesSampled": 30,
+    "fields": [
+      "requestFeedback: boolean",
+      "summary: string",
+      "updatedAt: string",
+      "userFacing: boolean"
+    ]
+  }
+}
