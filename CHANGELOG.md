@@ -5,6 +5,41 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.11.2](https://github.com/fstubner/xtctx/compare/xtctx-v0.11.1...xtctx-v0.11.2) (2026-08-19)
+
+
+### Bug Fixes
+
+* **antigravity:** attribute conversations by path, never by project name ([9ba1ac7](https://github.com/fstubner/xtctx/commit/9ba1ac782c7c25caaaee4466c4f1bf65edee4ab6))
+* **antigravity:** match the listening PID exactly and complete the barrel exports ([b9c3ad5](https://github.com/fstubner/xtctx/commit/b9c3ad5daea2cf370b1d425f02e851a2ec392a34))
+* **ci:** check RELEASE_PLEASE_TOKEN in run, not in a step-level if ([ec736b7](https://github.com/fstubner/xtctx/commit/ec736b7cbd6f958c7910a0f9c3dcd69bae784541))
+* **ci:** repair the release-please token guard ([52f6a73](https://github.com/fstubner/xtctx/commit/52f6a739f5211901fd6b398f155d68e3a61a7838))
+* **cli:** fail open in the session hook and release the index handle ([b536cf1](https://github.com/fstubner/xtctx/commit/b536cf1fcb0cad74403ba6f55a3a38135a57467f))
+* **config:** preserve line endings on disconnect and stop leaving litter ([6f800d2](https://github.com/fstubner/xtctx/commit/6f800d2dce99aa2413fb9ec8939979cc789c32b9))
+* **config:** report disconnect accurately and remove the stubs it leaves ([9dfab9b](https://github.com/fstubner/xtctx/commit/9dfab9b4fbdb92fc2c628e7b555c75320f70ebfc))
+* **config:** write other tools' config files safely ([6f48086](https://github.com/fstubner/xtctx/commit/6f480866fb79020cb1034709202b7d76f4779b13))
+* **deps:** bump transitive postcss out of the path-traversal advisories ([51e3d58](https://github.com/fstubner/xtctx/commit/51e3d580bf6f9bc0fe76a60fe1c2019ff9feab3e))
+* **handoff:** make the index crash-safe, correct, and cheap to refresh ([269fefb](https://github.com/fstubner/xtctx/commit/269fefbaa3a8b1cb491175fc2b2c69cea292c1f3))
+* **handoff:** repair the embedding pipeline and stop it failing silently ([6ee6255](https://github.com/fstubner/xtctx/commit/6ee62551d55f2fd91af8a23282a52c380e3060f1))
+* **handoff:** require real evidence for a semantic match ([7c4bf8b](https://github.com/fstubner/xtctx/commit/7c4bf8b8fd8379a3e75fd7b484437b89a70571d9))
+* **handoff:** reset cursors whenever the index is empty, and stop indexing scaffolding ([0a1aa76](https://github.com/fstubner/xtctx/commit/0a1aa768dabb077f6ab898cf8627b8974de88d6e))
+* **landing:** upgrade Astro to 7 and pin the published version ([73a20e9](https://github.com/fstubner/xtctx/commit/73a20e973f70ca8398a0ac967e0f32525a405c5a))
+* **mcp:** fence untrusted transcript content and validate tool arguments ([a662805](https://github.com/fstubner/xtctx/commit/a662805bf65a521aac992233ea35aafbda202007))
+* **mcp:** keep session previews from forging response structure ([799d7ff](https://github.com/fstubner/xtctx/commit/799d7ff1ba5c4417550350cbb810de9fe77f5c3c))
+* **mcp:** redact paths in reported errors and always end status with a next step ([626e2bf](https://github.com/fstubner/xtctx/commit/626e2bf8f6837414b8ebd817bfa8513583d10367))
+* **opencode:** report a corrupt store instead of an empty one ([83d8872](https://github.com/fstubner/xtctx/commit/83d88721857e1b47c3724b73b950df0e438ddb87))
+* remediate the full-product audit findings ([5198690](https://github.com/fstubner/xtctx/commit/5198690a425399b94d6cd234e3b8ffa87e79c38c))
+* **scrapers:** attribute Claude Code sessions by cwd, not by encoded name ([9b5a6ad](https://github.com/fstubner/xtctx/commit/9b5a6ada818464f28532677fb94e0e2a8f0fa400))
+* **scrapers:** contain read errors and stabilise chunk identity ([31f5ecb](https://github.com/fstubner/xtctx/commit/31f5ecb9c0d7ff8bb4dec766c286ec315210690d))
+* **scrapers:** parse current Copilot CLI events and scope sessions to the project ([6a387f8](https://github.com/fstubner/xtctx/commit/6a387f80679bec1ca5e472b98953bcdec82deaa5))
+* stop reporting false drift and close the prefix-sibling leak ([6dc4e68](https://github.com/fstubner/xtctx/commit/6dc4e68a9c2bdea098df7dda1d165de2ac950943))
+
+
+### Documentation
+
+* add the product, architecture, and design contracts ([147d2af](https://github.com/fstubner/xtctx/commit/147d2aff4e8d5e9afbbe3936c33fa0886fe24548))
+* correct the session-hook failure wording ([d31ac2f](https://github.com/fstubner/xtctx/commit/d31ac2f68ddb253e6debbdc745b05d43e15a5ef4))
+
 ## [0.11.1](https://github.com/fstubner/xtctx/compare/xtctx-v0.11.0...xtctx-v0.11.1) (2026-08-05)
 
 
