@@ -20,6 +20,11 @@
 import { readdir, readFile, mkdir, writeFile, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+import {
+  fingerprintsDiffer,
+  normalizeForCompare,
+  serializeFingerprint,
+} from "./lib/fingerprint-compare.mjs";
 import { fileURLToPath } from "node:url";
 
 const EXIT_CHANGED = 10;
@@ -455,7 +460,7 @@ let changed = 0;
 
 for (const [tool, fingerprint] of Object.entries(captured)) {
   const path = join(outDir, `${tool}.json`);
-  const next = JSON.stringify(fingerprint, null, 2) + "\n";
+  const next = serializeFingerprint(fingerprint);
   const previous = existsSync(path) ? await readFile(path, "utf-8") : null;
 
   if (previous === null) {
@@ -469,15 +474,15 @@ for (const [tool, fingerprint] of Object.entries(captured)) {
     continue;
   }
 
-  if (previous === next) {
+  if (!fingerprintsDiffer(previous, next)) {
     console.log(`same     ${tool}`);
     continue;
   }
 
   changed += 1;
   console.log(`CHANGED  ${tool}`);
-  const before = new Set(previous.split("\n"));
-  const after = next.split("\n");
+  const before = new Set(normalizeForCompare(previous).split("\n"));
+  const after = normalizeForCompare(next).split("\n");
   const added = after.filter((line) => line.trim() && !before.has(line)).slice(0, 12);
   for (const line of added) console.log(`           + ${line.trim()}`);
   if (write) {
