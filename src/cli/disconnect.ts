@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import {
@@ -11,10 +12,20 @@ export interface DisconnectCliOptions {
   tool?: string;
   all?: boolean;
   yes?: boolean;
+  homeDir?: string;
 }
 
 export async function runDisconnect(options: DisconnectCliOptions = {}): Promise<void> {
-  if (!options.yes) {
+  if (options.yes) {
+    // `--yes` skips the prompt, not the disclosure. Antigravity keeps its MCP
+    // config at app level, so disconnecting here removes xtctx from
+    // Antigravity for every project on the machine — which was previously
+    // only mentioned once the files had been written.
+    const plan = describeDisconnectPlan(options);
+    for (const warning of plan.warnings) {
+      process.stdout.write(`  warning ${warning}\n`);
+    }
+  } else {
     const confirmed = await confirmDisconnect(options);
     if (!confirmed) {
       process.stdout.write("xtctx disconnect cancelled.\n");
@@ -26,8 +37,22 @@ export async function runDisconnect(options: DisconnectCliOptions = {}): Promise
     projectPath: options.projectPath,
     tool: options.tool,
     all: options.all,
+    homeDir: options.homeDir,
   });
   printDisconnectResult(result);
+  printLeftovers(result.projectRoot);
+}
+
+/**
+ * Disconnect unwires xtctx from other tools; it does not delete the project's
+ * own directory, which holds an index built from transcript content. Leaving
+ * that unmentioned makes "disconnect" sound more complete than it is.
+ */
+function printLeftovers(projectRoot: string): void {
+  process.stdout.write(
+    `  left in place ${join(projectRoot, ".xtctx")} ` +
+      `(config and the local indexed transcript content — delete the directory to remove it)\n`,
+  );
 }
 
 async function confirmDisconnect(options: DisconnectCliOptions): Promise<boolean> {

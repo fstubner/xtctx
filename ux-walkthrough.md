@@ -26,7 +26,12 @@ content through xtctx without any manual export.
    for stable refs.
 5. **Leave cleanly.** `xtctx disconnect <tool>` (or `--all`) shows its plan,
    asks (or `--yes`), removes MCP entries, managed blocks, synced skills,
-   and hooks — transcript data and user content stay.
+   and hooks — transcript data and user content stay. Mostly project-scoped,
+   with one exception it warns about up front: Antigravity keeps its MCP
+   config at app level, so disconnecting it removes xtctx from Antigravity
+   for every project on the machine. The project's own `.xtctx/` directory,
+   including the local index built from transcript content, is left in place
+   and named in the output.
 
 ## States
 
