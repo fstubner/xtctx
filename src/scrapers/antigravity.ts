@@ -831,12 +831,40 @@ async function callLanguageServer(
   });
 }
 
-async function listConversationFileIds(conversationsDir: string): Promise<string[]> {
+/**
+ * Session ids are taken from the conversation file names, and Antigravity
+ * writes them in two formats: the original protobuf `.pb` and, since it
+ * migrated, SQLite `.db`. Both name the file after the cascade id, which is
+ * the only thing needed here — the transcript itself is fetched from the
+ * language server, not read off disk.
+ *
+ * Reading only `.pb` silently skipped every session written after the
+ * migration. It could not fail loudly: unknown files are simply not
+ * enumerated, so the runtime is never asked about them and the sessions do
+ * not appear.
+ */
+const CONVERSATION_EXTENSIONS = [".pb", ".db"];
+
+export async function listConversationFileIds(conversationsDir: string): Promise<string[]> {
   const names = await listFileNames(conversationsDir);
-  return names
-    .filter((name) => name.endsWith(".pb"))
-    .map((name) => basename(name, ".pb"))
-    .filter((name) => name.length > 0);
+  const ids: string[] = [];
+  const seen = new Set<string>();
+
+  for (const name of names) {
+    const extension = CONVERSATION_EXTENSIONS.find((candidate) => name.endsWith(candidate));
+    if (!extension) {
+      continue;
+    }
+    // A session can exist in both stores; it is still one session.
+    const id = basename(name, extension);
+    if (id.length === 0 || seen.has(id)) {
+      continue;
+    }
+    seen.add(id);
+    ids.push(id);
+  }
+
+  return ids;
 }
 
 function formatArtifactContent(artifact: AntigravityArtifact): string {
