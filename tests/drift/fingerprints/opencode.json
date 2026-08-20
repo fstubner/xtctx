@@ -1,0 +1,191 @@
+{
+  "kind": "sqlite",
+  "tables": {
+    "__drizzle_migrations": [
+      "applied_at: TEXT",
+      "created_at: numeric",
+      "hash: TEXT",
+      "id: INTEGER",
+      "name: TEXT"
+    ],
+    "account": [
+      "access_token: TEXT",
+      "email: TEXT",
+      "id: TEXT",
+      "refresh_token: TEXT",
+      "time_created: INTEGER",
+      "time_updated: INTEGER",
+      "token_expiry: INTEGER",
+      "url: TEXT"
+    ],
+    "account_state": [
+      "active_account_id: TEXT",
+      "active_org_id: TEXT",
+      "id: INTEGER"
+    ],
+    "control_account": [
+      "access_token: TEXT",
+      "active: INTEGER",
+      "email: TEXT",
+      "refresh_token: TEXT",
+      "time_created: INTEGER",
+      "time_updated: INTEGER",
+      "token_expiry: INTEGER",
+      "url: TEXT"
+    ],
+    "event": [
+      "aggregate_id: TEXT",
+      "data: TEXT",
+      "id: TEXT",
+      "seq: INTEGER",
+      "type: TEXT"
+    ],
+    "event_sequence": [
+      "aggregate_id: TEXT",
+      "seq: INTEGER"
+    ],
+    "message": [
+      "data: TEXT",
+      "id: TEXT",
+      "session_id: TEXT",
+      "time_created: INTEGER",
+      "time_updated: INTEGER"
+    ],
+    "part": [
+      "data: TEXT",
+      "id: TEXT",
+      "message_id: TEXT",
+      "session_id: TEXT",
+      "time_created: INTEGER",
+      "time_updated: INTEGER"
+    ],
+    "permission": [
+      "data: TEXT",
+      "project_id: TEXT",
+      "time_created: INTEGER",
+      "time_updated: INTEGER"
+    ],
+    "project": [
+      "commands: TEXT",
+      "icon_color: TEXT",
+      "icon_url: TEXT",
+      "icon_url_override: TEXT",
+      "id: TEXT",
+      "name: TEXT",
+      "sandboxes: TEXT",
+      "time_created: INTEGER",
+      "time_initialized: INTEGER",
+      "time_updated: INTEGER",
+      "vcs: TEXT",
+      "worktree: TEXT"
+    ],
+    "session": [
+      "directory: TEXT",
+      "id: TEXT",
+      "parent_id: TEXT",
+      "path: TEXT",
+      "permission: TEXT",
+      "project_id: TEXT",
+      "revert: TEXT",
+      "share_url: TEXT",
+      "slug: TEXT",
+      "summary_additions: INTEGER",
+      "summary_deletions: INTEGER",
+      "summary_diffs: TEXT",
+      "summary_files: INTEGER",
+      "time_archived: INTEGER",
+      "time_compacting: INTEGER",
+      "time_created: INTEGER",
+      "time_updated: INTEGER",
+      "title: TEXT",
+      "version: TEXT",
+      "workspace_id: TEXT"
+    ],
+    "session_entry": [
+      "data: TEXT",
+      "id: TEXT",
+      "session_id: TEXT",
+      "time_created: INTEGER",
+      "time_updated: INTEGER",
+      "type: TEXT"
+    ],
+    "session_share": [
+      "id: TEXT",
+      "secret: TEXT",
+      "session_id: TEXT",
+      "time_created: INTEGER",
+      "time_updated: INTEGER",
+      "url: TEXT"
+    ],
+    "todo": [
+      "content: TEXT",
+      "position: INTEGER",
+      "priority: TEXT",
+      "session_id: TEXT",
+      "status: TEXT",
+      "time_created: INTEGER",
+      "time_updated: INTEGER"
+    ],
+    "workspace": [
+      "branch: TEXT",
+      "directory: TEXT",
+      "extra: TEXT",
+      "id: TEXT",
+      "name: TEXT",
+      "project_id: TEXT",
+      "type: TEXT"
+    ]
+  },
+  "embeddedJson": {
+    "message.data": [
+      "agent: string",
+      "cost: number",
+      "finish: string",
+      "mode: string",
+      "model.modelID: string",
+      "model.providerID: string",
+      "modelID: string",
+      "parentID: string",
+      "path.cwd: string",
+      "path.root: string",
+      "providerID: string",
+      "role: string",
+      "summary.diffs: array<empty>",
+      "time.completed: number",
+      "time.created: number",
+      "tokens.cache.read: number",
+      "tokens.cache.write: number",
+      "tokens.input: number",
+      "tokens.output: number",
+      "tokens.reasoning: number",
+      "tokens.total: number"
+    ],
+    "part.data": [
+      "callID: string",
+      "cost: number",
+      "metadata.anthropic.signature: string",
+      "reason: string",
+      "snapshot: string",
+      "state.input.filePath: string",
+      "state.metadata.loaded: array<empty>",
+      "state.metadata.preview: string",
+      "state.metadata.truncated: boolean",
+      "state.output: string",
+      "state.status: string",
+      "state.time.end: number",
+      "state.time.start: number",
+      "state.title: string",
+      "text: string",
+      "time.end: number",
+      "time.start: number",
+      "tokens.cache.read: number",
+      "tokens.cache.write: number",
+      "tokens.input: number",
+      "tokens.output: number",
+      "tokens.reasoning: number",
+      "tokens.total: number",
+      "tool: string",
+      "type: string"
+    ]
+  }
+}

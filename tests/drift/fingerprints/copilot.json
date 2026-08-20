@@ -1,0 +1,20 @@
+{
+  "kind": "sqlite-kv",
+  "table": "ItemTable",
+  "keysByPrefix": {
+    "interactive.sessions": [
+      "creationDate: number",
+      "isImported: boolean",
+      "providerId: string",
+      "requesterAvatarIconUri.$mid: number",
+      "requesterAvatarIconUri.authority: string",
+      "requesterAvatarIconUri.path: string",
+      "requesterAvatarIconUri.scheme: string",
+      "requesterUsername: string",
+      "requests: array<object>",
+      "responderUsername: string",
+      "sessionId: string",
+      "welcomeMessage: array<string>"
+    ]
+  }
+}

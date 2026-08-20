@@ -16,7 +16,9 @@ landing/dist/
 .vscode/mcp.json
 .mcp.json
 .github/instructions/
-opencode.json
+# Anchored: this is opencode's own config at the repo root. Unanchored it also
+# matched tests/drift/fingerprints/opencode.json, which silently stayed untracked.
+/opencode.json
 *.tsbuildinfo
 coverage/
 .env
