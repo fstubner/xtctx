@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.11.4](https://github.com/fstubner/xtctx/compare/xtctx-v0.11.3...xtctx-v0.11.4) (2026-08-20)
+
+
+### Bug Fixes
+
+* **ci:** smoke the published package outside the repo checkout ([93a5df6](https://github.com/fstubner/xtctx/commit/93a5df6037ff8192d3ad215381d2203f9a529cf8))
+* **ci:** smoke the published package outside the repo checkout ([9843937](https://github.com/fstubner/xtctx/commit/98439370170a85bb1d8f1924a2b321b2d4739fa1))
+
 ## [0.11.3](https://github.com/fstubner/xtctx/compare/xtctx-v0.11.2...xtctx-v0.11.3) (2026-08-20)
 
 
