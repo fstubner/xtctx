@@ -6,6 +6,13 @@ export interface SessionSummary {
   message_count: number;
   preview?: string;
   source_path?: string;
+  /**
+   * The branch and commit the session ran on, as the tool recorded them at the
+   * time. Absent for tools that do not record it; never inferred from the
+   * working tree at index time, which would be a different branch entirely.
+   */
+  git_branch?: string;
+  git_commit?: string;
   score?: number;
   retrieval?: SessionSearchMode;
   matches?: RetrievalMatch[];
@@ -42,7 +49,11 @@ export interface HandoffStatus {
 }
 
 export interface SessionService {
-  listRecentSessions(limit: number, toolFilter?: string[]): Promise<SessionSummary[]>;
+  listRecentSessions(
+    limit: number,
+    toolFilter?: string[],
+    branchFilter?: string[],
+  ): Promise<SessionSummary[]>;
   getSessionByRef(sessionRef: string): Promise<SessionSummary | null>;
   getSessionDetail(sessionRef: string, offset: number, limit: number): Promise<SessionMessage[]>;
   searchSessions(
@@ -50,6 +61,7 @@ export interface SessionService {
     limit: number,
     toolFilter?: string[],
     mode?: SessionSearchMode,
+    branchFilter?: string[],
   ): Promise<SessionSummary[]>;
   getStatus(): Promise<HandoffStatus>;
   close(): Promise<void>;

@@ -99,6 +99,8 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
         tokenEstimate: estimateTokens(content),
         referencedFiles: [],
         approvalMode: normalizeApprovalMode(toStringValue(value.approvalMode)) ?? "suggest",
+        gitBranch: toStringValue(value.gitBranch),
+        gitCommit: toStringValue(value.gitCommit),
         sandboxed: toBoolean(value.sandboxed),
         layer: toMessageIndex(value.layer),
       },
@@ -129,6 +131,8 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
       // Session-level state, updated as we encounter meta/context events.
       let sessionId = sessionIdFromFile;
       let approvalMode: ApprovalMode = "suggest";
+      let gitBranch: string | undefined;
+      let gitCommit: string | undefined;
       let sandboxed = false;
       let messageIndex = 0;
       let projectMatched = this.projectRoot ? false : true;
@@ -177,6 +181,13 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
           const payload = parsed.payload;
           if (isRecord(payload)) {
             sessionId = toStringValue(payload.id) ?? sessionIdFromFile;
+            // codex stamps the branch and commit at session start, which is
+            // exactly the state the work happened against.
+            const git = payload.git;
+            if (isRecord(git)) {
+              gitBranch = toStringValue(git.branch) ?? gitBranch;
+              gitCommit = toStringValue(git.commit_hash) ?? gitCommit;
+            }
             const match = this.matchesProject(payload.cwd);
             if (match === false) {
               break;
@@ -254,6 +265,8 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
             content,
             approvalMode,
             sandboxed,
+            gitBranch,
+            gitCommit,
           });
           messageIndex++;
           continue;
@@ -281,6 +294,8 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
                 content,
                 approvalMode,
                 sandboxed,
+                gitBranch,
+                gitCommit,
                 layer: 1,
               });
             }
@@ -349,6 +364,8 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
           content,
           approvalMode,
           sandboxed,
+          gitBranch,
+          gitCommit,
         });
         messageIndex++;
       }

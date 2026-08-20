@@ -99,6 +99,9 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
         referencedFiles: [],
         toolCalls: type === "tool_use" ? [(obj.name as string) || ""] : undefined,
         costUsd: obj.costUsd as number | undefined,
+        // Recorded per record by Claude Code itself, so it is the branch the
+        // work actually happened on rather than whatever is checked out now.
+        gitBranch: toOptionalString(obj.gitBranch),
         sessionType: "interactive",
       } as ChunkMetadata & ClaudeCodeChunk["metadata"],
     };
@@ -365,6 +368,11 @@ function stringifyContent(value: unknown): string {
     })
     .filter((item) => item.length > 0)
     .join("\n");
+}
+
+/** A non-empty string, or nothing. An empty branch is no branch. */
+function toOptionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
 }
 
 function describeType(value: unknown): string {

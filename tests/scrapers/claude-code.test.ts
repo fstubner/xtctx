@@ -160,6 +160,39 @@ describe("ClaudeCodeScraper", () => {
     }
   });
 
+  /**
+   * The branch comes from what the tool wrote at the time, never from asking
+   * git during indexing: indexing happens long after the session, often from
+   * a different branch, so `git rev-parse` now would label old work with
+   * today's branch.
+   */
+  it("records the branch the session was actually on", async () => {
+    const projectDir = join(tempDir, "with-branch");
+    await mkdir(projectDir, { recursive: true });
+    await writeFile(
+      join(projectDir, "branchy.jsonl"),
+      JSON.stringify({
+        type: "human",
+        content: "work on the parser",
+        timestamp: "2026-02-24T10:00:00Z",
+        gitBranch: "feat/parser",
+      }) + "\n",
+    );
+
+    const chunks: ClaudeCodeChunk[] = [];
+    for await (const chunk of scraper.fullSync()) chunks.push(chunk);
+
+    const found = chunks.find((chunk) => chunk.content === "work on the parser");
+    expect(found?.metadata.gitBranch).toBe("feat/parser");
+  });
+
+  it("leaves the branch unset when the transcript does not record one", async () => {
+    const chunks: ClaudeCodeChunk[] = [];
+    for await (const chunk of scraper.fullSync()) chunks.push(chunk);
+
+    expect(chunks[0].metadata.gitBranch).toBeUndefined();
+  });
+
   it("scrapes conversation chunks from JSONL", async () => {
     const chunks: ClaudeCodeChunk[] = [];
 

@@ -13,6 +13,19 @@ export interface ChunkMetadata {
    * condensed context that spans more conversational history.
    */
   layer?: number;
+  /**
+   * The git branch and commit the session was actually working on.
+   *
+   * Taken from what the tool recorded in its own transcript, never from
+   * asking git now. Indexing happens long after the session — often on a
+   * different branch — so `git rev-parse` at index time would stamp today's
+   * branch onto work done weeks ago, which is worse than recording nothing.
+   *
+   * Absent for tools that do not record it (antigravity, cursor, VS Code
+   * Copilot). Nothing infers it.
+   */
+  gitBranch?: string;
+  gitCommit?: string;
 }
 
 export interface ConversationChunk {
