@@ -8,6 +8,16 @@ export interface EmbeddingProvider {
   readonly model: string;
   embed(text: string): Promise<Float32Array>;
   embedBatch(texts: string[]): Promise<Float32Array[]>;
+  /**
+   * Whether the model is loaded and embedding would start immediately.
+   *
+   * Loading it means fetching and initialising a local model, which on a cold
+   * cache is minutes — not something to do while an agent holds a tool call
+   * open. Callers check this to decide whether to answer now by another route.
+   */
+  isReady?(): boolean;
+  /** Begin loading the model without waiting for it. */
+  warm?(): void;
 }
 
 type FeatureExtractionOutput = {
@@ -28,6 +38,7 @@ type PipelineFactory = (
 export class TransformersEmbeddingProvider implements EmbeddingProvider {
   readonly model: string;
   private extractor: FeatureExtractionPipeline | null = null;
+  private loading: Promise<FeatureExtractionPipeline> | null = null;
 
   constructor(model = DEFAULT_EMBEDDING_MODEL) {
     this.model = model;
@@ -53,11 +64,32 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
     return vectors;
   }
 
+  isReady(): boolean {
+    return this.extractor !== null;
+  }
+
+  warm(): void {
+    void this.getExtractor().catch(() => {
+      // Warming is best-effort; the next real embed call reports the failure.
+    });
+  }
+
   private async getExtractor(): Promise<FeatureExtractionPipeline> {
     if (this.extractor) {
       return this.extractor;
     }
+    // Concurrent callers must not each start their own model load.
+    if (this.loading) {
+      return this.loading;
+    }
 
+    this.loading = this.loadExtractor().finally(() => {
+      this.loading = null;
+    });
+    return this.loading;
+  }
+
+  private async loadExtractor(): Promise<FeatureExtractionPipeline> {
     process.stderr.write(`xtctx: Initializing local embedding provider (${this.model})...\n`);
 
     const transformers = (await import("@huggingface/transformers")) as unknown as {

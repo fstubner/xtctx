@@ -53,6 +53,24 @@ export interface SessionService {
   ): Promise<SessionSummary[]>;
   getStatus(): Promise<HandoffStatus>;
   close(): Promise<void>;
+  /**
+   * What the last answer did not include, if anything.
+   *
+   * Scanning and vectorizing are both bounded per call so an agent is never
+   * left waiting on the whole machine's history. That makes an answer capable
+   * of being incomplete, and an incomplete answer presented as a complete one
+   * is the worse failure — the agent concludes the history is not there.
+   */
+  getIndexProgress?(): IndexProgress;
+}
+
+export interface IndexProgress {
+  /** A scan started by an earlier call is still running. */
+  scanning: boolean;
+  /** Windows indexed but not yet vectorized, so semantic recall is partial. */
+  vectorBacklog: number;
+  /** The embedding model is still loading, so this answer is keyword-only. */
+  embeddingWarming: boolean;
 }
 
 export type SessionSearchMode = "hybrid" | "keyword" | "vector";

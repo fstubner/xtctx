@@ -37,10 +37,10 @@ export function createRecentSessionsHandler(service: SessionService) {
     const sessions = await service.listRecentSessions(limit, params.tool_filter);
 
     if (format === "json") {
-      return { sessions };
+      return { sessions, indexing: service.getIndexProgress?.() };
     }
 
-    return formatRecentSessionsMarkdown(sessions);
+    return formatRecentSessionsMarkdown(sessions) + progressNote(service);
   };
 }
 
@@ -73,16 +73,48 @@ export function createSearchSessionsHandler(service: SessionService) {
     const sessions = await service.searchSessions(query, limit, params.tool_filter, mode);
 
     if (format === "json") {
-      return { query, mode, sessions };
+      return { query, mode, sessions, indexing: service.getIndexProgress?.() };
     }
 
     // Echo a bounded form of the query: a 10k-character query came back
     // verbatim in the heading, burning the calling agent's context.
-    return formatRecentSessionsMarkdown(
-      sessions,
-      `## Search Results: ${inlineSafe(truncateQueryEcho(query))}`,
+    return (
+      formatRecentSessionsMarkdown(
+        sessions,
+        `## Search Results: ${inlineSafe(truncateQueryEcho(query))}`,
+      ) + progressNote(service)
     );
   };
+}
+
+/**
+ * A one-line note when the answer is not the whole picture.
+ *
+ * Scanning and vectorizing are bounded per call so an agent never waits on the
+ * machine's entire history. The cost is that an answer can be partial, and a
+ * partial answer that looks complete is the worse outcome: the agent concludes
+ * the history isn't there and stops asking.
+ */
+function progressNote(service: SessionService): string {
+  const progress = service.getIndexProgress?.();
+  if (!progress) {
+    return "";
+  }
+
+  const notes: string[] = [];
+  if (progress.scanning) {
+    notes.push("still scanning transcript stores");
+  }
+  if (progress.embeddingWarming) {
+    notes.push("embedding model still loading, so this answer is keyword-only");
+  }
+  if (progress.vectorBacklog > 0) {
+    notes.push(`${progress.vectorBacklog} windows not yet vectorized`);
+  }
+
+  return notes.length > 0
+    ? `\n\n_Indexing in progress (${notes.join("; ")}) — ask again shortly for more._`
+    : "";
 }
 
 function formatRecentSessionsMarkdown(

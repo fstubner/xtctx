@@ -13,6 +13,7 @@ import {
 } from "./embeddings.js";
 import type {
   HandoffStatus,
+  IndexProgress,
   RetrievalMatch,
   SessionMessage,
   SessionSearchMode,
@@ -44,7 +45,37 @@ interface SqliteHandoffIndexOptions {
   embeddingProvider?: EmbeddingProvider;
   windowSize?: number;
   windowStride?: number;
+  /** How long a caller waits for a scan before taking what is indexed so far. */
+  refreshBudgetMs?: number;
+  /** How long one search spends building vectors before answering with what it has. */
+  vectorBudgetMs?: number;
 }
+
+/**
+ * How long a tool call will wait for a scan of every transcript store on the
+ * machine.
+ *
+ * A cold scan here takes about 55 seconds — 18GB of codex history is most of
+ * it — and it used to run inside the caller's first tool call. MCP servers are
+ * spawned per agent session, so that was paid on every handoff, and a host
+ * with a 30s tool timeout never got a first answer at all.
+ *
+ * The scan is not cancelled when the budget expires; the caller just stops
+ * waiting for it. Everything it has already written stays written, so the next
+ * call sees more, and the call after that sees all of it.
+ */
+const DEFAULT_REFRESH_BUDGET_MS = 4_000;
+
+/**
+ * How long one search spends building vectors before answering.
+ *
+ * The first semantic search used to vectorize the entire corpus inline: 530
+ * seconds on a 1,145-window index, inside a single tool call, with no cap and
+ * nothing to show for the wait. Each batch commits on its own, so stopping
+ * early costs nothing — the next search picks up where this one stopped, and
+ * recall improves call over call until the corpus is covered.
+ */
+const DEFAULT_VECTOR_BUDGET_MS = 6_000;
 
 interface SessionRow {
   session_ref: string;
@@ -129,7 +160,22 @@ export class SqliteHandoffIndex implements SessionService {
   private readonly initialized: Promise<void>;
   private refreshPromise: Promise<void> | null = null;
   private lastRefreshMs = 0;
-  private readonly refreshTtlMs = 5_000;
+  /**
+   * How long an indexed view is treated as current.
+   *
+   * A scan re-reads every transcript store on the machine, so at five seconds
+   * almost every tool call in a session started a fresh one and paid the wait
+   * budget again. The transcripts being read belong to sessions that ended
+   * before this one started; they do not change second to second.
+   */
+  private readonly refreshTtlMs = 30_000;
+  private readonly refreshBudgetMs: number;
+  private readonly vectorBudgetMs: number;
+  private scanStartedMs = 0;
+  /** The embedding model is loading, so this answer came from keyword search alone. */
+  private embeddingWarming = false;
+  /** Windows still waiting to be vectorized after the last search gave up its budget. */
+  private vectorBacklog = 0;
   private readonly embeddingProvider: EmbeddingProvider;
   private readonly windowSize: number;
   private readonly windowStride: number;
@@ -144,6 +190,8 @@ export class SqliteHandoffIndex implements SessionService {
       options.embeddingProvider ?? new TransformersEmbeddingProvider(DEFAULT_EMBEDDING_MODEL);
     this.windowSize = Math.max(2, Math.floor(options.windowSize ?? DEFAULT_WINDOW_SIZE));
     this.windowStride = Math.max(1, Math.floor(options.windowStride ?? DEFAULT_WINDOW_STRIDE));
+    this.refreshBudgetMs = Math.max(0, options.refreshBudgetMs ?? DEFAULT_REFRESH_BUDGET_MS);
+    this.vectorBudgetMs = Math.max(0, options.vectorBudgetMs ?? DEFAULT_VECTOR_BUDGET_MS);
     this.initialized = this.initialize();
     // Attach a no-op handler so a failed open cannot become an unhandled
     // rejection (which would kill the process) before the first caller
@@ -228,6 +276,18 @@ export class SqliteHandoffIndex implements SessionService {
       return this.keywordSearch(trimmed, limit, toolFilter);
     }
 
+    // Loading the embedding model is a one-off that takes minutes on a cold
+    // cache. Hybrid is the default mode, so blocking it on that made the first
+    // search of a session look broken. Start the load, answer from keyword,
+    // and let the next search use the model. An explicit `vector` request is a
+    // different matter: there is no other route, so that one waits.
+    if (normalizedMode === "hybrid" && this.embeddingProvider.isReady?.() === false) {
+      this.embeddingProvider.warm?.();
+      this.embeddingWarming = true;
+      return this.keywordSearch(trimmed, limit, toolFilter);
+    }
+    this.embeddingWarming = false;
+
     try {
       const results = await this.semanticSearch(trimmed, limit, toolFilter, normalizedMode);
       clearSetting(this.getDb(), "last_error:embeddings");
@@ -302,6 +362,10 @@ export class SqliteHandoffIndex implements SessionService {
 
   async close(): Promise<void> {
     await this.initialized.catch(() => {});
+    // A scan may still be running because a caller stopped waiting for it.
+    // Closing the database underneath it would turn an ordinary shutdown into
+    // a write to a closed handle.
+    await this.whenScanSettled();
     this.db?.close();
     this.db = null;
   }
@@ -321,15 +385,73 @@ export class SqliteHandoffIndex implements SessionService {
     }
 
     if (!this.refreshPromise) {
-      this.refreshPromise = this.refreshNow().finally(() => {
+      const running = this.refreshNow().finally(() => {
         // Stamp the TTL on failure as well as success so a persistently
         // broken refresh backs off instead of re-running on every call.
         this.lastRefreshMs = Date.now();
         this.refreshPromise = null;
       });
+      // A caller may stop waiting on this promise, so it needs its own
+      // handler: an unhandled rejection would take the process down.
+      running.catch(() => {});
+      this.refreshPromise = running;
+      this.scanStartedMs = Date.now();
     }
 
-    await this.refreshPromise;
+    await this.waitWithBudget(this.refreshPromise);
+  }
+
+  /**
+   * Wait for the scan, but not past the budget. Nothing is cancelled on
+   * timeout — the scan keeps running and keeps committing — so a caller that
+   * stops waiting costs the index nothing, and the next call finds more.
+   */
+  private async waitWithBudget(scan: Promise<void>): Promise<void> {
+    if (this.refreshBudgetMs === 0) {
+      return;
+    }
+
+    // The budget is spent by the scan, not by each caller. Measuring it from
+    // when the scan started means one call pays the wait and the calls behind
+    // it return straight away with whatever has landed so far — rather than
+    // every call in a session paying the full budget over again.
+    const remaining = this.scanStartedMs + this.refreshBudgetMs - Date.now();
+    if (remaining <= 0) {
+      return;
+    }
+
+    let timer: NodeJS.Timeout | undefined;
+    const budget = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, remaining);
+      // Do not hold the process open just to enforce a deadline.
+      timer.unref?.();
+    });
+
+    try {
+      await Promise.race([scan.catch(() => {}), budget]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** True when a scan started by an earlier call is still running. */
+  isScanning(): boolean {
+    return this.refreshPromise !== null;
+  }
+
+  getIndexProgress(): IndexProgress {
+    return {
+      scanning: this.isScanning(),
+      vectorBacklog: this.vectorBacklog,
+      embeddingWarming: this.embeddingWarming,
+    };
+  }
+
+  /** Resolves when no scan is in flight. Used by close() and by tests. */
+  async whenScanSettled(): Promise<void> {
+    while (this.refreshPromise) {
+      await this.refreshPromise.catch(() => {});
+    }
   }
 
   private async refreshNow(): Promise<void> {
@@ -744,6 +866,7 @@ export class SqliteHandoffIndex implements SessionService {
         content_hash: string;
       }>;
 
+    this.vectorBacklog = 0;
     if (rows.length === 0) {
       return;
     }
@@ -761,8 +884,19 @@ export class SqliteHandoffIndex implements SessionService {
 
     // Bounded batches keep memory flat on a first-time index of a large
     // history, and each batch commits before the next one embeds.
-    const unitBatchSize = 64;
+    // Small enough that the budget below can actually bite. At 64 windows a
+    // single batch took 20-30s on the real index, so the deadline — checked
+    // between batches — could not stop a search from blowing straight past it.
+    const unitBatchSize = 8;
+    // Answer with the vectors that exist rather than making the caller wait
+    // for the whole corpus. Every batch below commits before the next starts,
+    // so an unfinished pass is progress, not wasted work.
+    const deadline = this.vectorBudgetMs > 0 ? Date.now() + this.vectorBudgetMs : Infinity;
     for (let start = 0; start < rows.length; start += unitBatchSize) {
+      if (Date.now() >= deadline) {
+        this.vectorBacklog = rows.length - start;
+        break;
+      }
       const batch = rows.slice(start, start + unitBatchSize);
       // Long windows are segmented to the model's sequence budget and
       // mean-pooled, so content beyond the window's opening still shapes
