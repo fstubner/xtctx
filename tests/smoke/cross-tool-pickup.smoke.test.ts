@@ -12,7 +12,7 @@
  * tools and loads the embedding model.
  */
 
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -31,7 +31,13 @@ describe("cross-tool pickup", () => {
   let services: ProjectServices;
 
   beforeAll(async () => {
-    const root = await mkdtemp(join(tmpdir(), "xtctx-pickup-"));
+    // realpath, because the product canonicalises its project root and the
+    // seeded stores must agree with it. CI temp directories are not canonical:
+    // macOS gives a symlink (/var -> /private/var) and Windows an 8.3 short
+    // path (RUNNER~1 -> runneradmin). Seeding against the raw path scopes
+    // every session to a root the scrapers then correctly reject — which is
+    // exactly how this failed on both, while passing on ubuntu and locally.
+    const root = await realpath(await mkdtemp(join(tmpdir(), "xtctx-pickup-")));
     sandboxRoot = root;
     home = join(root, "home");
     projectRoot = join(root, "project");
