@@ -5,6 +5,16 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.11.7](https://github.com/fstubner/xtctx/compare/xtctx-v0.11.6...xtctx-v0.11.7) (2026-08-20)
+
+
+### Bug Fixes
+
+* **canary:** distinguish "could not run" from "scraper is broken" ([3e5f13d](https://github.com/fstubner/xtctx/commit/3e5f13dd58d230397b79cec46c3c426444fb38cd))
+* **canary:** distinguish "could not run" from "scraper is broken" ([406e6bf](https://github.com/fstubner/xtctx/commit/406e6bff1d5f89669419a5f58ab1f2e78e791524))
+* **handoff:** rescale semantic scores per query so relevance outranks recency ([6a0a3a7](https://github.com/fstubner/xtctx/commit/6a0a3a7619379140899e5a53e2685cf790cd1b0f))
+* **handoff:** rescale semantic scores per query so relevance outranks recency ([8452ffd](https://github.com/fstubner/xtctx/commit/8452ffd2891a788dddbdd809944d9c94eff1caae))
+
 ## [0.11.6](https://github.com/fstubner/xtctx/compare/xtctx-v0.11.5...xtctx-v0.11.6) (2026-08-20)
 
 
