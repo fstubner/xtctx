@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.13.0](https://github.com/fstubner/xtctx/compare/xtctx-v0.12.0...xtctx-v0.13.0) (2026-08-20)
+
+
+### Features
+
+* **drift:** fingerprint the Antigravity store layout ([#119](https://github.com/fstubner/xtctx/issues/119)) ([8f1541a](https://github.com/fstubner/xtctx/commit/8f1541a13e0089bf33bd0c6b99ac3668a85308f2))
+
+
+### Bug Fixes
+
+* opencode transcripts were invisible; harden format fingerprints ([#117](https://github.com/fstubner/xtctx/issues/117)) ([eb5305a](https://github.com/fstubner/xtctx/commit/eb5305a5251b69e4a383ab99546840cd7c45150b))
+
 ## [0.12.0](https://github.com/fstubner/xtctx/compare/xtctx-v0.11.7...xtctx-v0.12.0) (2026-08-20)
 
 
