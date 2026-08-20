@@ -24,6 +24,14 @@ jobs:
       - name: Enable auto-merge for release PR
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
+          # Must be the PAT, not GITHUB_TOKEN: the merge this enables is
+          # attributed to whoever enabled it, and a push made with
+          # GITHUB_TOKEN triggers no further workflows. With the default
+          # token the release PR merged and then nothing ran — no
+          # release-please, so no release, so no publish. The chain stalled
+          # silently at the last step, which is the failure this whole
+          # workflow exists to automate away.
+          github-token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
           script: |
             const pr = context.payload.pull_request;
             if (!pr) {
