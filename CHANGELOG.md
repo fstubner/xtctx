@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.12.0](https://github.com/fstubner/xtctx/compare/xtctx-v0.11.7...xtctx-v0.12.0) (2026-08-20)
+
+
+### Features
+
+* **drift:** watch upstream releases and fingerprint real formats, without API spend ([f6bc848](https://github.com/fstubner/xtctx/commit/f6bc848d8ad6d9842c4ce427bf7eef4f9230d6f9))
+* **drift:** watch upstream releases and fingerprint real formats, without API spend ([994d111](https://github.com/fstubner/xtctx/commit/994d111e387374b7305add28ff8044da016a9dad))
+
 ## [0.11.7](https://github.com/fstubner/xtctx/compare/xtctx-v0.11.6...xtctx-v0.11.7) (2026-08-20)
 
 
