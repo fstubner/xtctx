@@ -100,3 +100,22 @@ jobs:
 
       - name: Package dry run
         run: npm pack --dry-run
+
+  # Aggregate gate. Branch protection on `main` requires a check named
+  # `test-and-build`, so that name has to keep reporting — splitting the old
+  # single job into `test` + `checks` silently removed it and would have
+  # blocked every future pull request, not just the one that made the change.
+  # Depending on the matrix here also makes each platform effectively
+  # required, without editing repository settings to do it.
+  test-and-build:
+    if: always()
+    needs: [test, checks]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify every job succeeded
+        run: |
+          echo "test=${{ needs.test.result }} checks=${{ needs.checks.result }}"
+          if [ "${{ needs.test.result }}" != "success" ] || [ "${{ needs.checks.result }}" != "success" ]; then
+            echo "One or more required jobs did not succeed." >&2
+            exit 1
+          fi
