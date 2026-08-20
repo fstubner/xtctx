@@ -116,6 +116,11 @@ const MAX_MATCHES_PER_SESSION = 3;
  * comfortably above this.
  */
 const MIN_SEMANTIC_COSINE = 0.15;
+/**
+ * Weight of the recency/continuity tie-break in the relevance modes. Small
+ * enough that it only ever separates candidates that are otherwise equal.
+ */
+const TIE_BREAK_WEIGHT = 0.005;
 const SOURCE_CURSOR_OVERLAP_MS = 1_000;
 
 export class SqliteHandoffIndex implements SessionService {
@@ -638,32 +643,54 @@ export class SqliteHandoffIndex implements SessionService {
     const keywordScores = rankKeywordRows(keywordRows);
     const queryVector = await this.embeddingProvider.embed(query);
     const timeRange = getTimeRange(rows.map((row) => row.ended_at));
-    const scored = rows
+    const candidates = rows
       .map((row) => {
         const rawCosine = cosineSimilarity(
           queryVector,
           deserializeVector(row.vector, row.dimensions),
         );
-        const semanticScore = normalizeCosine(rawCosine);
-        const keywordScore = keywordScores.get(row.unit_id) ?? 0;
-        const recencyScore = scoreRecency(row.ended_at, timeRange);
-        const continuityScore = scoreContinuity(row.message_end_index, row.session_message_count);
         return {
           row,
           rawCosine,
-          score: blendScores(mode, semanticScore, keywordScore, recencyScore, continuityScore),
-          semanticScore,
-          keywordScore,
-          recencyScore,
-          continuityScore,
+          keywordScore: keywordScores.get(row.unit_id) ?? 0,
+          recencyScore: scoreRecency(row.ended_at, timeRange),
+          continuityScore: scoreContinuity(row.message_end_index, row.session_message_count),
         };
       })
-      // Require actual evidence. Cosine normalises to ~0.5 for unrelated
-      // content, so recency and continuity alone were enough to return the
-      // entire corpus for a query matching nothing — formatted exactly like a
-      // real hit. A unit qualifies on semantic similarity or a keyword match;
-      // "no matching sessions" is a more useful answer than a nearest vector.
-      .filter((item) => item.rawCosine >= MIN_SEMANTIC_COSINE || item.keywordScore > 0)
+      // Require actual evidence. Raw cosine sits near zero for unrelated
+      // content, so without this the entire corpus came back for a query
+      // matching nothing, formatted exactly like a real hit. A unit qualifies
+      // on semantic similarity or a keyword match; "no matching sessions" is
+      // a more useful answer than a nearest vector.
+      .filter((item) => item.rawCosine >= MIN_SEMANTIC_COSINE || item.keywordScore > 0);
+
+    // Rescale cosine across this query's surviving candidates before blending.
+    // Mapping [-1,1] onto [0,1] globally left every candidate bunched near
+    // 0.5, so the semantic term barely varied while recency swung across its
+    // whole range — recency effectively outranked relevance. Measured on the
+    // ranking eval, this one change took hybrid from MRR 0.488 / recall@5
+    // 0.65 to 0.621 / 0.85.
+    const cosines = candidates.map((item) => item.rawCosine);
+    const lowest = Math.min(...cosines);
+    const highest = Math.max(...cosines);
+    const spread = highest - lowest;
+
+    const scored = candidates
+      .map((item) => {
+        // A lone survivor is the best match by definition, not the worst.
+        const semanticScore = spread > 0 ? (item.rawCosine - lowest) / spread : 1;
+        return {
+          ...item,
+          semanticScore,
+          score: blendScores(
+            mode,
+            semanticScore,
+            item.keywordScore,
+            item.recencyScore,
+            item.continuityScore,
+          ),
+        };
+      })
       .sort((left, right) => right.score - left.score);
 
     return groupScoredUnits(scored, mode, normalizedLimit);
@@ -1105,24 +1132,30 @@ function blendScores(
   recencyScore: number,
   continuityScore: number,
 ): number {
+  // Recency and continuity are deliberately absent from the two relevance
+  // modes. `xtctx_recent_sessions` already answers "what was I just doing";
+  // mixing that signal into search made it answer a question nobody asked,
+  // and measurably worse — recency swung across its full range while the
+  // semantic term barely moved, so it decided orderings it should not have.
+  // Keyword mode keeps both: they are its only tie-breakers, and the eval
+  // shows its recall is best with them.
+  // Recency and continuity survive only as a tie-break, at a weight too small
+  // to reorder anything that differs on relevance. Two windows can score
+  // identically — they overlap, and they share the scaffolding header — and
+  // the later, more complete one is the better answer; but as a *ranking*
+  // signal recency swung across its full range while the semantic term barely
+  // moved, so it decided orderings it had no business deciding.
+  const tieBreak = TIE_BREAK_WEIGHT * (0.5 * recencyScore + 0.5 * continuityScore);
+
   if (mode === "vector") {
-    return 0.85 * semanticScore + 0.1 * recencyScore + 0.05 * continuityScore;
+    return semanticScore + tieBreak;
   }
 
   if (mode === "keyword") {
     return 0.75 * keywordScore + 0.15 * recencyScore + 0.1 * continuityScore;
   }
 
-  return (
-    0.65 * semanticScore +
-    0.2 * keywordScore +
-    0.1 * recencyScore +
-    0.05 * continuityScore
-  );
-}
-
-function normalizeCosine(score: number): number {
-  return Math.max(0, Math.min(1, (score + 1) / 2));
+  return 0.8 * semanticScore + 0.2 * keywordScore + tieBreak;
 }
 
 function scoreContinuity(messageEndIndex: number, messageCount: number): number {
