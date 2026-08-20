@@ -46,7 +46,7 @@ jobs:
           github.event_name != 'workflow_dispatch' ||
           github.event.inputs.tool == 'all' ||
           github.event.inputs.tool == matrix.tool
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
 
       - name: Setup Node
         if: >
