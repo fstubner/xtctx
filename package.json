@@ -16,7 +16,7 @@
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "npm run clean && tsc",
     "dev": "tsx watch src/cli/index.ts",
-    "test": "vitest run --exclude=tests/smoke/** --exclude=tests/drift/**",
+    "test": "vitest run --exclude=tests/smoke/** --exclude=tests/drift/** --exclude=tests/eval/**",
     "test:security": "vitest run tests/security",
     "test:integration": "vitest run tests/integration",
     "test:drift": "vitest run tests/drift",
@@ -30,7 +30,9 @@
     "landing:preview": "npm --prefix landing run preview",
     "prepack": "npm run build",
     "smoke:cli": "node dist/src/cli/index.js --help",
-    "verify:release": "npm run lint && npm test && npm run test:security && npm run security:checklist && npm audit --omit=dev && npm --prefix landing audit && npm run test:drift && npm run build && npm pack --dry-run && npm run demo:public && npm run landing:build && npm run smoke:cli"
+    "verify:release": "npm run lint && npm test && npm run test:security && npm run security:checklist && npm audit --omit=dev && npm --prefix landing audit && npm run test:drift && npm run build && npm pack --dry-run && npm run demo:public && npm run landing:build && npm run smoke:cli",
+    "test:eval": "vitest run tests/eval",
+    "test:smoke": "vitest run tests/smoke"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",

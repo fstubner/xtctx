@@ -48,6 +48,12 @@ jobs:
       - name: Drift canary
         run: npm run test:drift
 
+      # Seeds every tool's native store at the path the product computes for
+      # this platform, so a scraper that silently matches nothing on macOS or
+      # Windows fails here instead of in someone's install.
+      - name: Cross-tool pickup smoke
+        run: npm run test:smoke
+
       - name: Build package
         run: npm run build
 
@@ -94,6 +100,13 @@ jobs:
         # The landing site has only devDependencies (Astro is a build-time
         # dependency of a static site), so --omit=dev would audit nothing.
         run: npm --prefix landing audit
+
+      # Ranking quality gate. Single platform on purpose: the baseline is
+      # derived from float embeddings, so its portability across runners is
+      # unproven — running it in one place keeps the signal honest until that
+      # is established.
+      - name: Retrieval ranking eval
+        run: npm run test:eval
 
       - name: Build landing
         run: npm --prefix landing run build
