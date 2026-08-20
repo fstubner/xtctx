@@ -5,6 +5,15 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.11.6](https://github.com/fstubner/xtctx/compare/xtctx-v0.11.5...xtctx-v0.11.6) (2026-08-20)
+
+
+### Tests
+
+* add a retrieval ranking eval and a cross-tool pickup smoke ([7709330](https://github.com/fstubner/xtctx/commit/77093303c6c0f610fd72ff32da87aaaca9e98b80))
+* add retrieval ranking eval and cross-tool pickup smoke ([1a006bd](https://github.com/fstubner/xtctx/commit/1a006bdf02b9a284be523a3b41f1138d29bf2160))
+* **smoke:** canonicalise the sandbox root before seeding ([73a4600](https://github.com/fstubner/xtctx/commit/73a4600ff53308c8fb7e907c7f26610ae100dfac))
+
 ## [0.11.5](https://github.com/fstubner/xtctx/compare/xtctx-v0.11.4...xtctx-v0.11.5) (2026-08-20)
 
 
