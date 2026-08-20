@@ -57,8 +57,9 @@ no durable memory, no write-back tools, no cloud anything.
   what a coding agent's MCP config can express.
 - Transcript stores belong to other tools: all reads are read-only
   (`readonly` + `fileMustExist` for SQLite stores) and must survive those
-  tools changing their formats — drift is detected by tests and a nightly
-  canary, and degrades with warnings rather than silent data loss.
+  tools changing their formats — drift is detected by tests, committed format
+  fingerprints and an upstream release watch, with an on-demand canary against
+  the real CLIs, and degrades with warnings rather than silent data loss.
 - Config files written during setup belong to other tools too: writes are
   atomic, merge-preserving, and never clobber unparsable user content.
 - Transcript content handed to a model is untrusted data; the MCP layer

@@ -108,7 +108,7 @@ startup hooks; others receive MCP config plus managed instructions only.
 
 - xtctx is local-only. It does not upload transcripts or run telemetry.
 - Transcript formats belong to each upstream tool and can drift. The drift
-  tests and nightly canary exist to catch parser breakage, but `xtctx status`
+  tests and format fingerprints exist to catch parser breakage, but `xtctx status`
   is still the source of truth for your machine.
 - Semantic search is lazy. The first semantic or hybrid query may initialize
   the local embedding provider and create local vectors; hybrid search falls

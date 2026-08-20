@@ -45,14 +45,19 @@ never touched and consecutive runs don't leak state.
 
 ## CI
 
-The workflow `.github/workflows/drift-canary.yml` runs:
+The workflow `.github/workflows/drift-canary.yml` runs on manual
+`workflow_dispatch` only, optionally scoped to a single tool.
 
-- Nightly at 03:00 UTC.
-- On manual `workflow_dispatch` (optionally scoped to a single tool).
+**Manual, not nightly, because every run spends real API credits.** It used to
+run at 03:00 UTC whether or not anything upstream had changed, which paid for a
+signal that only matters after a tool ships a release. The nightly watching is
+now done for free by `upstream-watch` (see `RELEASE.md`), which files an issue
+when a tracked tool releases; this canary is the stronger check a human reaches
+for once that issue exists.
 
 It's a matrix with one job per tool (`fail-fast: false`) so one broken scraper
-doesn't mask the others. Deliberately **not** part of `ci.yml` — this is a
-nightly drift signal, not a per-PR gate.
+doesn't mask the others. Deliberately **not** part of `ci.yml` — real-API
+dependencies must not gate PRs.
 
 ### Required GitHub Secrets
 

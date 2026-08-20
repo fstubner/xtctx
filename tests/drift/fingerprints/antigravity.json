@@ -32,7 +32,6 @@
     ".pb"
   ],
   "artifactMetadata": {
-    "filesSampled": 30,
     "fields": [
       "requestFeedback: boolean",
       "summary: string",

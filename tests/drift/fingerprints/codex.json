@@ -1,7 +1,5 @@
 {
   "kind": "jsonl",
-  "filesSampled": 30,
-  "recordsSampled": 6030,
   "recordTypes": {
     "compacted": [
       "payload.first_window_id: string",
