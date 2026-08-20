@@ -174,6 +174,30 @@ describe("SqliteHandoffIndex", () => {
     await index.close();
   });
 
+  it("does not zero the score when only one candidate survives", async () => {
+    // Semantic scores are rescaled across a query's candidates, which maps
+    // the weakest to 0. With a single survivor there is nothing to rescale
+    // against, and treating it as the weakest would score the only match at
+    // zero and drop it below anything else.
+    const scraper = new FixtureScraper([
+      chunk("solo-session", 0, "user", "sqlite vector handoff"),
+      chunk("solo-session", 1, "assistant", "chronological windows"),
+    ]);
+    const index = new SqliteHandoffIndex(
+      join(tempDir, "xtctx.db"),
+      tempDir,
+      [{ tool: "codex", scraper }],
+      { embeddingProvider: new FixtureEmbeddingProvider(), windowSize: 8, windowStride: 8 },
+    );
+
+    const results = await index.searchSessions("sqlite vector", 5, undefined, "vector");
+
+    expect(results).toHaveLength(1);
+    expect(results[0].score ?? 0).toBeGreaterThan(0);
+
+    await index.close();
+  });
+
   it("returns nothing for a hybrid query with no relevance to the corpus", async () => {
     // Cosine similarity normalises to ~0.5 for unrelated content, so with
     // recency and continuity added every session scored 0.49-0.76 and was

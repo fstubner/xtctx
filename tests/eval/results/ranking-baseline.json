@@ -1,15 +1,15 @@
 {
   "hybrid": {
     "queries": 20,
-    "mrr": 0.484,
-    "recallAt5": 0.65,
-    "top1": 0.3
+    "mrr": 0.613,
+    "recallAt5": 0.85,
+    "top1": 0.5
   },
   "vector": {
     "queries": 20,
-    "mrr": 0.426,
-    "recallAt5": 0.65,
-    "top1": 0.3
+    "mrr": 0.552,
+    "recallAt5": 0.7,
+    "top1": 0.45
   },
   "keyword": {
     "queries": 20,
