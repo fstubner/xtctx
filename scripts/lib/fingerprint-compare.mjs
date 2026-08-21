@@ -46,6 +46,19 @@ export function normalizeForCompare(text) {
   return text.replace(/\r\n/g, "\n");
 }
 
+/**
+ * Files SQLite writes beside a database while it is open.
+ *
+ * Whether these exist depends on whether the tool happened to be running when
+ * the fingerprint was captured, not on its format. Recording them reports a
+ * changed format for having Antigravity open — and accepting that with
+ * `--write` inverts the alarm, so it then reports a change for having it
+ * closed. Neither reading is about a format.
+ */
+export function isTransientSidecar(name) {
+  return /\.[A-Za-z0-9]+-(wal|shm|journal)$/.test(name);
+}
+
 /** True when two serialized fingerprints describe a different shape. */
 export function fingerprintsDiffer(previousText, nextText) {
   return normalizeForCompare(previousText) !== normalizeForCompare(nextText);
