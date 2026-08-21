@@ -6,7 +6,9 @@ import {
   AntigravityScraper,
   parseAntigravityRuntimeSteps,
   listConversationFileIds,
+  mapWithConcurrency,
   parsePosixListeningPorts,
+  shouldFetchTrajectory,
   parseWindowsListeningPorts,
   type AntigravityRuntimeClient,
   type AntigravityRuntimeConversation,
@@ -471,5 +473,77 @@ describe("listConversationFileIds", () => {
     await write("notes.txt", "ddd.db");
 
     expect(await listConversationFileIds(dir)).toEqual(["ddd"]);
+  });
+});
+
+/**
+ * Fetching a trajectory pulls its whole transcript over the wire with a 30s
+ * timeout. Doing that for all 155 sessions on this machine and filtering
+ * afterwards meant most of the work — and most of the transcripts — belonged
+ * to other projects.
+ */
+describe("shouldFetchTrajectory", () => {
+  const projectRoot = "/home/dev/projects/xtctx";
+
+  function summaryFor(...uris: string[]) {
+    return { workspaces: uris.map((uri) => ({ workspaceFolderAbsoluteUri: uri })) };
+  }
+
+  it("fetches a trajectory whose workspace is this project", () => {
+    expect(
+      shouldFetchTrajectory(summaryFor("file:///home/dev/projects/xtctx"), projectRoot),
+    ).toBe(true);
+  });
+
+  it("skips one whose workspace is a different project", () => {
+    // Not just cheaper — that transcript is never pulled over the wire at all.
+    expect(
+      shouldFetchTrajectory(summaryFor("file:///home/dev/projects/netscli"), projectRoot),
+    ).toBe(false);
+  });
+
+  it("fetches when no workspace is recorded, because that rules nothing out", () => {
+    // The message bodies may carry the only path evidence there is, and on
+    // this machine 83 of 155 summaries name no workspace.
+    expect(shouldFetchTrajectory({ summary: "[on-disk] abc12345" }, projectRoot)).toBe(true);
+  });
+
+  it("fetches everything when the scraper is not scoped to a project", () => {
+    expect(shouldFetchTrajectory(summaryFor("file:///somewhere/else"), undefined)).toBe(true);
+  });
+});
+
+describe("mapWithConcurrency", () => {
+  it("keeps results in input order regardless of completion order", async () => {
+    const results = await mapWithConcurrency([30, 10, 20, 0], 3, async (delay: number) => {
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      return delay;
+    });
+
+    expect(results).toEqual([30, 10, 20, 0]);
+  });
+
+  it("keeps at most the requested number in flight", async () => {
+    let running = 0;
+    let peak = 0;
+
+    await mapWithConcurrency(Array.from({ length: 12 }, (_, i) => i), 4, async () => {
+      running += 1;
+      peak = Math.max(peak, running);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      running -= 1;
+      return null;
+    });
+
+    expect(peak).toBeLessThanOrEqual(4);
+  });
+
+  it("loses only the item that failed, not the rest of the scan", async () => {
+    const results = await mapWithConcurrency([1, 2, 3], 2, async (value: number) => {
+      if (value === 2) throw new Error("language server hung up");
+      return value;
+    });
+
+    expect(results).toEqual([1, null, 3]);
   });
 });
