@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.14.2](https://github.com/fstubner/xtctx/compare/xtctx-v0.14.1...xtctx-v0.14.2) (2026-08-21)
+
+
+### Bug Fixes
+
+* **claude-code:** treat atis-latch as bookkeeping, not drift ([#128](https://github.com/fstubner/xtctx/issues/128)) ([4ee257a](https://github.com/fstubner/xtctx/commit/4ee257a82358ef52be6c05a31cca754dc11aee50))
+
 ## [0.14.1](https://github.com/fstubner/xtctx/compare/xtctx-v0.14.0...xtctx-v0.14.1) (2026-08-21)
 
 
