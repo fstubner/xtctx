@@ -193,6 +193,34 @@ describe("ClaudeCodeScraper", () => {
     expect(chunks[0].metadata.gitBranch).toBeUndefined();
   });
 
+  /**
+   * Caught by `npm run capture:formats` the day it appeared: Claude Code
+   * started writing `{"type":"atis-latch","atis":"","sessionId":"..."}`, 18 of
+   * them in one transcript. Bookkeeping with no conversational content, like
+   * `mode` before it — but unknown types warn, so without this it reports
+   * drift on every scan forever.
+   */
+  it("does not treat an atis-latch record as drift", async () => {
+    const warnings: string[] = [];
+    const origWarn = console.warn;
+    console.warn = (...args) => warnings.push(args.join(" "));
+    try {
+      const projectDir = join(tempDir, "atis-records");
+      await mkdir(projectDir, { recursive: true });
+      await writeFile(
+        join(projectDir, "atis.jsonl"),
+        '{"type":"atis-latch","atis":"","sessionId":"abc"}\n',
+      );
+
+      const chunks: ClaudeCodeChunk[] = [];
+      for await (const chunk of scraper.fullSync()) chunks.push(chunk);
+
+      expect(warnings).toEqual([]);
+    } finally {
+      console.warn = origWarn;
+    }
+  });
+
   it("scrapes conversation chunks from JSONL", async () => {
     const chunks: ClaudeCodeChunk[] = [];
 
