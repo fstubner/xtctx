@@ -154,6 +154,34 @@ describe("CursorScraper", () => {
     expect(chunks[0].content).toBe("cursor second");
   });
 
+  /**
+   * Detection answers "is Cursor installed", not "does it hold anything for
+   * this project" — which is what every other scraper's detect() means, and
+   * what `xtctx status` reports. Deciding it by opening each workspace to test
+   * project membership cost 3.2s per call on a real machine, and `getStatus()`
+   * runs detection for all seven scrapers on every call.
+   */
+  it("detects an installed Cursor even when no workspace matches this project", async () => {
+    await writeFile(
+      join(workspaceDir, "workspace.json"),
+      JSON.stringify({ folder: "file:///somewhere/else/entirely" }),
+      "utf-8",
+    );
+
+    const scoped = new CursorScraper(
+      join(rootDir, "workspaceStorage"),
+      stateDir,
+      join("/not", "this", "project"),
+    );
+
+    expect(await scoped.detect()).toBe(true);
+
+    // Installed, but nothing here belongs to this project.
+    const chunks: CursorChunk[] = [];
+    for await (const chunk of scoped.fullSync()) chunks.push(chunk);
+    expect(chunks).toEqual([]);
+  });
+
   it("limits project-scoped scrapers to matching Cursor workspace folders", async () => {
     await writeFile(
       join(workspaceDir, "workspace.json"),
