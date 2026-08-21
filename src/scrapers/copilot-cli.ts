@@ -138,6 +138,8 @@ export class CopilotCliScraper extends AbstractScraper<CopilotCliChunk> {
     let lineNo = 0;
     // null = no session.start context seen yet; only consulted when scoped.
     let projectMatch: boolean | null = null;
+    let gitBranch: string | undefined;
+    let gitCommit: string | undefined;
 
     for await (const line of reader) {
       lineNo++;
@@ -165,6 +167,16 @@ export class CopilotCliScraper extends AbstractScraper<CopilotCliChunk> {
           1,
         );
         continue;
+      }
+
+      if (event.type === "session.start") {
+        // Recorded by the CLI at session start, so it is the branch the work
+        // happened on rather than whatever is checked out at index time.
+        const context = isRecord(event.data) ? event.data.context : undefined;
+        if (isRecord(context)) {
+          gitBranch = toOptionalString(context.branch);
+          gitCommit = toOptionalString(context.headCommit);
+        }
       }
 
       if (this.projectRoot && event.type === "session.start") {
@@ -249,6 +261,8 @@ export class CopilotCliScraper extends AbstractScraper<CopilotCliChunk> {
           tokenEstimate: estimateTokens(content),
           referencedFiles: [],
           eventType,
+          gitBranch,
+          gitCommit,
         },
       };
       messageIndex++;
@@ -370,6 +384,11 @@ function extractContent(event: Record<string, unknown>): string | undefined {
   }
 
   return undefined;
+}
+
+/** A non-empty string, or nothing. An empty branch is no branch. */
+function toOptionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

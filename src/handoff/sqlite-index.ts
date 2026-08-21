@@ -85,6 +85,8 @@ interface SessionRow {
   message_count: number;
   preview: string | null;
   source_path: string | null;
+  git_branch: string | null;
+  git_commit: string | null;
 }
 
 interface MessageRow {
@@ -134,7 +136,7 @@ interface ToolCountRow {
  * version mismatch (older or newer) triggers a full rebuild rather than a
  * migration — the transcript stores remain authoritative.
  */
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 const DEFAULT_LIMIT = 5;
 const MAX_LIMIT = 100;
@@ -224,31 +226,70 @@ export class SqliteHandoffIndex implements SessionService {
     this.initialized.catch(() => {});
   }
 
-  async listRecentSessions(limit: number, toolFilter?: string[]): Promise<SessionSummary[]> {
+  async listRecentSessions(
+    limit: number,
+    toolFilter?: string[],
+    branchFilter?: string[],
+  ): Promise<SessionSummary[]> {
     await this.refresh({ toolFilter });
     const db = this.getDb();
     const normalizedLimit = normalizeLimit(limit, DEFAULT_LIMIT);
     const filters = normalizeToolFilter(toolFilter);
-    const where = filters.length > 0 ? `WHERE tool IN (${placeholders(filters.length)})` : "";
+    const branches = normalizeToolFilter(branchFilter);
+    const clauses: string[] = [];
+    if (filters.length > 0) {
+      clauses.push(`tool IN (${placeholders(filters.length)})`);
+    }
+    if (branches.length > 0) {
+      // A session with no recorded branch is not evidence that it was on the
+      // requested one, so it is excluded rather than assumed in.
+      clauses.push(`git_branch IN (${placeholders(branches.length)})`);
+    }
+    const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
     const rows = db
       .prepare(
-        `SELECT session_ref, tool, started_at, last_activity_at, message_count, preview, source_path
+        `SELECT session_ref, tool, started_at, last_activity_at, message_count, preview, source_path,
+                git_branch, git_commit
          FROM sessions
          ${where}
          ORDER BY last_activity_at DESC
          LIMIT ?`,
       )
-      .all(...filters, normalizedLimit) as SessionRow[];
+      .all(...filters, ...branches, normalizedLimit) as SessionRow[];
 
     return rows.map(formatSessionRow);
   }
 
+  /**
+   * What is already indexed, with no scan and no waiting.
+   *
+   * The SessionStart hook runs before the user has typed anything, so it
+   * cannot afford the scan `listRecentSessions` starts — even bounded, that
+   * is four seconds added to every agent startup. Priming with slightly
+   * stale context instantly beats priming with fresh context late.
+   */
+  async listIndexedSessions(limit: number): Promise<SessionSummary[]> {
+    await this.initialized;
+    const db = this.getDb();
+    const rows = db
+      .prepare(
+        `SELECT session_ref, tool, started_at, last_activity_at, message_count, preview, source_path,
+                git_branch, git_commit
+         FROM sessions
+         ORDER BY last_activity_at DESC
+         LIMIT ?`,
+      )
+      .all(normalizeLimit(limit, DEFAULT_LIMIT)) as SessionRow[];
+
+    return rows.map(formatSessionRow);
+  }
   async getSessionByRef(sessionRef: string): Promise<SessionSummary | null> {
     await this.refresh({ sessionRef });
     const db = this.getDb();
     const row = db
       .prepare(
-        `SELECT session_ref, tool, started_at, last_activity_at, message_count, preview, source_path
+        `SELECT session_ref, tool, started_at, last_activity_at, message_count, preview, source_path,
+                git_branch, git_commit
          FROM sessions
          WHERE session_ref = ?`,
       )
@@ -289,6 +330,7 @@ export class SqliteHandoffIndex implements SessionService {
     limit: number,
     toolFilter?: string[],
     mode: SessionSearchMode = "hybrid",
+    branchFilter?: string[],
   ): Promise<SessionSummary[]> {
     await this.refresh({ toolFilter });
     const trimmed = query.trim();
@@ -298,7 +340,7 @@ export class SqliteHandoffIndex implements SessionService {
 
     const normalizedMode = normalizeSearchMode(mode);
     if (normalizedMode === "keyword") {
-      return this.keywordSearch(trimmed, limit, toolFilter);
+      return this.keywordSearch(trimmed, limit, toolFilter, branchFilter);
     }
 
     // Loading the embedding model is a one-off that takes minutes on a cold
@@ -309,12 +351,18 @@ export class SqliteHandoffIndex implements SessionService {
     if (normalizedMode === "hybrid" && this.embeddingProvider.isReady?.() === false) {
       this.embeddingProvider.warm?.();
       this.embeddingWarming = true;
-      return this.keywordSearch(trimmed, limit, toolFilter);
+      return this.keywordSearch(trimmed, limit, toolFilter, branchFilter);
     }
     this.embeddingWarming = false;
 
     try {
-      const results = await this.semanticSearch(trimmed, limit, toolFilter, normalizedMode);
+      const results = await this.semanticSearch(
+        trimmed,
+        limit,
+        toolFilter,
+        normalizedMode,
+        branchFilter,
+      );
       clearSetting(this.getDb(), "last_error:embeddings");
       return results;
     } catch (error) {
@@ -325,7 +373,7 @@ export class SqliteHandoffIndex implements SessionService {
         const message = error instanceof Error ? error.message : String(error);
         setSetting(this.getDb(), "last_error:embeddings", message);
         process.stderr.write(`xtctx: semantic search unavailable, using keyword only (${message})\n`);
-        return this.keywordSearch(trimmed, limit, toolFilter);
+        return this.keywordSearch(trimmed, limit, toolFilter, branchFilter);
       }
       throw error;
     }
@@ -558,6 +606,8 @@ export class SqliteHandoffIndex implements SessionService {
         chunk.tool,
         chunk.sessionId,
         this.projectRoot,
+        chunk.metadata?.gitBranch ?? null,
+        chunk.metadata?.gitCommit ?? null,
         timestamp,
         timestamp,
         sourcePointer,
@@ -678,9 +728,9 @@ export class SqliteHandoffIndex implements SessionService {
     const db = this.getDb();
     const upsertSession = db.prepare(
       `INSERT INTO sessions
-       (session_ref, tool, source_session_id, project_root, started_at, last_activity_at,
-        message_count, preview, source_path, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, 0, NULL, ?, ?)
+       (session_ref, tool, source_session_id, project_root, git_branch, git_commit,
+        started_at, last_activity_at, message_count, preview, source_path, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?)
        ON CONFLICT(session_ref) DO UPDATE SET
          started_at = CASE
            WHEN excluded.started_at < started_at THEN excluded.started_at
@@ -690,6 +740,10 @@ export class SqliteHandoffIndex implements SessionService {
            WHEN excluded.last_activity_at > last_activity_at THEN excluded.last_activity_at
            ELSE last_activity_at
          END,
+         -- First non-null wins: a session keeps the branch it started on
+         -- even if later records omit it.
+         git_branch = COALESCE(git_branch, excluded.git_branch),
+         git_commit = COALESCE(git_commit, excluded.git_commit),
          source_path = COALESCE(source_path, excluded.source_path),
          updated_at = excluded.updated_at`,
     );
@@ -752,8 +806,9 @@ export class SqliteHandoffIndex implements SessionService {
     query: string,
     limit: number,
     toolFilter?: string[],
+    branchFilter?: string[],
   ): Promise<SessionSummary[]> {
-    const rows = this.queryKeywordUnits(query, limit, toolFilter);
+    const rows = this.queryKeywordUnits(query, limit, toolFilter, branchFilter);
     // Rank by BM25 position so relevance, not recency, dominates ordering.
     return groupUnits(rows, rankKeywordRows(rows), "keyword", normalizeLimit(limit, DEFAULT_LIMIT));
   }
@@ -763,6 +818,7 @@ export class SqliteHandoffIndex implements SessionService {
     limit: number,
     toolFilter: string[] | undefined,
     mode: Exclude<SessionSearchMode, "keyword">,
+    branchFilter?: string[],
   ): Promise<SessionSummary[]> {
     const normalizedLimit = normalizeLimit(limit, DEFAULT_LIMIT);
     await this.ensureVectors(toolFilter);
@@ -770,6 +826,11 @@ export class SqliteHandoffIndex implements SessionService {
     const db = this.getDb();
     const filters = normalizeToolFilter(toolFilter);
     const toolWhere = filters.length > 0 ? `AND u.tool IN (${placeholders(filters.length)})` : "";
+    const branches = normalizeToolFilter(branchFilter);
+    // Sessions with no recorded branch are excluded rather than assumed in:
+    // no branch is not evidence of this branch.
+    const branchWhere =
+      branches.length > 0 ? `AND s.git_branch IN (${placeholders(branches.length)})` : "";
     const rows = db
       .prepare(
         `${retrievalUnitSelect()},
@@ -778,15 +839,16 @@ export class SqliteHandoffIndex implements SessionService {
          FROM retrieval_units u
          JOIN retrieval_unit_vectors v ON v.unit_id = u.id
          JOIN sessions s ON s.session_ref = u.session_ref
-         WHERE v.model = ? ${toolWhere}`,
+         WHERE v.model = ? ${toolWhere} ${branchWhere}`,
       )
-      .all(this.embeddingProvider.model, ...filters) as VectorUnitRow[];
+      .all(this.embeddingProvider.model, ...filters, ...branches) as VectorUnitRow[];
 
     if (rows.length === 0) {
       return [];
     }
 
-    const keywordRows = mode === "hybrid" ? this.queryKeywordUnits(query, limit, toolFilter) : [];
+    const keywordRows =
+      mode === "hybrid" ? this.queryKeywordUnits(query, limit, toolFilter, branchFilter) : [];
     const keywordScores = rankKeywordRows(keywordRows);
     const queryVector = await this.embeddingProvider.embed(query);
     const timeRange = getTimeRange(rows.map((row) => row.ended_at));
@@ -867,6 +929,7 @@ export class SqliteHandoffIndex implements SessionService {
     query: string,
     limit: number,
     toolFilter?: string[],
+    branchFilter?: string[],
   ): RetrievalUnitRow[] {
     const ftsQuery = toFtsQuery(query);
     if (!ftsQuery) {
@@ -877,17 +940,22 @@ export class SqliteHandoffIndex implements SessionService {
     const normalizedLimit = normalizeLimit(limit, DEFAULT_LIMIT);
     const filters = normalizeToolFilter(toolFilter);
     const toolWhere = filters.length > 0 ? `AND u.tool IN (${placeholders(filters.length)})` : "";
+    const branches = normalizeToolFilter(branchFilter);
+    // Sessions with no recorded branch are excluded rather than assumed in:
+    // no branch is not evidence of this branch.
+    const branchWhere =
+      branches.length > 0 ? `AND s.git_branch IN (${placeholders(branches.length)})` : "";
     return db
       .prepare(
         `${retrievalUnitSelect()}
          FROM retrieval_units_fts f
          JOIN retrieval_units u ON u.id = f.unit_id
          JOIN sessions s ON s.session_ref = u.session_ref
-         WHERE retrieval_units_fts MATCH ? ${toolWhere}
+         WHERE retrieval_units_fts MATCH ? ${toolWhere} ${branchWhere}
          ORDER BY bm25(retrieval_units_fts), u.ended_at DESC
          LIMIT ?`,
       )
-      .all(ftsQuery, ...filters, normalizedLimit * MAX_MATCHES_PER_SESSION) as RetrievalUnitRow[];
+      .all(ftsQuery, ...filters, ...branches, normalizedLimit * MAX_MATCHES_PER_SESSION) as RetrievalUnitRow[];
   }
 
   private async ensureVectors(toolFilter?: string[]): Promise<void> {
@@ -1059,6 +1127,8 @@ function createSchema(db: DatabaseHandle): void {
       tool TEXT NOT NULL,
       source_session_id TEXT NOT NULL,
       project_root TEXT NOT NULL,
+      git_branch TEXT,
+      git_commit TEXT,
       started_at TEXT NOT NULL,
       last_activity_at TEXT NOT NULL,
       message_count INTEGER NOT NULL DEFAULT 0,
@@ -1153,6 +1223,8 @@ function formatSessionRow(row: SessionRow): SessionSummary {
     message_count: row.message_count,
     preview: row.preview ?? undefined,
     source_path: row.source_path ?? undefined,
+    git_branch: row.git_branch ?? undefined,
+    git_commit: row.git_commit ?? undefined,
   };
 }
 

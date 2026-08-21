@@ -41,6 +41,12 @@ export function buildToolDefinitions(): Tool[] {
             items: { type: "string" },
             description: "Optional tool ids to include",
           },
+          branch_filter: {
+            type: "array",
+            items: { type: "string" },
+            description:
+              "Optional git branches to include, as recorded by the tool at session time. Sessions from tools that record no branch are excluded when this is set.",
+          },
           format: {
             type: "string",
             enum: ["markdown", "json"],
@@ -80,6 +86,12 @@ export function buildToolDefinitions(): Tool[] {
             type: "array",
             items: { type: "string" },
             description: "Optional tool ids to include",
+          },
+          branch_filter: {
+            type: "array",
+            items: { type: "string" },
+            description:
+              "Optional git branches to include, as recorded by the tool at session time. Sessions from tools that record no branch are excluded when this is set.",
           },
           mode: {
             type: "string",
@@ -125,6 +137,12 @@ export function buildToolDefinitions(): Tool[] {
             type: "array",
             items: { type: "string" },
             description: "Optional tool ids to include",
+          },
+          branch_filter: {
+            type: "array",
+            items: { type: "string" },
+            description:
+              "Optional git branches to include, as recorded by the tool at session time. Sessions from tools that record no branch are excluded when this is set.",
           },
           limit: { type: "number", description: "Max recent sessions. Default: 5" },
           correlation_id: {

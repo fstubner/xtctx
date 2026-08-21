@@ -3,6 +3,7 @@ import type { SessionSearchMode, SessionService } from "../../handoff/types.js";
 interface RecentSessionsParams {
   limit?: number;
   tool_filter?: string[];
+  branch_filter?: string[];
   format?: "markdown" | "json";
 }
 
@@ -18,6 +19,7 @@ interface SearchSessionsParams {
   limit?: number;
   tool_filter?: string[];
   mode?: SessionSearchMode;
+  branch_filter?: string[];
   format?: "markdown" | "json";
 }
 
@@ -34,7 +36,7 @@ export function createRecentSessionsHandler(service: SessionService) {
     const params = raw as unknown as RecentSessionsParams;
     const limit = numberOrDefault(params.limit, 5);
     const format = params.format ?? "markdown";
-    const sessions = await service.listRecentSessions(limit, params.tool_filter);
+    const sessions = await service.listRecentSessions(limit, params.tool_filter, params.branch_filter);
 
     if (format === "json") {
       return { sessions, indexing: service.getIndexProgress?.() };
@@ -70,7 +72,13 @@ export function createSearchSessionsHandler(service: SessionService) {
     const limit = numberOrDefault(params.limit, 5);
     const mode = normalizeSearchMode(params.mode);
     const format = params.format ?? "markdown";
-    const sessions = await service.searchSessions(query, limit, params.tool_filter, mode);
+    const sessions = await service.searchSessions(
+      query,
+      limit,
+      params.tool_filter,
+      mode,
+      params.branch_filter,
+    );
 
     if (format === "json") {
       return { query, mode, sessions, indexing: service.getIndexProgress?.() };
@@ -132,6 +140,12 @@ function formatRecentSessionsMarkdown(
     lines.push(`- Started: ${session.started_at}`);
     lines.push(`- Last activity: ${session.last_activity_at}`);
     lines.push(`- Messages: ${session.message_count}`);
+    if (session.git_branch) {
+      // The branch the session ran on, from the transcript — not from the
+      // working tree now, which is very often a different branch.
+      const commit = session.git_commit ? ` @ ${session.git_commit.slice(0, 8)}` : "";
+      lines.push(`- Branch: ${inlineSafe(session.git_branch)}${commit}`);
+    }
     if (typeof session.score === "number") {
       lines.push(`- Score: ${session.score.toFixed(3)} (${session.retrieval ?? "hybrid"})`);
     }

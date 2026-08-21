@@ -756,3 +756,106 @@ describe("search scores mean similarity", () => {
     expect(await searchWith(0.2)).toEqual([]);
   });
 });
+
+/**
+ * Which branch a session ran on is recorded by the tool at the time. Asking
+ * git during indexing would answer for today instead — indexing happens long
+ * after the session, often after a branch switch — so the index carries what
+ * the transcript said and nothing else.
+ */
+describe("git provenance", () => {
+  let tempDir = "";
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "xtctx-git-"));
+  });
+
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  function branchChunk(sessionId: string, index: number, gitBranch?: string): ConversationChunk {
+    const base = chunk(sessionId, index, "user", `work item ${index}`);
+    return { ...base, metadata: { ...base.metadata, gitBranch, gitCommit: gitBranch && "abc1234" } };
+  }
+
+  it("reports the branch the session recorded", async () => {
+    const index = new SqliteHandoffIndex(
+      join(tempDir, "git.db"),
+      tempDir,
+      [{ tool: "codex", scraper: new FixtureScraper([branchChunk("on-branch", 0, "feat/thing")]) }],
+      { refreshBudgetMs: 5_000 },
+    );
+
+    const [session] = await index.listRecentSessions(5);
+
+    expect(session.git_branch).toBe("feat/thing");
+    expect(session.git_commit).toBe("abc1234");
+
+    await index.close();
+  });
+
+  it("leaves it unset for a tool that does not record one", async () => {
+    const index = new SqliteHandoffIndex(
+      join(tempDir, "nogit.db"),
+      tempDir,
+      [{ tool: "codex", scraper: new FixtureScraper([branchChunk("no-branch", 0)]) }],
+      { refreshBudgetMs: 5_000 },
+    );
+
+    const [session] = await index.listRecentSessions(5);
+
+    expect(session.git_branch).toBeUndefined();
+
+    await index.close();
+  });
+
+  it("filters to the branches asked for", async () => {
+    const index = new SqliteHandoffIndex(
+      join(tempDir, "filter.db"),
+      tempDir,
+      [
+        {
+          tool: "codex",
+          scraper: new FixtureScraper([
+            branchChunk("on-main", 0, "main"),
+            branchChunk("on-feature", 1, "feat/thing"),
+            branchChunk("no-branch-at-all", 2),
+          ]),
+        },
+      ],
+      { refreshBudgetMs: 5_000 },
+    );
+
+    const filtered = await index.listRecentSessions(10, undefined, ["feat/thing"]);
+
+    // A session with no recorded branch is not evidence that it was on this
+    // one, so it is excluded rather than assumed.
+    expect(filtered.map((session) => session.session_ref)).toEqual(["codex:on-feature"]);
+
+    await index.close();
+  });
+
+  it("keeps the branch a session started on when later records omit it", async () => {
+    const index = new SqliteHandoffIndex(
+      join(tempDir, "partial.db"),
+      tempDir,
+      [
+        {
+          tool: "codex",
+          scraper: new FixtureScraper([
+            branchChunk("mixed", 0, "feat/thing"),
+            branchChunk("mixed", 1),
+          ]),
+        },
+      ],
+      { refreshBudgetMs: 5_000 },
+    );
+
+    const [session] = await index.listRecentSessions(5);
+
+    expect(session.git_branch).toBe("feat/thing");
+
+    await index.close();
+  });
+});

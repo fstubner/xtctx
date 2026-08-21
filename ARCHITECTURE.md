@@ -48,6 +48,12 @@ allowed to trust.
 - **Process boundary:** the MCP server writes logs to stderr only — stdout
   is the JSON-RPC transport. The session-start hook fails open: it must
   never break a host agent's startup.
+- **The session-start hook never scans.** It runs before the user's first
+  turn, so its cost is added to every agent startup, and a scan of every
+  transcript store on the machine takes seconds even bounded. It reads the
+  index as it already stands (`listIndexedSessions`) and names the most
+  recent session — a pointer to raw detail, not a summary of it. Slightly
+  stale context instantly beats fresh context late.
 
 ## Trust
 

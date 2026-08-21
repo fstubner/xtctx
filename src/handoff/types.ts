@@ -6,6 +6,13 @@ export interface SessionSummary {
   message_count: number;
   preview?: string;
   source_path?: string;
+  /**
+   * The branch and commit the session ran on, as the tool recorded them at the
+   * time. Absent for tools that do not record it; never inferred from the
+   * working tree at index time, which would be a different branch entirely.
+   */
+  git_branch?: string;
+  git_commit?: string;
   score?: number;
   retrieval?: SessionSearchMode;
   matches?: RetrievalMatch[];
@@ -42,7 +49,11 @@ export interface HandoffStatus {
 }
 
 export interface SessionService {
-  listRecentSessions(limit: number, toolFilter?: string[]): Promise<SessionSummary[]>;
+  listRecentSessions(
+    limit: number,
+    toolFilter?: string[],
+    branchFilter?: string[],
+  ): Promise<SessionSummary[]>;
   getSessionByRef(sessionRef: string): Promise<SessionSummary | null>;
   getSessionDetail(sessionRef: string, offset: number, limit: number): Promise<SessionMessage[]>;
   searchSessions(
@@ -50,6 +61,7 @@ export interface SessionService {
     limit: number,
     toolFilter?: string[],
     mode?: SessionSearchMode,
+    branchFilter?: string[],
   ): Promise<SessionSummary[]>;
   getStatus(): Promise<HandoffStatus>;
   close(): Promise<void>;
@@ -62,6 +74,16 @@ export interface SessionService {
    * is the worse failure — the agent concludes the history is not there.
    */
   getIndexProgress?(): IndexProgress;
+  /**
+   * Recent sessions from the index as it already stands, without scanning.
+   *
+   * `listRecentSessions` will start a scan of every transcript store on the
+   * machine and wait several seconds for it. That is the right trade inside a
+   * tool call the agent is already waiting on, and the wrong one in the
+   * SessionStart hook, which runs before the user's first turn and would add
+   * that delay to every agent startup.
+   */
+  listIndexedSessions?(limit: number): Promise<SessionSummary[]>;
 }
 
 export interface IndexProgress {

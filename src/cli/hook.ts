@@ -1,10 +1,23 @@
 import { createProjectServices } from "../runtime/services.js";
+import type { SessionSummary } from "../handoff/types.js";
 
 export interface HookOptions {
   projectPath?: string;
   tool?: string;
   event?: string;
 }
+
+/**
+ * How recent a session has to be to count as active context.
+ *
+ * Priming the agent with what someone was doing an hour ago saves it a
+ * round-trip. Priming it with last week's work just puts stale detail at the
+ * top of the context window, where it reads as current.
+ */
+const ACTIVE_FRAME_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+/** Keep the preview to a line: this lands in the agent's boot context. */
+const PREVIEW_CHARS = 200;
 
 export async function runHook(options: HookOptions = {}): Promise<void> {
   if (options.event && options.event !== "session-start") {
@@ -19,22 +32,77 @@ export async function runHook(options: HookOptions = {}): Promise<void> {
     const status = await services.sessions.getStatus();
     const tool = options.tool ?? "unknown";
 
-    process.stdout.write(
-      [
-        "# xtctx handoff",
-        "",
-        `Tool: ${tool}`,
-        `Project root: ${services.projectRoot}`,
-        `Last scan: ${status.last_scan_at ?? "never"}`,
-        "",
-        "Recent transcript context is available through MCP.",
-        "Call `xtctx_recent_sessions`, then `xtctx_session_detail` for relevant sessions.",
-        "",
-      ].join("\n"),
+    // Deliberately the no-scan read. This runs before the user's first turn,
+    // and `listRecentSessions` would start a scan of every transcript store on
+    // the machine and wait seconds for it — on every agent startup.
+    const recent = (await services.sessions.listIndexedSessions?.(1)) ?? [];
+    const active = recent.find(isActive);
+
+    const lines = [
+      "# xtctx handoff",
+      "",
+      `Tool: ${tool}`,
+      `Project root: ${services.projectRoot}`,
+      `Last scan: ${status.last_scan_at ?? "never"}`,
+      "",
+    ];
+
+    if (active) {
+      lines.push(...activeFrame(active));
+    }
+
+    lines.push(
+      "Recent transcript context is available through MCP.",
+      "Call `xtctx_recent_sessions`, then `xtctx_session_detail` for relevant sessions.",
+      "",
     );
+
+    process.stdout.write(lines.join("\n"));
   } catch {
     return;
   } finally {
     await services?.sessions.close().catch(() => {});
   }
+}
+
+function isActive(session: SessionSummary): boolean {
+  const lastActivity = Date.parse(session.last_activity_at);
+  return Number.isFinite(lastActivity) && Date.now() - lastActivity <= ACTIVE_FRAME_MAX_AGE_MS;
+}
+
+/**
+ * A pointer, not a summary. It names the session and where it was, and leaves
+ * the content to `xtctx_session_detail` — the raw transcript stays the
+ * authority, and nothing here is derived from more than one field.
+ */
+function activeFrame(session: SessionSummary): string[] {
+  const branch = session.git_branch
+    ? ` on ${session.git_branch}${session.git_commit ? ` @ ${session.git_commit.slice(0, 8)}` : ""}`
+    : "";
+
+  const lines = [
+    "## Active context",
+    "",
+    `- Session: \`${session.session_ref}\` (${session.tool}${branch})`,
+    `- Last activity: ${session.last_activity_at}`,
+    `- Messages: ${session.message_count}`,
+  ];
+
+  if (session.preview) {
+    // Single line: this is untrusted transcript text going into a context
+    // window, and content that cannot start a line cannot forge structure.
+    lines.push(`- Opened with: ${inlineSafe(session.preview).slice(0, PREVIEW_CHARS)}`);
+  }
+
+  lines.push(
+    "",
+    `Call \`xtctx_session_detail session_ref="${session.session_ref}"\` for the full turn history.`,
+    "",
+  );
+
+  return lines;
+}
+
+function inlineSafe(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
 }
