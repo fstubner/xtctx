@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.13.1](https://github.com/fstubner/xtctx/compare/xtctx-v0.13.0...xtctx-v0.13.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* **antigravity:** read sessions from the migrated SQLite store ([#120](https://github.com/fstubner/xtctx/issues/120)) ([7e5c661](https://github.com/fstubner/xtctx/commit/7e5c6619aaae47a4495a979960792f0b0ea11517))
+
 ## [0.13.0](https://github.com/fstubner/xtctx/compare/xtctx-v0.12.0...xtctx-v0.13.0) (2026-08-20)
 
 
