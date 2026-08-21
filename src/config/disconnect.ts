@@ -329,12 +329,15 @@ async function removeManagedBlocksFromFile(filePath: string): Promise<boolean> {
     return false;
   }
 
-  const repaired = removeManagedBlocks(existing).trimEnd();
-  if (normalizeNewlines(existing).trimEnd() === repaired) {
+  // Untrimmed: `removeManagedBlocks` gives back exactly the bytes that were
+  // there before setup added its separator, and trimming here would undo that
+  // by editing the tail of the user's own content.
+  const repaired = removeManagedBlocks(existing);
+  if (normalizeNewlines(existing) === repaired) {
     return false;
   }
 
-  if (!repaired || isOnlyFrontmatter(repaired)) {
+  if (!repaired.trim() || isOnlyFrontmatter(repaired)) {
     // The file held nothing but the xtctx block — or the YAML frontmatter
     // xtctx itself wrote above it, which Cursor would keep loading as an
     // xtctx rule. Either way setup created it and disconnect owns removing
@@ -344,7 +347,9 @@ async function removeManagedBlocksFromFile(filePath: string): Promise<boolean> {
   }
 
   // Put the author's line endings back: removal must not reformat the file.
-  await writeFileAtomic(filePath, matchLineEndings(`${repaired}\n`, existing));
+  // No trailing newline is appended — whatever the file ended with is already
+  // in `repaired`, and adding one is an edit to content xtctx does not own.
+  await writeFileAtomic(filePath, matchLineEndings(repaired, existing));
   return true;
 }
 

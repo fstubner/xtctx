@@ -84,6 +84,16 @@ export interface SessionService {
    * that delay to every agent startup.
    */
   listIndexedSessions?(limit: number): Promise<SessionSummary[]>;
+  /**
+   * Resolves once no scan is in flight.
+   *
+   * Serving a tool call deliberately stops waiting for the scan and lets it
+   * finish in the background, so a caller that needs the *complete* index —
+   * shutdown, or a test asserting that every tool was picked up — has to be
+   * able to say so. Without this the only way to wait is to guess a duration,
+   * which is a race dressed up as a test.
+   */
+  whenScanSettled?(): Promise<void>;
 }
 
 export interface IndexProgress {
@@ -104,7 +114,12 @@ export interface RetrievalMatch {
   started_at: string;
   ended_at: string;
   preview: string;
-  score: number;
+  /**
+   * How similar this window is to the query, on the same absolute scale as the
+   * session's score. Absent for keyword-only matches, whose keyword score is
+   * reciprocal rank — the top hit is 1.0 whatever it matched.
+   */
+  score?: number;
   semantic_score?: number;
   keyword_score?: number;
   recency_score: number;

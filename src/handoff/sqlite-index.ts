@@ -515,9 +515,37 @@ export class SqliteHandoffIndex implements SessionService {
   getIndexProgress(): IndexProgress {
     return {
       scanning: this.isScanning(),
-      vectorBacklog: this.vectorBacklog,
+      vectorBacklog: this.countUnvectorizedUnits(),
       embeddingWarming: this.embeddingWarming,
     };
+  }
+
+  /**
+   * Windows with no vector for the current model.
+   *
+   * Counted from the index rather than remembered from the last vectorizing
+   * pass: that pass only runs inside a search, so anything that had not run
+   * one yet reported a backlog of zero — which a JSON consumer reads as
+   * "nothing outstanding" while thousands of windows are unvectorized.
+   */
+  private countUnvectorizedUnits(): number {
+    try {
+      const row = this.getDb()
+        .prepare(
+          `SELECT COUNT(*) AS count
+           FROM retrieval_units u
+           LEFT JOIN retrieval_unit_vectors v
+             ON v.unit_id = u.id
+            AND v.model = ?
+            AND v.content_hash = u.content_hash
+           WHERE v.unit_id IS NULL`,
+        )
+        .get(this.embeddingProvider.model) as CountRow | undefined;
+      return row?.count ?? 0;
+    } catch {
+      // Progress reporting must never be the thing that fails a tool call.
+      return 0;
+    }
   }
 
   /** Resolves when no scan is in flight. Used by close() and by tests. */
@@ -576,6 +604,34 @@ export class SqliteHandoffIndex implements SessionService {
     }
 
     setSetting(db, "last_scan_at", startedAt);
+
+    // Warm vectors here too, not only inside a search.
+    //
+    // Vectorizing used to happen exclusively in `searchSessions`, where it is
+    // capped so the caller is not left waiting. On a real corpus that means
+    // about 80 searches — each paying the cap — before semantic search covers
+    // the index, and an index nobody has searched yet reports zero vectors
+    // against thousands of windows. A scan already runs in the background with
+    // nobody waiting on it, which is the right place to spend the time.
+    //
+    // Same cap as a search, so this cannot become an unbounded CPU burn, and
+    // failures are swallowed: warming is opportunistic, and a broken embedding
+    // provider is already reported by the search path that depends on it.
+    // Only when the model is already loaded. Loading it is a one-off that can
+    // take minutes on a cold cache and is not covered by the cap, and `close()`
+    // waits for the scan — so warming through an unloaded model would turn
+    // shutting the server down into a multi-minute hang. Start the load and
+    // leave the vectors to the next scan instead.
+    if (this.embeddingProvider.isReady?.() === false) {
+      this.embeddingProvider.warm?.();
+      return;
+    }
+
+    try {
+      await this.ensureVectors();
+    } catch {
+      // Nothing to do here — search reports embedding failures where they matter.
+    }
   }
 
   private upsertChunk(chunk: ConversationChunk): string | null {
@@ -1364,6 +1420,7 @@ function groupScoredUnits(
 function formatMatch(item: {
   row: RetrievalUnitRow;
   score: number;
+  relevance: number | undefined;
   semanticScore: number;
   keywordScore: number;
   recencyScore: number;
@@ -1376,7 +1433,10 @@ function formatMatch(item: {
     started_at: item.row.started_at,
     ended_at: item.row.ended_at,
     preview: previewText(item.row.content),
-    score: roundScore(item.score),
+    // The blended value orders results; it is not a strength of match, and
+    // reporting it here reproduced the "best is always 1.0" problem one level
+    // down from where it was fixed.
+    score: item.relevance === undefined ? undefined : roundScore(item.relevance),
     semantic_score: roundScore(item.semanticScore),
     keyword_score: roundScore(item.keywordScore),
     recency_score: roundScore(item.recencyScore),

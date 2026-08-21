@@ -22,6 +22,7 @@ import { existsSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import {
   fingerprintsDiffer,
+  isTransientSidecar,
   normalizeForCompare,
   serializeFingerprint,
 } from "./lib/fingerprint-compare.mjs";
@@ -378,6 +379,11 @@ async function antigravityFingerprint() {
       // Compound suffixes matter here (`.md.metadata.json` is the convention
       // the scraper keys on), so take everything from the first dot.
       const name = basename(file);
+      // Present only while the tool holds its database open, so recording them
+      // makes the alarm depend on whether Antigravity happened to be running.
+      if (isTransientSidecar(name)) {
+        continue;
+      }
       const dot = name.indexOf(".");
       found.add(dot === -1 ? "(none)" : name.slice(dot));
     }

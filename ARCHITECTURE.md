@@ -43,8 +43,11 @@ allowed to trust.
 - **Config writers → other tools' files:** writes are atomic
   (temp + rename), merge under the tool's own root key, preserve unknown
   keys, preserve the file's line endings, and refuse to rewrite files they
-  cannot parse (JSONC comments included) rather than clobber them. Managed
-  markdown blocks touch nothing outside their markers.
+  cannot parse (JSONC comments included) rather than clobber them. JSON is
+  re-serialised, so formatting is normalised even though content is not.
+  Managed markdown blocks touch nothing outside their markers — including the
+  tail of the file, which is why setup does not trim it and removal gives back
+  exactly the separator it added.
 - **Process boundary:** the MCP server writes logs to stderr only — stdout
   is the JSON-RPC transport. The session-start hook fails open: it must
   never break a host agent's startup.

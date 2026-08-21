@@ -70,7 +70,14 @@ describe("cross-tool pickup", () => {
       );
 
       services = await createProjectServices(projectRoot);
+      // Start the scan, then wait for all of it. A tool call deliberately
+      // stops waiting after a few seconds and lets the rest finish in the
+      // background, so asserting completeness right after one call asserts
+      // against a half-built index: the tools scanned last (antigravity,
+      // opencode, copilot-cli) were simply missing, and whether that happened
+      // depended on how fast the machine was.
       await services.sessions.listRecentSessions(50);
+      await services.sessions.whenScanSettled?.();
     } finally {
       for (const key of Object.keys(process.env)) delete process.env[key];
       Object.assign(process.env, saved);

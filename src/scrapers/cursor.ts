@@ -1,4 +1,4 @@
-import { readFile, stat } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type Database from "better-sqlite3";
@@ -13,6 +13,7 @@ const BUBBLE_TYPE_USER = 1;
 const BUBBLE_TYPE_ASSISTANT = 2;
 
 const SCRAPER_NAME = "cursor";
+const STATE_DB_NAME = "state.vscdb";
 
 /**
  * Shapes the cursor scraper tolerates silently without logging. All other
@@ -75,9 +76,53 @@ export class CursorScraper extends AbstractScraper<CursorChunk> {
     super(stateDir);
   }
 
+  /**
+   * Is Cursor installed with a store here — nothing about this project.
+   *
+   * This used to answer via `resolveWorkspaceDatabasePaths()`, which opens
+   * every workspace to test project membership: 3.2s per call on a real
+   * machine, paid on every `getStatus()`, which runs detection for all seven
+   * scrapers. It also made `status` report "not detected" for an installed
+   * Cursor that simply had no sessions for this project, which is not what
+   * detection means for any of the other six scrapers.
+   *
+   * Stops at the first store found rather than enumerating them all.
+   */
   async detect(): Promise<boolean> {
-    const paths = await this.resolveWorkspaceDatabasePaths();
-    return paths.length > 0;
+    let target;
+    try {
+      target = await stat(this.cursorStorePath);
+    } catch {
+      return false;
+    }
+
+    if (target.isFile()) {
+      return true;
+    }
+    if (!target.isDirectory()) {
+      return false;
+    }
+
+    let entries;
+    try {
+      entries = await readdir(this.cursorStorePath, { withFileTypes: true });
+    } catch {
+      return false;
+    }
+
+    for (const entry of entries) {
+      if (entry.isFile() && entry.name === STATE_DB_NAME) {
+        return true;
+      }
+      if (!entry.isDirectory()) {
+        continue;
+      }
+      if (await pathExists(join(this.cursorStorePath, entry.name, STATE_DB_NAME))) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   getStorePaths(): string[] {
@@ -367,6 +412,15 @@ export class CursorScraper extends AbstractScraper<CursorChunk> {
       }
     }
     return filtered;
+  }
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch {
+    return false;
   }
 }
 

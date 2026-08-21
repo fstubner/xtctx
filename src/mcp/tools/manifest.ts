@@ -49,6 +49,9 @@ export function createHandoffManifestHandler(service: SessionService) {
       freshness: {
         last_scan_at: status.last_scan_at,
         indexed_sessions: status.sessions,
+        // An orchestrator holding these refs needs to know the set is still
+        // filling, or it treats a partial index as the whole history.
+        indexing: service.getIndexProgress?.() ?? null,
       },
       sessions: selected.map(formatSession),
       missing_session_refs: missingRefs,

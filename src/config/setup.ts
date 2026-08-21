@@ -422,7 +422,11 @@ async function upsertManagedBlock(
   prelude = "",
 ): Promise<boolean> {
   const existing = await readUtf8IfExists(filePath);
-  const repaired = existing ? removeManagedBlocks(existing).trimEnd() : "";
+  // Deliberately not trimmed. Trimming the tail here silently edited the
+  // user's file: blank lines at EOF vanished, and two trailing spaces on the
+  // last line — a markdown hard break — were destroyed. The separator below is
+  // exactly what removal takes back, so the round trip is byte-for-byte.
+  const repaired = existing ? removeManagedBlocks(existing) : "";
   // A file that already opens with YAML frontmatter keeps it — prepending
   // the prelude again would produce a second, invalid frontmatter block.
   const hasFrontmatter = repaired.startsWith("---");
