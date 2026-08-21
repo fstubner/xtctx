@@ -34,6 +34,10 @@ const ROLE_MAP: Record<string, ClaudeCodeChunk["role"]> = {
 };
 
 const NON_MESSAGE_TYPES = new Set([
+  // `{"type":"atis-latch","atis":"","sessionId":"..."}` — bookkeeping, no
+  // conversational content. Found by the format fingerprint the day Claude
+  // Code started writing it, 18 in a single transcript.
+  "atis-latch",
   "attachment",
   "custom-title",
   "last-prompt",
