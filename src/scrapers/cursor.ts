@@ -6,6 +6,7 @@ import { glob } from "glob";
 import type { CursorChunk } from "../types/scraper.js";
 import { AbstractScraper, estimateTokens, toDate } from "./base.js";
 import { pathMatchesProject } from "../utils/project-scope.js";
+import { recordDrift, withDriftReport } from "./drift-log.js";
 
 // Bubble type constants from Cursor's internal format.
 const BUBBLE_TYPE_USER = 1;
@@ -30,11 +31,8 @@ export const ACCEPTED_DEGRADATIONS = {
   unknownFieldsAlongside: "extra keys alongside known composer schema",
 };
 
-function warnDrift(sourcePath: string, surprise: string, recordsAffected: number): void {
-  console.warn(
-    `[${SCRAPER_NAME}] schema-drift surprise at ${sourcePath}: ${surprise} ` +
-      `(records affected: ${recordsAffected})`,
-  );
+function warnDrift(sourcePath: string, surprise: string, _recordsAffected: number): void {
+  recordDrift(SCRAPER_NAME, sourcePath, surprise);
 }
 
 function describeType(value: unknown): string {
@@ -89,11 +87,11 @@ export class CursorScraper extends AbstractScraper<CursorChunk> {
   async *scrape(since?: Date): AsyncIterable<CursorChunk> {
     const state = await this.getLastScrapedPosition();
     const cutoff = since ?? state.lastTimestamp;
-    yield* this.readAllMessages(cutoff);
+    yield* withDriftReport(SCRAPER_NAME, this.readAllMessages(cutoff));
   }
 
   async *fullSync(): AsyncIterable<CursorChunk> {
-    yield* this.readAllMessages(new Date(0));
+    yield* withDriftReport(SCRAPER_NAME, this.readAllMessages(new Date(0)));
   }
 
   private async *readAllMessages(since: Date): AsyncIterable<CursorChunk> {

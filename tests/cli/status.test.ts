@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { renderStatusBlock } from "@xtctx/cli/status";
+import { renderStatusBlock, storePathNotes } from "@xtctx/cli/status";
 import { setupProject } from "@xtctx/config/setup";
 import { createProjectServices } from "@xtctx/runtime/services";
 
@@ -95,4 +95,59 @@ describe("status", () => {
     expect(stdout).toContain(`Project  ${projectRoot}`);
     expect(stdout).not.toContain(`Project  ${process.cwd()}`);
   }, 15_000);
+});
+
+/**
+ * A store path recorded by setup is a snapshot of where a tool kept its data
+ * that day. When the tool moves — opencode turned out to write to the XDG
+ * location on Windows, not %APPDATA% — the recorded path silently stops
+ * matching anything, and status reports "not detected" forever while a real
+ * store sits elsewhere. Fixing the default only helps new setups, so status
+ * has to say something to everyone else.
+ */
+describe("storePathNotes", () => {
+  let home = "";
+
+  beforeEach(async () => {
+    home = await realpath(await mkdtemp(join(tmpdir(), "xtctx-storenotes-")));
+  });
+
+  afterEach(async () => {
+    await rm(home, { recursive: true, force: true });
+  });
+
+  function definitionFor(defaultPath: string) {
+    return { id: "opencode", defaultStorePath: () => defaultPath } as never;
+  }
+
+  it("flags a configured path that no longer exists when the default does", async () => {
+    const real = join(home, "real-store.db");
+    await writeFile(real, "", "utf-8");
+    const stale = join(home, "gone", "opencode.db");
+
+    const notes = storePathNotes(definitionFor(real), [stale]);
+
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toContain(stale);
+    expect(notes[0]).toContain(real);
+    expect(notes[0]).toContain("setup");
+  });
+
+  it("leaves a deliberate override alone when it exists", async () => {
+    const real = join(home, "real-store.db");
+    const override = join(home, "override.db");
+    await writeFile(real, "", "utf-8");
+    await writeFile(override, "", "utf-8");
+
+    const notes = storePathNotes(definitionFor(real), [override]);
+
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toContain("custom store path");
+  });
+
+  it("says nothing when the configured path is the default", () => {
+    const real = join(home, "real-store.db");
+
+    expect(storePathNotes(definitionFor(real), [real])).toEqual([]);
+  });
 });

@@ -1,7 +1,5 @@
 {
   "kind": "jsonl",
-  "filesSampled": 30,
-  "recordsSampled": 4372,
   "recordTypes": {
     "ai-title": [
       "aiTitle: string",
@@ -9,7 +7,9 @@
       "type: string"
     ],
     "assistant": [
+      "agentId: string",
       "apiErrorStatus: number",
+      "attributionAgent: string",
       "attributionMcpServer: string",
       "attributionMcpTool: string",
       "attributionPlugin: string",
@@ -66,6 +66,7 @@
       "version: string"
     ],
     "attachment": [
+      "agentId: string",
       "attachment.addedBlocks: array<empty>",
       "attachment.addedBlocks: array<string>",
       "attachment.addedLines: array<empty>",
@@ -229,6 +230,7 @@
       "version: string"
     ],
     "user": [
+      "agentId: string",
       "cwd: string",
       "entrypoint: string",
       "gitBranch: string",

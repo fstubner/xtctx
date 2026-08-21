@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { inspectManagedFile, pathExists } from "../config/setup.js";
 import { inspectSkillStatus } from "../config/skills.js";
@@ -58,11 +59,8 @@ export async function renderStatusBlock(services: ProjectServices): Promise<stri
       `  ${marker} ${tool.tool.padEnd(13)} ${tool.detected ? "detected" : "not detected"}; ` +
         `${tool.indexed_sessions} sessions; hook: ${hook}${error}`,
     );
-    // `.xtctx/config.yaml` is committable, so a cloned repo can point a
-    // scraper at any directory on disk. Overrides stay legal but visible.
-    const custom = customStorePaths(definition, tool.store_paths);
-    for (const path of custom) {
-      lines.push(`      custom store path (not the ${tool.tool} default): ${path}`);
+    for (const note of storePathNotes(definition, tool.store_paths)) {
+      lines.push(`      ${note}`);
     }
   }
 
@@ -133,7 +131,23 @@ function managedTargets(projectRoot: string): Array<{ label: string; path: strin
 }
 
 /** Store paths that differ from the tool's built-in default location. */
-function customStorePaths(
+/**
+ * Notes about where a tool's transcripts are being read from.
+ *
+ * Two different situations look identical in the config file. A path that
+ * differs from the default may be a deliberate override — `.xtctx/config.yaml`
+ * is committable, so a cloned repo can legitimately point a scraper anywhere,
+ * and those stay legal but visible. Or it may simply be stale: setup records
+ * where the tool kept its data that day, and tools move. opencode turned out
+ * to write to the XDG location on Windows rather than %APPDATA%, so every
+ * project set up before that was fixed still points at a path that has never
+ * existed, and reports "not detected" forever with a real store sitting
+ * elsewhere.
+ *
+ * Nothing is rewritten here — a config file is the user's. But the stale case
+ * is named, with the path that does exist and how to adopt it.
+ */
+export function storePathNotes(
   definition: (typeof SUPPORTED_TOOLS)[number] | undefined,
   storePaths: string[],
 ): string[] {
@@ -141,14 +155,29 @@ function customStorePaths(
     return [];
   }
 
-  let fallback: string;
+  let resolved: string;
   try {
-    fallback = normalizePath(definition.defaultStorePath());
+    resolved = definition.defaultStorePath();
   } catch {
     return [];
   }
 
-  return storePaths.filter((path) => normalizePath(path) !== fallback);
+  const notes: string[] = [];
+  for (const path of storePaths) {
+    if (normalizePath(path) === normalizePath(resolved)) {
+      continue;
+    }
+    if (!existsSync(path) && existsSync(resolved)) {
+      notes.push(
+        `stale store path: ${path} does not exist, but ${definition.id} has a store at ` +
+          `${resolved} — re-run 'xtctx setup --yes' to point at it`,
+      );
+      continue;
+    }
+    notes.push(`custom store path (not the ${definition.id} default): ${path}`);
+  }
+
+  return notes;
 }
 
 function normalizePath(value: string): string {

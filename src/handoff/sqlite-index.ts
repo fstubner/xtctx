@@ -13,6 +13,7 @@ import {
 } from "./embeddings.js";
 import type {
   HandoffStatus,
+  IndexProgress,
   RetrievalMatch,
   SessionMessage,
   SessionSearchMode,
@@ -44,7 +45,37 @@ interface SqliteHandoffIndexOptions {
   embeddingProvider?: EmbeddingProvider;
   windowSize?: number;
   windowStride?: number;
+  /** How long a caller waits for a scan before taking what is indexed so far. */
+  refreshBudgetMs?: number;
+  /** How long one search spends building vectors before answering with what it has. */
+  vectorBudgetMs?: number;
 }
+
+/**
+ * How long a tool call will wait for a scan of every transcript store on the
+ * machine.
+ *
+ * A cold scan here takes about 55 seconds — 18GB of codex history is most of
+ * it — and it used to run inside the caller's first tool call. MCP servers are
+ * spawned per agent session, so that was paid on every handoff, and a host
+ * with a 30s tool timeout never got a first answer at all.
+ *
+ * The scan is not cancelled when the budget expires; the caller just stops
+ * waiting for it. Everything it has already written stays written, so the next
+ * call sees more, and the call after that sees all of it.
+ */
+const DEFAULT_REFRESH_BUDGET_MS = 4_000;
+
+/**
+ * How long one search spends building vectors before answering.
+ *
+ * The first semantic search used to vectorize the entire corpus inline: 530
+ * seconds on a 1,145-window index, inside a single tool call, with no cap and
+ * nothing to show for the wait. Each batch commits on its own, so stopping
+ * early costs nothing — the next search picks up where this one stopped, and
+ * recall improves call over call until the corpus is covered.
+ */
+const DEFAULT_VECTOR_BUDGET_MS = 6_000;
 
 interface SessionRow {
   session_ref: string;
@@ -112,10 +143,35 @@ const DEFAULT_WINDOW_STRIDE = 4;
 const MAX_MATCHES_PER_SESSION = 3;
 /**
  * Minimum raw cosine similarity for a retrieval window to count as a semantic
- * match. Unrelated sentence-transformer pairs sit near 0; related ones are
+ * match.
+ *
+ * Unrelated sentence-transformer pairs sit near 0; related ones are
  * comfortably above this.
  */
 const MIN_SEMANTIC_COSINE = 0.15;
+
+/**
+ * How similar the *best* window has to be before a query counts as having
+ * found anything semantically.
+ *
+ * The per-window floor above cannot do this job. Raising it high enough to
+ * reject a nonsense query — which cleared 0.15 on 927 of 1,145 windows, 81% of
+ * the corpus — also discards genuine mid-range matches, and pure vector search
+ * has no keyword hits to fall back on: at a 0.35 per-window floor the eval
+ * lost recall@5 from 0.70 to 0.50.
+ *
+ * Whether a query found anything is a property of the query, not of each
+ * window. So when nothing clears this bar, semantic matches are dropped
+ * wholesale and only keyword hits remain — usually meaning "no matching
+ * sessions", which is the honest answer. When something does clear it, the
+ * weaker windows around it are kept.
+ *
+ * The value is bounded from both sides and the gap is narrow: gibberish tops
+ * out near 0.31 against this index, genuine queries reach 0.44-0.59, and the
+ * ranking eval starts losing vector recall above 0.32. If it needs to move,
+ * move it against the eval rather than against one query.
+ */
+const MIN_CONFIDENT_COSINE = 0.32;
 /**
  * Weight of the recency/continuity tie-break in the relevance modes. Small
  * enough that it only ever separates candidates that are otherwise equal.
@@ -129,7 +185,22 @@ export class SqliteHandoffIndex implements SessionService {
   private readonly initialized: Promise<void>;
   private refreshPromise: Promise<void> | null = null;
   private lastRefreshMs = 0;
-  private readonly refreshTtlMs = 5_000;
+  /**
+   * How long an indexed view is treated as current.
+   *
+   * A scan re-reads every transcript store on the machine, so at five seconds
+   * almost every tool call in a session started a fresh one and paid the wait
+   * budget again. The transcripts being read belong to sessions that ended
+   * before this one started; they do not change second to second.
+   */
+  private readonly refreshTtlMs = 30_000;
+  private readonly refreshBudgetMs: number;
+  private readonly vectorBudgetMs: number;
+  private scanStartedMs = 0;
+  /** The embedding model is loading, so this answer came from keyword search alone. */
+  private embeddingWarming = false;
+  /** Windows still waiting to be vectorized after the last search gave up its budget. */
+  private vectorBacklog = 0;
   private readonly embeddingProvider: EmbeddingProvider;
   private readonly windowSize: number;
   private readonly windowStride: number;
@@ -144,6 +215,8 @@ export class SqliteHandoffIndex implements SessionService {
       options.embeddingProvider ?? new TransformersEmbeddingProvider(DEFAULT_EMBEDDING_MODEL);
     this.windowSize = Math.max(2, Math.floor(options.windowSize ?? DEFAULT_WINDOW_SIZE));
     this.windowStride = Math.max(1, Math.floor(options.windowStride ?? DEFAULT_WINDOW_STRIDE));
+    this.refreshBudgetMs = Math.max(0, options.refreshBudgetMs ?? DEFAULT_REFRESH_BUDGET_MS);
+    this.vectorBudgetMs = Math.max(0, options.vectorBudgetMs ?? DEFAULT_VECTOR_BUDGET_MS);
     this.initialized = this.initialize();
     // Attach a no-op handler so a failed open cannot become an unhandled
     // rejection (which would kill the process) before the first caller
@@ -228,6 +301,18 @@ export class SqliteHandoffIndex implements SessionService {
       return this.keywordSearch(trimmed, limit, toolFilter);
     }
 
+    // Loading the embedding model is a one-off that takes minutes on a cold
+    // cache. Hybrid is the default mode, so blocking it on that made the first
+    // search of a session look broken. Start the load, answer from keyword,
+    // and let the next search use the model. An explicit `vector` request is a
+    // different matter: there is no other route, so that one waits.
+    if (normalizedMode === "hybrid" && this.embeddingProvider.isReady?.() === false) {
+      this.embeddingProvider.warm?.();
+      this.embeddingWarming = true;
+      return this.keywordSearch(trimmed, limit, toolFilter);
+    }
+    this.embeddingWarming = false;
+
     try {
       const results = await this.semanticSearch(trimmed, limit, toolFilter, normalizedMode);
       clearSetting(this.getDb(), "last_error:embeddings");
@@ -302,6 +387,10 @@ export class SqliteHandoffIndex implements SessionService {
 
   async close(): Promise<void> {
     await this.initialized.catch(() => {});
+    // A scan may still be running because a caller stopped waiting for it.
+    // Closing the database underneath it would turn an ordinary shutdown into
+    // a write to a closed handle.
+    await this.whenScanSettled();
     this.db?.close();
     this.db = null;
   }
@@ -321,15 +410,73 @@ export class SqliteHandoffIndex implements SessionService {
     }
 
     if (!this.refreshPromise) {
-      this.refreshPromise = this.refreshNow().finally(() => {
+      const running = this.refreshNow().finally(() => {
         // Stamp the TTL on failure as well as success so a persistently
         // broken refresh backs off instead of re-running on every call.
         this.lastRefreshMs = Date.now();
         this.refreshPromise = null;
       });
+      // A caller may stop waiting on this promise, so it needs its own
+      // handler: an unhandled rejection would take the process down.
+      running.catch(() => {});
+      this.refreshPromise = running;
+      this.scanStartedMs = Date.now();
     }
 
-    await this.refreshPromise;
+    await this.waitWithBudget(this.refreshPromise);
+  }
+
+  /**
+   * Wait for the scan, but not past the budget. Nothing is cancelled on
+   * timeout — the scan keeps running and keeps committing — so a caller that
+   * stops waiting costs the index nothing, and the next call finds more.
+   */
+  private async waitWithBudget(scan: Promise<void>): Promise<void> {
+    if (this.refreshBudgetMs === 0) {
+      return;
+    }
+
+    // The budget is spent by the scan, not by each caller. Measuring it from
+    // when the scan started means one call pays the wait and the calls behind
+    // it return straight away with whatever has landed so far — rather than
+    // every call in a session paying the full budget over again.
+    const remaining = this.scanStartedMs + this.refreshBudgetMs - Date.now();
+    if (remaining <= 0) {
+      return;
+    }
+
+    let timer: NodeJS.Timeout | undefined;
+    const budget = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, remaining);
+      // Do not hold the process open just to enforce a deadline.
+      timer.unref?.();
+    });
+
+    try {
+      await Promise.race([scan.catch(() => {}), budget]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** True when a scan started by an earlier call is still running. */
+  isScanning(): boolean {
+    return this.refreshPromise !== null;
+  }
+
+  getIndexProgress(): IndexProgress {
+    return {
+      scanning: this.isScanning(),
+      vectorBacklog: this.vectorBacklog,
+      embeddingWarming: this.embeddingWarming,
+    };
+  }
+
+  /** Resolves when no scan is in flight. Used by close() and by tests. */
+  async whenScanSettled(): Promise<void> {
+    while (this.refreshPromise) {
+      await this.refreshPromise.catch(() => {});
+    }
   }
 
   private async refreshNow(): Promise<void> {
@@ -664,24 +811,44 @@ export class SqliteHandoffIndex implements SessionService {
       // a more useful answer than a nearest vector.
       .filter((item) => item.rawCosine >= MIN_SEMANTIC_COSINE || item.keywordScore > 0);
 
-    // Rescale cosine across this query's surviving candidates before blending.
-    // Mapping [-1,1] onto [0,1] globally left every candidate bunched near
-    // 0.5, so the semantic term barely varied while recency swung across its
-    // whole range — recency effectively outranked relevance. Measured on the
-    // ranking eval, this one change took hybrid from MRR 0.488 / recall@5
-    // 0.65 to 0.621 / 0.85.
-    const cosines = candidates.map((item) => item.rawCosine);
+    // Nothing here is actually similar to the query — keep only what matched
+    // on words. For a query that means nothing to this corpus that leaves
+    // nothing at all, which is the answer.
+    const bestCosine = candidates.reduce((best, item) => Math.max(best, item.rawCosine), 0);
+    const semanticallyConfident = bestCosine >= MIN_CONFIDENT_COSINE;
+    const surviving = semanticallyConfident
+      ? candidates
+      : candidates.filter((item) => item.keywordScore > 0);
+
+    if (surviving.length === 0) {
+      return [];
+    }
+
+    // Ordering and reporting are two different jobs, and conflating them is
+    // what made the score meaningless.
+    //
+    // Ordering wants contrast: rescaling this query's survivors onto [0,1]
+    // spreads them out and measurably ranks better (hybrid MRR 0.566 -> 0.613
+    // on the eval). Reporting wants an absolute: the rescale forces the best
+    // survivor to exactly 1.0 however weak it is, so three nonsense words
+    // scored 0.901 against a real query's 0.872 and an agent had no way to
+    // tell a find from a shrug.
+    //
+    // So candidates are ranked on the rescaled value and reported with the
+    // cosine itself.
+    const cosines = surviving.map((item) => item.rawCosine);
     const lowest = Math.min(...cosines);
     const highest = Math.max(...cosines);
     const spread = highest - lowest;
 
-    const scored = candidates
+    const scored = surviving
       .map((item) => {
         // A lone survivor is the best match by definition, not the worst.
         const semanticScore = spread > 0 ? (item.rawCosine - lowest) / spread : 1;
         return {
           ...item,
           semanticScore,
+          relevance: Math.max(0, Math.min(1, item.rawCosine)),
           score: blendScores(
             mode,
             semanticScore,
@@ -744,6 +911,7 @@ export class SqliteHandoffIndex implements SessionService {
         content_hash: string;
       }>;
 
+    this.vectorBacklog = 0;
     if (rows.length === 0) {
       return;
     }
@@ -761,8 +929,19 @@ export class SqliteHandoffIndex implements SessionService {
 
     // Bounded batches keep memory flat on a first-time index of a large
     // history, and each batch commits before the next one embeds.
-    const unitBatchSize = 64;
+    // Small enough that the budget below can actually bite. At 64 windows a
+    // single batch took 20-30s on the real index, so the deadline — checked
+    // between batches — could not stop a search from blowing straight past it.
+    const unitBatchSize = 8;
+    // Answer with the vectors that exist rather than making the caller wait
+    // for the whole corpus. Every batch below commits before the next starts,
+    // so an unfinished pass is progress, not wasted work.
+    const deadline = this.vectorBudgetMs > 0 ? Date.now() + this.vectorBudgetMs : Infinity;
     for (let start = 0; start < rows.length; start += unitBatchSize) {
+      if (Date.now() >= deadline) {
+        this.vectorBacklog = rows.length - start;
+        break;
+      }
       const batch = rows.slice(start, start + unitBatchSize);
       // Long windows are segmented to the model's sequence budget and
       // mean-pooled, so content beyond the window's opening still shapes
@@ -1038,6 +1217,10 @@ function groupUnits(
     return {
       row,
       score: blendScores("keyword", 0, keywordScore, recencyScore, continuityScore),
+      // Deliberately no relevance: keyword scores are reciprocal rank, so the
+      // top FTS hit is 1.0 whatever it actually matched. Reporting that as a
+      // strength of match is the same lie the cosine rescale was telling.
+      relevance: undefined,
       semanticScore: 0,
       keywordScore,
       recencyScore,
@@ -1051,6 +1234,7 @@ function groupScoredUnits(
   scored: Array<{
     row: RetrievalUnitRow;
     score: number;
+    relevance: number | undefined;
     semanticScore: number;
     keywordScore: number;
     recencyScore: number;
@@ -1059,6 +1243,10 @@ function groupScoredUnits(
   retrieval: SessionSearchMode,
   limit: number,
 ): SessionSummary[] {
+  // `score` orders; `relevance` is what the caller is told. Kept apart here so
+  // the ranking the eval measures and the number an agent reads about a match
+  // can each be the right thing.
+  const ranks = new Map<string, number>();
   const sessions = new Map<string, SessionSummary>();
 
   for (const item of scored) {
@@ -1069,10 +1257,15 @@ function groupScoredUnits(
       if ((existing.matches?.length ?? 0) < MAX_MATCHES_PER_SESSION) {
         existing.matches = [...(existing.matches ?? []), match];
       }
-      existing.score = Math.max(existing.score ?? 0, item.score);
+      existing.score =
+        item.relevance === undefined
+          ? existing.score
+          : Math.max(existing.score ?? 0, item.relevance);
+      ranks.set(item.row.session_ref, Math.max(ranks.get(item.row.session_ref) ?? 0, item.score));
       continue;
     }
 
+    ranks.set(item.row.session_ref, item.score);
     sessions.set(item.row.session_ref, {
       session_ref: item.row.session_ref,
       tool: item.row.tool,
@@ -1081,7 +1274,7 @@ function groupScoredUnits(
       message_count: item.row.session_message_count,
       preview: item.row.session_preview ?? previewText(item.row.content),
       source_path: item.row.source_path ?? undefined,
-      score: item.score,
+      score: item.relevance,
       retrieval,
       matches: [match],
     });
@@ -1091,7 +1284,9 @@ function groupScoredUnits(
     }
   }
 
-  return [...sessions.values()].sort((left, right) => (right.score ?? 0) - (left.score ?? 0));
+  return [...sessions.values()].sort(
+    (left, right) => (ranks.get(right.session_ref) ?? 0) - (ranks.get(left.session_ref) ?? 0),
+  );
 }
 
 function formatMatch(item: {

@@ -1,0 +1,7 @@
+# Committed format fingerprints are compared byte-for-byte by
+# `npm run capture:formats`. With core.autocrlf on (the Windows default) a
+# checkout rewrote them to CRLF while the script writes LF, so every line
+# differed and the drift check reported a changed format forever on a store
+# that had not moved. The script normalizes line endings too; this keeps the
+# committed form consistent in the first place.
+tests/drift/fingerprints/*.json text eol=lf

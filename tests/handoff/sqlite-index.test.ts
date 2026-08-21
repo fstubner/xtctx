@@ -531,3 +531,228 @@ function fixtureVector(text: string): Float32Array {
   }
   return vector;
 }
+
+/**
+ * A scan reads every transcript store on the machine. On a real one that is
+ * 55 seconds cold — 18GB of codex history alone — and it used to happen inside
+ * the caller's first tool call. MCP servers are spawned per agent session, so
+ * that cost is paid on every handoff, and hosts with a 30s tool timeout lose
+ * the product entirely on the first call.
+ *
+ * The scan still runs to completion; the caller just stops waiting for all of
+ * it. Work already committed stays committed, so each call resumes from where
+ * the last one got to rather than starting over.
+ */
+describe("scan time budget", () => {
+  let tempDir = "";
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "xtctx-budget-"));
+  });
+
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  class SlowScraper extends FixtureScraper {
+    constructor(chunks: ConversationChunk[], private readonly delayMs: number) {
+      super(chunks);
+    }
+
+    override async *fullSync(): AsyncIterable<ConversationChunk> {
+      await new Promise((resolve) => setTimeout(resolve, this.delayMs));
+      yield* super.fullSync();
+    }
+  }
+
+  it("returns before a slow scan finishes, and says the index is still filling", async () => {
+    const scraper = new SlowScraper([chunk("slow-session", 0, "user", "eventually indexed")], 400);
+    const index = new SqliteHandoffIndex(join(tempDir, "xtctx.db"), tempDir, [
+      { tool: "codex", scraper },
+    ], { refreshBudgetMs: 30 });
+
+    const startedAt = Date.now();
+    const recent = await index.listRecentSessions(5);
+    const elapsed = Date.now() - startedAt;
+
+    expect(elapsed).toBeLessThan(300);
+    expect(recent).toEqual([]);
+    expect(index.isScanning()).toBe(true);
+
+    await index.close();
+  });
+
+  it("has the data once the scan it started has finished", async () => {
+    const scraper = new SlowScraper([chunk("slow-session", 0, "user", "eventually indexed")], 50);
+    const index = new SqliteHandoffIndex(join(tempDir, "xtctx.db"), tempDir, [
+      { tool: "codex", scraper },
+    ], { refreshBudgetMs: 5 });
+
+    await index.listRecentSessions(5);
+    await index.whenScanSettled();
+
+    // The scan ran once and completed; nothing was lost by not waiting.
+    expect(scraper.fullSyncCalls).toBe(1);
+    expect(index.isScanning()).toBe(false);
+
+    await index.close();
+  });
+
+  it("waits for the whole scan when the budget is generous", async () => {
+    const scraper = new SlowScraper([chunk("quick-session", 0, "user", "indexed inline")], 10);
+    const index = new SqliteHandoffIndex(join(tempDir, "xtctx.db"), tempDir, [
+      { tool: "codex", scraper },
+    ], { refreshBudgetMs: 5_000 });
+
+    const recent = await index.listRecentSessions(5);
+
+    expect(recent.map((session) => session.session_ref)).toEqual(["codex:quick-session"]);
+    expect(index.isScanning()).toBe(false);
+
+    await index.close();
+  });
+});
+
+/**
+ * The first semantic search blocked for nine minutes on a real index: it
+ * vectorized every window in the corpus inside one tool call, with no cap and
+ * no progress. Vectors are worth building, but not all at once while an agent
+ * waits — each batch commits, so the work carries over to the next call.
+ */
+describe("vectorization time budget", () => {
+  let tempDir = "";
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "xtctx-vecbudget-"));
+  });
+
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  class SlowEmbeddingProvider {
+    readonly model = "slow-test-model";
+    batches = 0;
+
+    async embed(text: string): Promise<Float32Array> {
+      const [vector] = await this.embedBatch([text]);
+      return vector;
+    }
+
+    async embedBatch(texts: string[]): Promise<Float32Array[]> {
+      this.batches += 1;
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      return texts.map(() => Float32Array.from([1, 0, 0]));
+    }
+  }
+
+  function manyChunks(count: number): ConversationChunk[] {
+    return Array.from({ length: count }, (_, i) =>
+      chunk(`vec-session-${i}`, 0, "user", `distinct window content number ${i}`),
+    );
+  }
+
+  it("stops vectorizing when the budget runs out instead of doing the whole corpus", async () => {
+    const provider = new SlowEmbeddingProvider();
+    const index = new SqliteHandoffIndex(
+      join(tempDir, "xtctx.db"),
+      tempDir,
+      [{ tool: "codex", scraper: new FixtureScraper(manyChunks(300)) }],
+      { embeddingProvider: provider, refreshBudgetMs: 5_000, vectorBudgetMs: 80 },
+    );
+
+    await index.searchSessions("distinct window", 5, undefined, "vector");
+    const vectorized = (await index.getStatus()).vectorized_units;
+
+    // Without a budget this embeds every window before answering.
+    expect(vectorized).toBeGreaterThan(0);
+    expect(vectorized).toBeLessThan(300);
+
+    await index.close();
+  });
+
+  it("keeps the vectors it already built and adds more on the next call", async () => {
+    const provider = new SlowEmbeddingProvider();
+    const index = new SqliteHandoffIndex(
+      join(tempDir, "xtctx.db"),
+      tempDir,
+      [{ tool: "codex", scraper: new FixtureScraper(manyChunks(300)) }],
+      { embeddingProvider: provider, refreshBudgetMs: 5_000, vectorBudgetMs: 80 },
+    );
+
+    await index.searchSessions("distinct window", 5, undefined, "vector");
+    const afterFirst = (await index.getStatus()).vectorized_units;
+
+    await index.searchSessions("distinct window", 5, undefined, "vector");
+    const afterSecond = (await index.getStatus()).vectorized_units;
+
+    expect(afterFirst).toBeGreaterThan(0);
+    expect(afterSecond).toBeGreaterThan(afterFirst);
+
+    await index.close();
+  });
+});
+
+/**
+ * The reported score used to be the candidate's rank within its own query, not
+ * how good the match was: every query's best survivor was rescaled to exactly
+ * 1.0, so three nonsense words scored 0.901 against a genuine query's 0.872.
+ * An agent reading that number had no way to tell a find from a shrug.
+ */
+describe("search scores mean similarity", () => {
+  let tempDir = "";
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "xtctx-score-"));
+  });
+
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  /** Places the document on one axis and the query at a chosen angle to it. */
+  class AngledEmbeddingProvider {
+    readonly model = "angled-test-model";
+
+    constructor(private readonly queryCosine: number) {}
+
+    async embed(text: string): Promise<Float32Array> {
+      const [vector] = await this.embedBatch([text]);
+      return vector;
+    }
+
+    async embedBatch(texts: string[]): Promise<Float32Array[]> {
+      return texts.map((text) =>
+        text.includes("QUERY")
+          ? Float32Array.from([this.queryCosine, Math.sqrt(1 - this.queryCosine ** 2)])
+          : Float32Array.from([1, 0]),
+      );
+    }
+  }
+
+  async function searchWith(queryCosine: number) {
+    const index = new SqliteHandoffIndex(
+      join(tempDir, `score-${queryCosine}.db`),
+      tempDir,
+      [{ tool: "codex", scraper: new FixtureScraper([chunk("scored", 0, "user", "indexed body")]) }],
+      { embeddingProvider: new AngledEmbeddingProvider(queryCosine), refreshBudgetMs: 5_000 },
+    );
+
+    const results = await index.searchSessions("QUERY", 5, undefined, "vector");
+    await index.close();
+    return results;
+  }
+
+  it("reports the similarity itself, not the best survivor rescaled to 1", async () => {
+    const results = await searchWith(0.6);
+
+    expect(results).toHaveLength(1);
+    expect(results[0].score).toBeCloseTo(0.6, 2);
+  });
+
+  it("finds nothing when nothing is actually similar", async () => {
+    // Below the confidence bar: the nearest vector is not a match just because
+    // it is the nearest.
+    expect(await searchWith(0.2)).toEqual([]);
+  });
+});

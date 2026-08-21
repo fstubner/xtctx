@@ -1,7 +1,5 @@
 {
   "kind": "jsonl",
-  "filesSampled": 5,
-  "recordsSampled": 674,
   "recordTypes": {
     "assistant.message": [
       "agentId: string",

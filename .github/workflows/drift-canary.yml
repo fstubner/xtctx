@@ -4,12 +4,16 @@ name: drift-canary
 # scrapers against the actual storage those tools wrote. Catches upstream drift
 # that synthetic fixtures cannot.
 #
-# This is intentionally NOT part of ci.yml — it has real-API dependencies,
-# burns credits, and should not gate PRs. It runs nightly + on demand.
+# Manual only, deliberately. Every run spends real API credits, and this used to
+# run nightly whether or not anything upstream had changed — paying every night
+# for a signal that only matters after a release. `upstream-watch` now does the
+# nightly watching for free and says when it is worth looking; this is the
+# stronger check a human reaches for once it has.
+#
+# It is also intentionally NOT part of ci.yml: real-API dependencies must not
+# gate PRs.
 
 on:
-  schedule:
-    - cron: "0 3 * * *" # 03:00 UTC nightly
   workflow_dispatch:
     inputs:
       tool:
@@ -24,7 +28,6 @@ on:
 
 permissions:
   contents: read
-  issues: write
 
 jobs:
   canary:
@@ -91,52 +94,9 @@ jobs:
           # $? after a pipeline is tee's status; the canary's own status is in PIPESTATUS[0].
           echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
 
-      - name: Build issue body on failure
-        if: steps.canary.outputs.exit_code != '0' && steps.canary.outputs.exit_code != '78' && github.event_name == 'schedule'
-        run: |
-          {
-            echo "The nightly drift canary for \`${{ matrix.tool }}\` failed."
-            echo ""
-            echo "This usually means the tool's on-disk storage format has changed upstream and xtctx's scraper no longer handles it. Check recent releases of the tool and compare against \`src/scrapers/${{ matrix.tool }}.ts\`."
-            echo ""
-            echo "**Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-            echo ""
-            echo "### stdout"
-            echo '```'
-            cat canary-stdout.log || true
-            echo '```'
-            echo ""
-            echo "### stderr"
-            echo '```'
-            cat canary-stderr.log || true
-            echo '```'
-          } > issue-body.md
-
-      - name: Check for an existing open drift issue
-        id: existing
-        if: steps.canary.outputs.exit_code != '0' && steps.canary.outputs.exit_code != '78' && github.event_name == 'schedule'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          title="drift: ${{ matrix.tool }} scraper may be broken"
-          existing=$(gh issue list --state open --search "\"$title\" in:title" --json number,title | jq -r ".[] | select(.title == \"$title\") | .number" | head -n1)
-          echo "number=${existing}" >> "$GITHUB_OUTPUT"
-
-      - name: Open drift issue (if none already open)
-        if: steps.canary.outputs.exit_code != '0' && steps.canary.outputs.exit_code != '78' && github.event_name == 'schedule' && steps.existing.outputs.number == ''
-        uses: peter-evans/create-issue-from-file@e8ef132d6df98ed982188e460ebb3b5d4ef3a9cd # v5
-        with:
-          title: "drift: ${{ matrix.tool }} scraper may be broken"
-          content-filepath: issue-body.md
-          labels: |
-            drift
-            canary
-
-      - name: Comment on existing drift issue
-        if: steps.canary.outputs.exit_code != '0' && steps.canary.outputs.exit_code != '78' && github.event_name == 'schedule' && steps.existing.outputs.number != ''
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh issue comment ${{ steps.existing.outputs.number }} --body-file issue-body.md
+      # No issue is filed on failure any more. Filing was for the unattended
+      # nightly run; a dispatch is started by a person who is already watching
+      # the run, and `upstream-watch` is what files issues now.
 
       # 78 means the canary could not run at all — no API key — which is a
       # configuration gap, not upstream drift. Surfaced as a warning so it is
@@ -145,7 +105,7 @@ jobs:
       - name: Note that the canary was skipped
         if: steps.canary.outputs.exit_code == '78'
         run: |
-          echo "::warning title=drift canary skipped::${{ matrix.tool }} did not run — its API key is not configured, so no drift signal exists for this tool tonight."
+          echo "::warning title=drift canary skipped::${{ matrix.tool }} did not run — its API key is not configured, so this run produced no drift signal for it."
           cat canary-stderr.log || true
 
       - name: Fail job on canary failure

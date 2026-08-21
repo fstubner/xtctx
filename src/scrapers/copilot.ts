@@ -5,6 +5,7 @@ import { glob } from "glob";
 import type { CopilotChunk } from "../types/scraper.js";
 import { AbstractScraper, estimateTokens, toDate } from "./base.js";
 import { pathMatchesProject } from "../utils/project-scope.js";
+import { recordDrift, withDriftReport } from "./drift-log.js";
 
 /** VS Code stores Copilot Chat history in workspaceStorage SQLite files. */
 const SESSIONS_KEY = "interactive.sessions";
@@ -54,11 +55,8 @@ interface CopilotSession {
   requests?: CopilotRequest[];
 }
 
-function warnDrift(sourcePath: string, surprise: string, recordsAffected: number): void {
-  console.warn(
-    `[${SCRAPER_NAME}] schema-drift surprise at ${sourcePath}: ${surprise} ` +
-      `(records affected: ${recordsAffected})`,
-  );
+function warnDrift(sourcePath: string, surprise: string, _recordsAffected: number): void {
+  recordDrift(SCRAPER_NAME, sourcePath, surprise);
 }
 
 export class CopilotScraper extends AbstractScraper<CopilotChunk> {
@@ -87,11 +85,11 @@ export class CopilotScraper extends AbstractScraper<CopilotChunk> {
   }
 
   async *scrape(since?: Date): AsyncIterable<CopilotChunk> {
-    yield* this.readAllMessages(since);
+    yield* withDriftReport(SCRAPER_NAME, this.readAllMessages(since));
   }
 
   async *fullSync(): AsyncIterable<CopilotChunk> {
-    yield* this.readAllMessages();
+    yield* withDriftReport(SCRAPER_NAME, this.readAllMessages());
   }
 
   parseRaw(raw: unknown): CopilotChunk {

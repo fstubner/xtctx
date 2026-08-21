@@ -10,7 +10,7 @@ name: upstream-watch
 
 on:
   schedule:
-    - cron: "30 6 * * *" # 06:30 UTC daily, after the canary window
+    - cron: "30 6 * * *" # 06:30 UTC daily
   workflow_dispatch:
 
 permissions:
