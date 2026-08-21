@@ -69,7 +69,9 @@ export class AntigravityScraper extends AbstractScraper<AntigravityChunk> {
     private readonly antigravityRoot: string,
     stateDir: string,
     private readonly projectRoot?: string,
-    private readonly runtimeClient: AntigravityRuntimeClient = new AntigravityLanguageServerClient(),
+    private readonly runtimeClient: AntigravityRuntimeClient = new AntigravityLanguageServerClient(
+      projectRoot,
+    ),
   ) {
     super(stateDir);
   }
@@ -260,7 +262,40 @@ export class AntigravityScraper extends AbstractScraper<AntigravityChunk> {
   }
 }
 
+/**
+ * Whether a trajectory is worth fetching, decided from its summary alone.
+ *
+ * Antigravity's summaries carry the workspace a session belonged to, and
+ * fetching a trajectory means pulling its entire transcript over the wire with
+ * a 30s timeout. Doing that for every session on the machine and filtering
+ * afterwards cost 155 round trips here to keep a handful.
+ *
+ * A summary that names workspaces and names none of ours belongs to another
+ * project, so it is skipped — which also means another project's transcript is
+ * never fetched at all, rather than fetched and then discarded.
+ *
+ * A summary with no workspace at all is not evidence of anything, so it is
+ * still fetched: the message bodies may carry the only path evidence there is.
+ */
+export function shouldFetchTrajectory(
+  summary: Record<string, unknown>,
+  projectRoot?: string,
+): boolean {
+  if (!projectRoot) {
+    return true;
+  }
+
+  const workspaces = extractWorkspaceUris(summary);
+  if (workspaces.length === 0) {
+    return true;
+  }
+
+  return workspaces.some((workspace) => textMentionsProject(workspace, projectRoot));
+}
+
 class AntigravityLanguageServerClient implements AntigravityRuntimeClient {
+  constructor(private readonly projectRoot?: string) {}
+
   async listConversations(conversationsDir: string): Promise<AntigravityRuntimeConversation[]> {
     const endpoints = await discoverLanguageServerEndpoints();
     if (endpoints.length === 0) {
@@ -298,8 +333,20 @@ class AntigravityLanguageServerClient implements AntigravityRuntimeClient {
       }
     }
 
-    const conversations: AntigravityRuntimeConversation[] = [];
-    for (const [sessionId, entry] of bySession.entries()) {
+    const worthFetching = [...bySession.entries()].filter(([, entry]) =>
+      shouldFetchTrajectory(entry.summary, this.projectRoot),
+    );
+
+    // Sessions Antigravity records no workspace for still have to be fetched
+    // to find out whose they are, and that is most of them. Fetching them one
+    // after another made the scan as slow as the sum of every round trip, so
+    // they go out in a small pool instead — same requests, same results, less
+    // waiting. The pool is deliberately modest: this is someone's editor
+    // answering on localhost, not a service built to be hammered.
+    const fetched = await mapWithConcurrency<
+      (typeof worthFetching)[number],
+      AntigravityRuntimeConversation
+    >(worthFetching, 6, async ([sessionId, entry]) => {
       const stepCount = toPositiveInteger(entry.summary.stepCount) ?? 1000;
       const response = await callLanguageServer(
         entry.endpoint,
@@ -314,20 +361,49 @@ class AntigravityLanguageServerClient implements AntigravityRuntimeClient {
           : [];
       const messages = parseAntigravityRuntimeSteps(sessionId, steps, entry.summary);
       if (messages.length === 0) {
-        continue;
+        return null;
       }
 
-      conversations.push({
+      return {
         sessionId,
         title: toStringValue(entry.summary.summary),
         createdAt: toDate(entry.summary.createdTime),
         workspaces: extractWorkspaceUris(entry.summary),
         messages,
-      });
-    }
+      };
+    });
 
-    return conversations;
+    return fetched.filter((entry): entry is AntigravityRuntimeConversation => entry !== null);
   }
+}
+
+/**
+ * Run `worker` over `items` with at most `limit` in flight, preserving order.
+ *
+ * One failed fetch must not lose the rest of the scan, so a rejection becomes
+ * a null for that item rather than taking the whole batch down.
+ */
+export async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  worker: (item: T) => Promise<R | null>,
+): Promise<Array<R | null>> {
+  const results: Array<R | null> = new Array(items.length).fill(null);
+  let next = 0;
+
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const index = next++;
+      try {
+        results[index] = await worker(items[index]);
+      } catch {
+        results[index] = null;
+      }
+    }
+  });
+
+  await Promise.all(runners);
+  return results;
 }
 
 export function parseAntigravityRuntimeSteps(
