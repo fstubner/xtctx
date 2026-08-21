@@ -135,7 +135,14 @@ describe("disconnectProject", () => {
     await setupProject({ projectPath: projectRoot, homeDir, yes: true });
     const target = join(projectRoot, "CLAUDE.md");
     const existing = await readFile(target, "utf-8");
-    await writeFile(target, `My CRLF notes\r\n\r\n${existing.replace(/\r?\n/g, "\r\n")}`, "utf-8");
+    // Two lines, so line endings are still observable once the block and the
+    // separator that preceded it are gone. With a single line there is nothing
+    // left to carry a line ending and the assertion below proves nothing.
+    await writeFile(
+      target,
+      `My CRLF notes\r\nsecond line\r\n\r\n${existing.replace(/\r?\n/g, "\r\n")}`,
+      "utf-8",
+    );
 
     await disconnectProject({ projectPath: projectRoot, homeDir, tool: "claude-code" });
 
@@ -193,5 +200,46 @@ describe("disconnectProject", () => {
     expect(hooks.hooks.SessionStart).toEqual([{ type: "command", command: "echo keep" }]);
     await expect(readFile(join(projectRoot, ".claude", "skills", "xtctx-handoff", "SKILL.md"), "utf-8"))
       .rejects.toThrow();
+  });
+});
+
+/**
+ * PRODUCT.md promises user content survives setup+disconnect byte for byte
+ * outside the managed block. Trailing bytes were the exception: blank lines at
+ * EOF were dropped, and a markdown hard break (two trailing spaces) on the
+ * last line was destroyed — a silent edit to the user's own file.
+ */
+describe("disconnect leaves user content byte-identical", () => {
+  let projectRoot = "";
+  let homeDir = "";
+
+  beforeEach(async () => {
+    projectRoot = await mkdtemp(join(tmpdir(), "xtctx-bytes-project-"));
+    homeDir = await mkdtemp(join(tmpdir(), "xtctx-bytes-home-"));
+  });
+
+  afterEach(async () => {
+    await rm(projectRoot, { recursive: true, force: true });
+    await rm(homeDir, { recursive: true, force: true });
+  });
+
+  it("preserves trailing blank lines and a hard break on the last line", async () => {
+    const original = "# Notes\nline one\nline two  \n\n\n";
+    await writeFile(join(projectRoot, "CLAUDE.md"), original, "utf-8");
+
+    await setupProject({ projectPath: projectRoot, homeDir, yes: true });
+    await disconnectProject({ projectPath: projectRoot, homeDir, all: true });
+
+    expect(await readFile(join(projectRoot, "CLAUDE.md"), "utf-8")).toBe(original);
+  });
+
+  it("preserves a file that ends without a trailing newline", async () => {
+    const original = "# Notes\nno newline at eof";
+    await writeFile(join(projectRoot, "CLAUDE.md"), original, "utf-8");
+
+    await setupProject({ projectPath: projectRoot, homeDir, yes: true });
+    await disconnectProject({ projectPath: projectRoot, homeDir, all: true });
+
+    expect(await readFile(join(projectRoot, "CLAUDE.md"), "utf-8")).toBe(original);
   });
 });

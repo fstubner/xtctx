@@ -41,8 +41,12 @@ export function removeManagedBlocks(content: string): string {
 
   let result = parts[0];
   for (let index = 1; index < parts.length; index += 1) {
-    const left = result.replace(/\n+$/, "");
-    const right = parts[index].replace(/^\n+/, "");
+    // At most the two newlines setup inserts as a separator. Removing every
+    // trailing newline took the user's own blank lines with it, and there is
+    // no way to tell those apart afterwards — so only ever give back what was
+    // added.
+    const left = result.replace(/\n{1,2}$/, "");
+    const right = parts[index].replace(/^\n{1,2}/, "");
     if (!left) {
       result = right;
     } else if (!right) {

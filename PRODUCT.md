@@ -29,8 +29,12 @@ Single-user, single-machine. There is no team, sync, or server component.
   `xtctx_recent_sessions` and retrieve real transcript content from a
   *different* tool's session in the same project, without manual export.
 - Setup is reversible: `xtctx disconnect` removes xtctx's management without
-  deleting transcript data, and user-authored file content survives both
-  operations byte-for-byte outside the managed block.
+  deleting transcript data. Markdown and other prose files come back
+  byte-for-byte outside the managed block, trailing whitespace and blank lines
+  included. JSON configs keep every key and value the user had, but are
+  re-serialised, so their original formatting is not preserved; and an MCP
+  config file that setup created may be left behind holding an empty server
+  map.
 - Only the current project's sessions are ever indexed or served — content
   from other projects on the machine never crosses the project boundary.
 - The demo smoke (`npm run demo:public`) proves the loop end-to-end against
