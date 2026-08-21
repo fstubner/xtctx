@@ -58,10 +58,12 @@ export function createSessionDetailHandler(service: SessionService) {
     );
 
     if (format === "json") {
-      return { session_ref: sessionRef, offset, limit, messages };
+      return { session_ref: sessionRef, offset, limit, messages, indexing: service.getIndexProgress?.() };
     }
 
-    return formatSessionDetailMarkdown(sessionRef, messages, offset, limit);
+    // Without this, "no messages found" during a first scan reads as "that
+    // session does not exist" — for a session that is about to.
+    return formatSessionDetailMarkdown(sessionRef, messages, offset, limit) + progressNote(service);
   };
 }
 
