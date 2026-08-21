@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.14.0](https://github.com/fstubner/xtctx/compare/xtctx-v0.13.1...xtctx-v0.14.0) (2026-08-21)
+
+
+### Features
+
+* git provenance and turn-0 context priming ([#123](https://github.com/fstubner/xtctx/issues/123)) ([2aa0536](https://github.com/fstubner/xtctx/commit/2aa053658b5d715fd4e30e80ad95d1f6690bbfe8))
+
+
+### Bug Fixes
+
+* acceptance round 4 — eight findings from the independent review ([#122](https://github.com/fstubner/xtctx/issues/122)) ([b8ef164](https://github.com/fstubner/xtctx/commit/b8ef164a35cf3142afdf05260f9edad75774f721))
+
 ## [0.13.1](https://github.com/fstubner/xtctx/compare/xtctx-v0.13.0...xtctx-v0.13.1) (2026-08-20)
 
 
