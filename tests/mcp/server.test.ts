@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildToolDefinitions } from "@xtctx/mcp/server";
+import { buildToolDefinitions, startMcpServer } from "@xtctx/mcp/server";
 
 describe("MCP Server", () => {
   it("exposes only the handoff-scope tool surface", () => {
@@ -32,5 +32,31 @@ describe("MCP Server", () => {
     expect(detail?.inputSchema.required).toEqual(["session_ref"]);
     expect(search?.inputSchema.required).toEqual(["query"]);
     expect(manifest?.inputSchema.required).toBeUndefined();
+  });
+});
+
+/**
+ * An MCP host ends a server by closing stdin. `server.onclose` does not fire
+ * for that, so the shutdown callback never ran and the process lived on until
+ * the event loop happened to drain — measured at 69-108 seconds while a scan
+ * of every transcript store on the machine finished. A host that starts a
+ * server per agent session accumulates those.
+ */
+describe("startMcpServer shutdown wiring", () => {
+  it("runs the close callback when stdin ends", async () => {
+    let closes = 0;
+    await startMcpServer({}, () => {
+      closes += 1;
+    });
+
+    try {
+      process.stdin.emit("end");
+
+      expect(closes).toBe(1);
+    } finally {
+      process.stdin.removeAllListeners("end");
+      process.stdin.removeAllListeners("close");
+      process.stdin.pause();
+    }
   });
 });

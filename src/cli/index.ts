@@ -17,16 +17,43 @@ export async function main(argv = process.argv): Promise<void> {
     const shutdown = (exit: boolean) => {
       if (closed) return;
       closed = true;
+
+      // `close()` waits for any in-flight scan to settle, which is right while
+      // the server is serving — it stops a scan writing into a closed handle.
+      // It is wrong once the client has gone: a scan of every transcript store
+      // on the machine takes over a minute, and the server sat there for 84
+      // seconds after stdin closed. A host that spawns a server per session
+      // accumulates those.
+      //
+      // So give the clean close a moment, then leave. Nothing is lost by not
+      // waiting: the index is derived data, every chunk is committed as it is
+      // written, and an unfinished scan simply resumes on the next run.
+      const graceMs = 2_000;
+      const timer = setTimeout(() => {
+        if (exit) process.exit(0);
+      }, graceMs);
+      timer.unref?.();
+
       void services.sessions
         .close()
         .catch(() => {})
         .finally(() => {
+          clearTimeout(timer);
           if (exit) process.exit(0);
         });
     };
     process.once("SIGINT", () => shutdown(true));
     process.once("SIGTERM", () => shutdown(true));
-    await startMcpServer({ sessions: services.sessions }, () => shutdown(false));
+    // Exit once the transport closes, rather than waiting for the event loop
+    // to drain. The client is gone, so there is nothing left to serve — and
+    // something in the scan path keeps a handle alive long after the work is
+    // done: the server sat there for 84 seconds after stdin closed, with the
+    // index already closed in 3ms. An MCP host that spawns a server per
+    // session accumulates those.
+    //
+    // Safe to exit here because `close()` waits for any in-flight scan to
+    // settle first, so nothing is cut off mid-write.
+    await startMcpServer({ sessions: services.sessions }, () => shutdown(true));
     return;
   }
 

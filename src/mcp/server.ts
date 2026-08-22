@@ -234,6 +234,17 @@ export async function startMcpServer(
   }
   const transport = new StdioServerTransport();
   await server.connect(transport);
+
+  // `server.onclose` does not fire when the host simply closes stdin, which is
+  // how an MCP client normally goes away — so the callback above never ran and
+  // the process lived on until the event loop happened to drain, measured at
+  // 69-108 seconds after the client had gone. Watch the stream itself. The
+  // handler is idempotent, so it does not matter which of these arrives first,
+  // or whether `onclose` fires as well.
+  if (onClose) {
+    process.stdin.once("end", onClose);
+    process.stdin.once("close", onClose);
+  }
 }
 
 function asToolParams(value: unknown): ToolParams {
