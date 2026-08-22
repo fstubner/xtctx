@@ -149,7 +149,11 @@ function formatRecentSessionsMarkdown(
       lines.push(`- Branch: ${inlineSafe(session.git_branch)}${commit}`);
     }
     if (typeof session.score === "number") {
-      lines.push(`- Score: ${session.score.toFixed(3)} (${session.retrieval ?? "hybrid"})`);
+      // "Similarity", not "Score" — the number is how close this session is to
+      // the query, and results are ordered by a blend of that with keyword
+      // rank. Calling it a score invited reading it as the sort key, which
+      // made a correctly-ordered list look wrong: 0.430 listed above 0.464.
+      lines.push(`- Similarity: ${session.score.toFixed(3)} (${session.retrieval ?? "hybrid"})`);
     }
     if (session.source_path) {
       lines.push(`- Source: ${session.source_path}`);
