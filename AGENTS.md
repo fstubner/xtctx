@@ -63,6 +63,7 @@ Do not rely on this block for a generated summary; raw local transcripts are aut
 - Call `xtctx_session_detail` with a `session_ref` for the raw transcript messages.
 - Call `xtctx_search_sessions` only when you need semantic or keyword search across chronological transcript windows.
 - Use `xtctx_continuity_status` for wiring and freshness diagnostics.
+- External orchestrators can call `xtctx_handoff_manifest` for stable session references and raw-detail pointers; it does not persist task state.
 
 ## Synced Skills
 - Canonical project skills live in `.xtctx/skills`.
