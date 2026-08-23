@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.15.8](https://github.com/fstubner/xtctx/compare/xtctx-v0.15.7...xtctx-v0.15.8) (2026-08-23)
+
+
+### Miscellaneous
+
+* regenerate the managed handoff blocks ([#157](https://github.com/fstubner/xtctx/issues/157)) ([b44c3b8](https://github.com/fstubner/xtctx/commit/b44c3b87167325239410340d1f4f364b617d0300))
+
 ## [0.15.7](https://github.com/fstubner/xtctx/compare/xtctx-v0.15.6...xtctx-v0.15.7) (2026-08-23)
 
 
