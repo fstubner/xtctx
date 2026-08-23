@@ -24,6 +24,9 @@ allowed to trust.
 - **Drift log** (`src/scrapers/drift-log.ts`) — per-tool record of the
   places another tool's transcripts did not match what the scraper expected,
   summarised once per scan and kept in `.xtctx/state/<tool>-drift.json`.
+  A reader reports only what it did not expect: a step type it has never seen
+  is drift, while one it knowingly does not extract is listed as a known gap,
+  because a warning that fires on every scan is one nobody reads.
   Warnings alone reach only the host agent's stderr, which nothing retains;
   `xtctx status` reads these files back. Bounded: 50 distinct surprises per
   tool, discards counted rather than silent, and ties broken towards the

@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   AntigravityScraper,
   parseAntigravityRuntimeSteps,
+  HANDLED_STEP_TYPES,
+  KNOWN_UNHANDLED_STEP_TYPES,
   listConversationFileIds,
   mapWithConcurrency,
   parsePosixListeningPorts,
@@ -545,5 +547,173 @@ describe("mapWithConcurrency", () => {
     });
 
     expect(results).toEqual([1, null, 3]);
+  });
+});
+
+/**
+ * Antigravity is the only reader that talks to a live language server, and it
+ * was also the only one that could not report a format surprise at all — a
+ * renamed step type would have dropped messages in complete silence.
+ */
+describe("antigravity drift reporting", () => {
+  let warnings: string[] = [];
+  let originalWarn: typeof console.warn;
+
+  beforeEach(() => {
+    warnings = [];
+    originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args.map((arg) => String(arg)).join(" "));
+    };
+  });
+
+  afterEach(() => {
+    console.warn = originalWarn;
+  });
+
+  const summary = { createdTime: "2026-05-10T12:00:00.000Z" };
+
+  it("reports an unhandled step type that was carrying text", () => {
+    parseAntigravityRuntimeSteps(
+      "cascade-drift",
+      [
+        {
+          type: "CORTEX_STEP_TYPE_BRAND_NEW",
+          metadata: { createdAt: "2026-05-10T12:00:00.000Z" },
+          brandNew: { response: "content this reader just dropped" },
+        },
+      ],
+      summary,
+    );
+
+    expect(warnings.join("\n")).toContain("CORTEX_STEP_TYPE_BRAND_NEW");
+  });
+
+  /**
+   * The flood this project has already had once: bookkeeping steps are normal
+   * and constant, so reporting them as drift makes the signal worthless.
+   */
+  it("stays quiet about an unhandled step type that carries nothing", () => {
+    parseAntigravityRuntimeSteps(
+      "cascade-quiet",
+      [
+        { type: "CORTEX_STEP_TYPE_INTERNAL_LATCH", metadata: { createdAt: "2026-05-10T12:00:00.000Z" } },
+        {
+          type: "CORTEX_STEP_TYPE_INTERNAL_FLAG",
+          metadata: { createdAt: "2026-05-10T12:00:00.000Z" },
+          internalFlag: { enabled: true, count: 3, note: "   " },
+        },
+      ],
+      summary,
+    );
+
+    expect(warnings).toEqual([]);
+  });
+
+  it("stays quiet about a handled step type that simply had no content", () => {
+    parseAntigravityRuntimeSteps(
+      "cascade-empty",
+      [
+        {
+          type: "CORTEX_STEP_TYPE_USER_INPUT",
+          metadata: { createdAt: "2026-05-10T12:00:00.000Z" },
+          userInput: {},
+        },
+      ],
+      summary,
+    );
+
+    expect(warnings).toEqual([]);
+  });
+
+  it("reports a step whose type field has gone missing", () => {
+    parseAntigravityRuntimeSteps(
+      "cascade-untyped",
+      [{ metadata: {}, plannerResponse: { response: "text with no type" } }],
+      summary,
+    );
+
+    expect(warnings.join("\n")).toContain("no 'type' field");
+  });
+
+  /**
+   * `HANDLED_STEP_TYPES` is what decides whether an unknown type is drift, so
+   * it has to agree with the parser. A type the parser handles but this set
+   * omits would be reported as drift on every scan for the rest of time.
+   */
+  it("lists exactly the step types the parser handles", () => {
+    const handled = [...HANDLED_STEP_TYPES];
+    const parsed = handled.filter((stepType) => {
+      const messages = parseAntigravityRuntimeSteps(
+        "cascade-cover",
+        [stepTypeFixture(stepType)],
+        summary,
+      );
+      return messages.length === 1;
+    });
+
+    expect(parsed.sort()).toEqual(handled.sort());
+    expect(warnings).toEqual([]);
+  });
+});
+
+/** A minimal step of the given type that the parser should turn into a message. */
+function stepTypeFixture(stepType: string): Record<string, unknown> {
+  const metadata = { createdAt: "2026-05-10T12:00:00.000Z" };
+  const payloads: Record<string, Record<string, unknown>> = {
+    CORTEX_STEP_TYPE_USER_INPUT: { userInput: { userResponse: "hello" } },
+    CORTEX_STEP_TYPE_PLANNER_RESPONSE: { plannerResponse: { response: "hello" } },
+    CORTEX_STEP_TYPE_CODE_ACTION: { codeAction: { description: "edited a file" } },
+    CORTEX_STEP_TYPE_RUN_COMMAND: { runCommand: { commandLine: "npm test" } },
+    CORTEX_STEP_TYPE_VIEW_FILE: { viewFile: { path: "/a/b.ts" } },
+    CORTEX_STEP_TYPE_FIND: { find: { query: "needle" } },
+    CORTEX_STEP_TYPE_LIST_DIRECTORY: { listDirectory: { path: "/a" } },
+    CORTEX_STEP_TYPE_SEARCH_WEB: { searchWeb: { query: "needle" } },
+    CORTEX_STEP_TYPE_READ_URL_CONTENT: { readUrlContent: { url: "https://example.com" } },
+    CORTEX_STEP_TYPE_COMMAND_STATUS: {},
+  };
+
+  return { type: stepType, metadata, ...(payloads[stepType] ?? {}) };
+}
+
+/**
+ * The known-gap list is the reason the drift check means anything: without it
+ * every scan reports twelve types this reader has never extracted, and a
+ * warning that always fires is one nobody reads.
+ */
+describe("known-unhandled antigravity step types", () => {
+  it("does not overlap the handled set", () => {
+    const both = [...KNOWN_UNHANDLED_STEP_TYPES].filter((type) => HANDLED_STEP_TYPES.has(type));
+    expect(both).toEqual([]);
+  });
+
+  it("stays quiet about a known gap, and speaks up about a genuinely new type", () => {
+    const warnings: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args.map((arg) => String(arg)).join(" "));
+    };
+
+    try {
+      parseAntigravityRuntimeSteps(
+        "cascade-known",
+        [...KNOWN_UNHANDLED_STEP_TYPES].map((type) => ({
+          type,
+          metadata: {},
+          payload: { text: "content this reader knowingly does not extract" },
+        })),
+        {},
+      );
+      expect(warnings).toEqual([]);
+
+      parseAntigravityRuntimeSteps(
+        "cascade-new",
+        [{ type: "CORTEX_STEP_TYPE_INVENTED_LATER", metadata: {}, payload: { text: "new content" } }],
+        {},
+      );
+      expect(warnings.join("\n")).toContain("CORTEX_STEP_TYPE_INVENTED_LATER");
+    } finally {
+      console.warn = originalWarn;
+    }
   });
 });

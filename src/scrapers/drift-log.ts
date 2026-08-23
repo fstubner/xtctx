@@ -1,4 +1,4 @@
-import { mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 /**
@@ -137,8 +137,19 @@ function enqueueWrite(key: string, work: () => Promise<void>): Promise<void> {
   });
 }
 
-/** How long to wait for another process's write before breaking its lock. */
-const LOCK_TIMEOUT_MS = 2_000;
+/**
+ * A lock is only stale once it is this old.
+ *
+ * Judged from the lock file's own age rather than from how long this process
+ * has been waiting: a busy machine can make a perfectly healthy write take
+ * longer than a short patience threshold, and breaking a live holder's lock is
+ * exactly the interleaving the lock exists to prevent. A real write is
+ * milliseconds, so this leaves three orders of magnitude of headroom while
+ * still reclaiming a lock from a process that died holding one.
+ */
+const STALE_LOCK_MS = 30_000;
+/** Hard ceiling on waiting, so a scan can never hang on a lock. */
+const MAX_LOCK_WAIT_MS = 30_000;
 const LOCK_RETRY_MS = 25;
 
 /**
@@ -155,7 +166,7 @@ const LOCK_RETRY_MS = 25;
  * which is worse than the interleaving the lock prevents.
  */
 async function withFileLock<T>(lockPath: string, work: () => Promise<T>): Promise<T> {
-  const deadline = Date.now() + LOCK_TIMEOUT_MS;
+  const giveUpAt = Date.now() + MAX_LOCK_WAIT_MS;
   for (;;) {
     try {
       const handle = await open(lockPath, "wx");
@@ -167,14 +178,28 @@ async function withFileLock<T>(lockPath: string, work: () => Promise<T>): Promis
       }
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
-      if (Date.now() >= deadline) {
-        // Break it once, then take it on the next pass. If a live holder wins
-        // the race instead, the loop simply waits again on a fresh deadline.
+
+      const heldFor = await lockAge(lockPath);
+      if (heldFor === null) {
+        // Released between the failed open and the stat: just try again.
+        continue;
+      }
+      if (heldFor > STALE_LOCK_MS || Date.now() >= giveUpAt) {
+        // Whoever held this is not coming back. Break it and take it.
         await rm(lockPath, { force: true });
-        return await withFileLock(lockPath, work);
+        continue;
       }
       await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_MS));
     }
+  }
+}
+
+/** Age of the lock file in ms, or null if it is already gone. */
+async function lockAge(lockPath: string): Promise<number | null> {
+  try {
+    return Date.now() - (await stat(lockPath)).mtimeMs;
+  } catch {
+    return null;
   }
 }
 
