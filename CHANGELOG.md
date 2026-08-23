@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.15.2](https://github.com/fstubner/xtctx/compare/xtctx-v0.15.1...xtctx-v0.15.2) (2026-08-23)
+
+
+### Dependencies
+
+* bump googleapis/release-please-action from 4.4.0 to 5.0.0 ([#86](https://github.com/fstubner/xtctx/issues/86)) ([0bbb125](https://github.com/fstubner/xtctx/commit/0bbb1253614a8499aef922aaa66c02f112596540))
+
 ## [0.15.1](https://github.com/fstubner/xtctx/compare/xtctx-v0.15.0...xtctx-v0.15.1) (2026-08-23)
 
 
