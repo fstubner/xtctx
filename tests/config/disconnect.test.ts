@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -244,5 +245,54 @@ describe("disconnect leaves user content byte-identical", () => {
     await disconnectProject({ projectPath: projectRoot, homeDir, all: true });
 
     expect(await readFile(join(projectRoot, "CLAUDE.md"), "utf-8")).toBe(original);
+  });
+});
+
+/**
+ * Pruning empty directories walks up from each write path — and several write
+ * paths sit at the project root (`.mcp.json`, `CLAUDE.md`, `AGENTS.md`), so
+ * `dirname` is the root itself. Without a floor it kept climbing and deleted
+ * the project directory and its empty ancestors, in a documented command with
+ * no --force, even when disconnect had changed nothing.
+ */
+describe("disconnect never deletes outside the project", () => {
+  let sandbox = "";
+  let homeDir = "";
+
+  beforeEach(async () => {
+    sandbox = await mkdtemp(join(tmpdir(), "xtctx-prune-"));
+    homeDir = await mkdtemp(join(tmpdir(), "xtctx-prune-home-"));
+  });
+
+  afterEach(async () => {
+    await rm(sandbox, { recursive: true, force: true });
+    await rm(homeDir, { recursive: true, force: true });
+  });
+
+  it("leaves the project directory and its ancestors standing", async () => {
+    const keep = join(sandbox, "keep");
+    const projectRoot = join(keep, "a", "b", "empty");
+    await mkdir(projectRoot, { recursive: true });
+    await writeFile(join(keep, "marker.txt"), "mine", "utf-8");
+
+    await disconnectProject({ projectPath: projectRoot, homeDir, all: true });
+
+    // Nothing of ours was ever there, so nothing may be removed.
+    expect(existsSync(projectRoot)).toBe(true);
+    expect(existsSync(join(keep, "a", "b"))).toBe(true);
+    expect(existsSync(join(keep, "a"))).toBe(true);
+    expect(existsSync(join(keep, "marker.txt"))).toBe(true);
+  });
+
+  it("still prunes the empty directories it made inside the project", async () => {
+    const projectRoot = join(sandbox, "project");
+    await mkdir(projectRoot, { recursive: true });
+    await setupProject({ projectPath: projectRoot, homeDir, yes: true });
+
+    await disconnectProject({ projectPath: projectRoot, homeDir, all: true });
+
+    expect(existsSync(projectRoot)).toBe(true);
+    expect(existsSync(join(projectRoot, ".github", "instructions"))).toBe(false);
+    expect(existsSync(join(projectRoot, ".cursor", "rules", "xtctx-skills"))).toBe(false);
   });
 });

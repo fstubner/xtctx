@@ -116,7 +116,11 @@ describe("session-start hook", () => {
     const startedAt = Date.now();
     await runHook({ projectPath: projectRoot, tool: "claude-code", event: "session-start" });
 
-    expect(Date.now() - startedAt).toBeLessThan(1_500);
+    // What this guards is the hook waiting for a scan, which costs the 4s
+    // refresh budget. The hook itself measures 700-950ms, but a loaded machine
+    // pushed it to 2596ms and made this flake — and a flaky test is worth less
+    // than none. Comfortably under the budget, comfortably over the noise.
+    expect(Date.now() - startedAt).toBeLessThan(3_500);
   });
 
   it("stays silent rather than failing the host startup", async () => {

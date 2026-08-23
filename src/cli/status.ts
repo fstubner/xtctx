@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { inspectManagedFile, pathExists } from "../config/setup.js";
+import { inspectMcpWiring } from "../config/mcp-config.js";
 import { inspectSkillStatus } from "../config/skills.js";
 import { createProjectServices, type ProjectServices } from "../runtime/services.js";
 import { SUPPORTED_TOOLS } from "../tools/sources.js";
@@ -22,11 +23,31 @@ export async function runStatus(options: StatusOptions = {}): Promise<void> {
   }
 }
 
-export async function renderStatusBlock(services: ProjectServices): Promise<string> {
+export interface StatusRenderOptions {
+  /**
+   * Home directory to resolve global MCP configs against. Production uses the
+   * real one; tests that configure a sandbox home must inspect that same home,
+   * or every globally-scoped tool looks unwired.
+   */
+  homeDir?: string;
+}
+
+export async function renderStatusBlock(
+  services: ProjectServices,
+  options: StatusRenderOptions = {},
+): Promise<string> {
   const { version } = readXtctxPackage(import.meta.url);
   const status = await services.sessions.getStatus();
   const skills = await inspectSkillStatus(services.projectRoot, services.configPath);
   const configPresent = await pathExists(services.configPath);
+  const enabledTools = SUPPORTED_TOOLS.map((tool) => tool.id).filter(
+    (id) => services.config.tools?.[id]?.enabled !== false,
+  );
+  // Only tools actually installed here can be "broken": a global config for
+  // a tool the user does not have is absent for a good reason, and nagging
+  // about it every run is the crying-wolf failure this command exists to avoid.
+  const detectedTools = new Set(status.tools.filter((tool) => tool.detected).map((tool) => tool.tool));
+  const mcpWiring = configPresent ? await inspectMcpWiring(services.projectRoot, "xtctx", enabledTools, options.homeDir ? { homeDir: options.homeDir } : {}) : [];
   const managed = await Promise.all(
     managedTargets(services.projectRoot).map(async (target) => ({
       ...target,
@@ -80,6 +101,18 @@ export async function renderStatusBlock(services: ProjectServices): Promise<stri
     lines.push(`  ${target.state.padEnd(13)} ${target.tool} ${target.mode}${skillPart}${pathPart}`);
   }
 
+  if (mcpWiring.length > 0) {
+    lines.push("");
+    lines.push("MCP wiring:");
+    for (const entry of mcpWiring) {
+      const scope = entry.scope === "global" ? " (global config)" : "";
+      const detail = entry.detail ? ` — ${entry.detail}` : "";
+      lines.push(
+        `  ${(entry.wired ? "wired" : "not wired").padEnd(12)} ${entry.tool.padEnd(13)} ${entry.path}${scope}${detail}`,
+      );
+    }
+  }
+
   lines.push("");
   lines.push("Managed files:");
   for (const file of managed) {
@@ -107,7 +140,18 @@ export async function renderStatusBlock(services: ProjectServices): Promise<stri
   // damaged are different states and get different advice.
   const needsRepair =
     configPresent &&
-    (managed.some((file) => file.exists && (file.blockCount !== 1 || file.staleReferences.length > 0)) ||
+    // A tool that is enabled but has no xtctx entry in its own MCP config is
+    // the most complete way to be broken: the agent simply never sees xtctx.
+    // Status reported nothing at all for this, so deleting `.mcp.json` left it
+    // saying everything was fine.
+    // A config that was never written is not drift: `setup` only writes some
+    // global configs when asked (`--global-mcp`), so demanding one would tell
+    // a correctly-set-up project to repair itself forever. A config that
+    // exists but has lost its entry is the real thing.
+    (mcpWiring.some(
+      (entry) => !entry.wired && entry.configExists && detectedTools.has(entry.tool),
+    ) ||
+      managed.some((file) => file.exists && (file.blockCount !== 1 || file.staleReferences.length > 0)) ||
     skills.selected.some((skill) => !skill.exists) ||
     // Only `missing` and `drift` are faults. `managed-block` and
     // `unsupported` are the normal, healthy states for tools that carry

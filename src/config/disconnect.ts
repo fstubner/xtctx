@@ -1,5 +1,5 @@
 import { readdir, readFile, rm, rmdir, stat } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative as relativePath, resolve } from "node:path";
 import { writeFileAtomic } from "../utils/atomic-file.js";
 import { matchLineEndings, normalizeNewlines, removeManagedBlocks } from "./managed-block.js";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
@@ -165,17 +165,19 @@ export async function disconnectProject(options: DisconnectOptions = {}): Promis
   }
 
   // Files are removed by several different paths above, so pruning happens
-  // once at the end over everything that actually changed.
-  // Deliberately not gated on `changed`: several removal paths report false
-  // even when they deleted something, and "is this directory empty" is the
-  // real guard — a directory with anything else in it is never touched.
+  // once at the end over every write path.
+  //
+  // Not gated on `changed`: several removal paths report false even when they
+  // deleted something. The guards are that the directory is empty and that it
+  // lies strictly inside the project — a directory holding anything else, or
+  // the project root itself, is never touched.
+  //
   // Deepest first, so a nested directory is gone before its parent is judged.
   const parents = writes
     .map((write) => write.path)
-    .filter((path) => path.startsWith(projectRoot))
     .sort((left, right) => right.split(/[\\/]/).length - left.split(/[\\/]/).length);
   for (const path of parents) {
-    await pruneEmptyParents(dirname(path));
+    await pruneEmptyParents(dirname(path), projectRoot);
   }
 
   return { projectRoot, tools, writes, warnings };
@@ -386,13 +388,32 @@ async function removeIfPresent(path: string): Promise<boolean> {
  * each directory is genuinely empty, so anything the user keeps alongside our
  * files stops it immediately.
  */
-async function pruneEmptyParents(directory: string): Promise<void> {
+/** Strictly below the project root — the root itself is never a candidate. */
+function isInsideProject(candidate: string, projectRoot: string): boolean {
+  const relative = relativePath(projectRoot, candidate);
+  return relative.length > 0 && !relative.startsWith("..") && !isAbsolute(relative);
+}
+
+async function pruneEmptyParents(directory: string, projectRoot: string): Promise<void> {
   let current = directory;
+
+  // Hard floor at the project root. Several write paths sit at the root
+  // itself — `.mcp.json`, `CLAUDE.md`, `AGENTS.md` — so `dirname` is the root,
+  // and without this the walk climbed straight out of the project and deleted
+  // it along with its empty ancestors. Emptiness is not a licence to delete
+  // something xtctx never created.
+  if (!isInsideProject(current, projectRoot)) {
+    return;
+  }
 
   // Bounded: three levels covers the deepest xtctx creates
   // (`.cursor/rules/xtctx-skills`), and a bound is cheaper than reasoning
   // about how far up an unexpected path could walk.
   for (let depth = 0; depth < 3; depth += 1) {
+    if (!isInsideProject(current, projectRoot)) {
+      return;
+    }
+
     let entries: string[];
     try {
       entries = await readdir(current);
