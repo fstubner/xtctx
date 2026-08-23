@@ -1,8 +1,10 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { stringify as stringifyYaml } from "yaml";
+import { SEEDERS, sandboxEnv } from "./helpers.js";
 
 /**
  * Drives the real MCP server over stdio.
@@ -17,13 +19,34 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
  * before the build step.
  */
 describe("MCP server over stdio", () => {
+  let sandboxRoot = "";
   let projectRoot = "";
+  const marker = "STDIO-SMOKE-MARKER decided the retry budget";
   let proc: ChildProcessWithoutNullStreams;
   let buffer = "";
   const pending = new Map<number, (message: Record<string, unknown>) => void>();
 
   function send(message: Record<string, unknown>): void {
     proc.stdin.write(`${JSON.stringify(message)}\n`);
+  }
+
+  /** Retries while the answer is still the empty state: scans are bounded per call. */
+  async function callUntilFound(
+    startId: number,
+    name: string,
+    args: Record<string, unknown>,
+  ): Promise<string> {
+    let text = "";
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const response = (await request(startId + attempt, "tools/call", { name, arguments: args })) as {
+        result?: { isError?: boolean; content?: Array<{ text?: string }> };
+      };
+      expect(response.result?.isError).not.toBe(true);
+      text = response.result?.content?.[0]?.text ?? "";
+      if (!text.includes("No matching sessions found")) return text;
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 2_000));
+    }
+    return text;
   }
 
   function request(id: number, method: string, params: unknown): Promise<Record<string, unknown>> {
@@ -38,9 +61,35 @@ describe("MCP server over stdio", () => {
   }
 
   beforeAll(async () => {
-    projectRoot = await mkdtemp(join(tmpdir(), "xtctx-stdio-"));
+    // realpath, because the product canonicalises its project root and the
+    // seeded store has to agree with it.
+    sandboxRoot = await realpath(await mkdtemp(join(tmpdir(), "xtctx-stdio-")));
+    const home = join(sandboxRoot, "home");
+    projectRoot = join(sandboxRoot, "project");
+    await mkdir(home, { recursive: true });
+    await mkdir(projectRoot, { recursive: true });
+
+    // Seed one real transcript so the retrieval assertions mean something:
+    // against an empty project every call answers "no matching sessions",
+    // which would pass with indexing entirely broken.
+    await SEEDERS["claude-code"](home, projectRoot, marker);
+
+    // Without a project config no tool is enabled, so the server would index
+    // nothing and the assertions would pass on an empty answer again.
+    await mkdir(join(projectRoot, ".xtctx"), { recursive: true });
+    await writeFile(
+      join(projectRoot, ".xtctx", "config.yaml"),
+      stringifyYaml({ tools: { "claude-code": { enabled: true } } }),
+      "utf-8",
+    );
+
+    // The sandbox env, minus the flag that stops the CLI serving MCP — this
+    // test exists to talk to that server.
+    const env = { ...sandboxEnv(home) };
+    delete env.XTCTX_NO_AUTO_MCP;
     proc = spawn(process.execPath, [resolve("node_modules/tsx/dist/cli.mjs"), resolve("src/cli/index.ts")], {
       cwd: projectRoot,
+      env,
       stdio: ["pipe", "pipe", "pipe"],
     }) as ChildProcessWithoutNullStreams;
 
@@ -83,7 +132,7 @@ describe("MCP server over stdio", () => {
       await exited;
       clearTimeout(force);
     }
-    await rm(projectRoot, { recursive: true, force: true });
+    await rm(sandboxRoot, { recursive: true, force: true });
   }, 30_000);
 
   it("advertises exactly the five read-only tools", async () => {
@@ -102,14 +151,21 @@ describe("MCP server over stdio", () => {
   }, 60_000);
 
   it("answers a tool call with content, not an error", async () => {
-    const response = (await request(3, "tools/call", {
-      name: "xtctx_recent_sessions",
-      arguments: { limit: 2 },
-    })) as { result?: { isError?: boolean; content?: Array<{ text?: string }> } };
+    const text = await callUntilFound(100, "xtctx_recent_sessions", { limit: 2 });
 
-    expect(response.result?.isError).not.toBe(true);
-    // An empty project has nothing indexed, and saying so is the contract.
-    expect(response.result?.content?.[0]?.text).toContain("No matching sessions found");
+    // The seeded session, retrieved end to end over the transport.
+    expect(text).toContain("claude-code:");
+  }, 120_000);
+
+  it("returns the seeded transcript content through search", async () => {
+    const text = await callUntilFound(200, "xtctx_search_sessions", {
+      query: "STDIO-SMOKE-MARKER",
+      mode: "keyword",
+    });
+
+    // Asserting on a real hit, not just "a response arrived": this is the one
+    // test that proves indexing and retrieval work through the transport.
+    expect(text).toContain("claude-code:");
   }, 120_000);
 
   it("reports a bad argument as a caller error rather than crashing", async () => {
