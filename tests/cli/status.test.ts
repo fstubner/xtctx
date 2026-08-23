@@ -37,7 +37,7 @@ describe("status", () => {
 
     const services = await createProjectServices(projectRoot);
     try {
-      const status = await renderStatusBlock(services);
+      const status = await renderStatusBlock(services, { homeDir });
 
       expect(status).not.toContain("Wiring has drifted");
       expect(status).toContain("Ask a configured agent to call xtctx_recent_sessions");
@@ -56,7 +56,7 @@ describe("status", () => {
 
     const services = await createProjectServices(projectRoot);
     try {
-      const status = await renderStatusBlock(services);
+      const status = await renderStatusBlock(services, { homeDir });
 
       expect(status).toContain("Skills:");
       // This fixture deliberately drifts a skill target, so the closing hint

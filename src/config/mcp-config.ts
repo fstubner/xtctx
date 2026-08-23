@@ -167,6 +167,97 @@ export function isGlobalOnlyMcpTool(tool: string): boolean {
   return Boolean(renderer?.globalPath && !renderer.projectPath);
 }
 
+export interface McpWiringState {
+  tool: string;
+  path: string;
+  scope: "project" | "global";
+  /** The server entry is present under the tool's own root key. */
+  wired: boolean;
+  /**
+   * The config file exists at all.
+   *
+   * Absent and present-but-empty mean different things: a global config that
+   * was never written is a tool the user has not opted into, while one that
+   * exists without our entry is wiring that has been lost.
+   */
+  configExists: boolean;
+  /** Why it is not wired, when that is worth saying. */
+  detail?: string;
+}
+
+/**
+ * Is each tool actually wired to this server right now?
+ *
+ * `xtctx status` had no way to answer this: it inspected managed instruction
+ * files and skill targets, so deleting `.mcp.json` outright left it reporting
+ * that everything was fine while no agent could reach xtctx at all. Setup can
+ * also legitimately decline to write a config — a commented TOML is left
+ * alone — and that ends the same way unless something checks.
+ */
+export async function inspectMcpWiring(
+  projectRoot: string,
+  serverName: string,
+  tools: string[],
+  options: { homeDir?: string } = {},
+): Promise<McpWiringState[]> {
+  const home = options.homeDir ?? homedir();
+  const states: McpWiringState[] = [];
+  const seen = new Set<string>();
+
+  for (const tool of tools) {
+    const renderer = NATIVE_MCP_TOOLS[tool];
+    if (!renderer) continue;
+
+    const scope: "project" | "global" = renderer.projectPath ? "project" : "global";
+    const configPath = renderer.projectPath
+      ? renderer.projectPath(projectRoot)
+      : renderer.globalPath?.(home);
+    if (!configPath || seen.has(`${tool}:${configPath}`)) continue;
+    seen.add(`${tool}:${configPath}`);
+
+    let raw: string;
+    try {
+      raw = await readFile(configPath, "utf-8");
+    } catch {
+      states.push({ tool, path: configPath, scope, configExists: false, wired: false, detail: "config missing" });
+      continue;
+    }
+
+    const format = renderer.format ?? "json";
+    let parsed: Record<string, unknown> | null = null;
+    try {
+      parsed = parseConfig(raw, format);
+    } catch {
+      if (format === "json") {
+        try {
+          parsed = JSON.parse(stripJsonComments(raw)) as Record<string, unknown>;
+        } catch {
+          parsed = null;
+        }
+      }
+    }
+
+    if (!parsed) {
+      states.push({ tool, path: configPath, scope, configExists: true, wired: false, detail: "config unparsable" });
+      continue;
+    }
+
+    const rootKey = renderer.rootKey ?? "mcpServers";
+    const root = parsed[rootKey];
+    const wired = isRecord(root) && serverName in root;
+    states.push({
+      tool,
+      path: configPath,
+      scope,
+      configExists: true,
+      wired,
+      detail: wired ? undefined : `no ${serverName} entry under ${rootKey}`,
+    });
+  }
+
+  return states;
+}
+
 /**
  * Sync MCP server configs into native formats for tools that support them.
  *
@@ -391,11 +482,32 @@ function parseConfig(raw: string, format: "json" | "toml"): Record<string, unkno
  * otherwise `tag = "release#1"` would make the file permanently unwritable.
  */
 export function tomlHasComments(raw: string): boolean {
+  // Multi-line strings are the reason this cannot be done line by line. An
+  // earlier version reset string state at every newline, so line two of a
+  // `"""` block was scanned as if it were outside a string — which both missed
+  // a real comment after the block (setup then deleted it) and saw a comment
+  // inside one (setup then refused to write a file that had none).
+  let multiline: '"""' | "'''" | null = null;
   let inBasic = false;
   let inLiteral = false;
   let escaped = false;
 
   for (let index = 0; index < raw.length; index += 1) {
+    if (multiline) {
+      // Only the closing delimiter matters; `#` inside is content. Escapes
+      // still apply in the basic form, so `\"""` does not close it.
+      if (multiline === '"""' && !escaped && raw[index] === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (!escaped && raw.startsWith(multiline, index)) {
+        index += 2;
+        multiline = null;
+      }
+      escaped = false;
+      continue;
+    }
+
     const char = raw[index];
 
     if (escaped) {
@@ -406,10 +518,14 @@ export function tomlHasComments(raw: string): boolean {
       escaped = true;
       continue;
     }
+    if (!inBasic && !inLiteral && (raw.startsWith('"""', index) || raw.startsWith("'''", index))) {
+      multiline = raw.startsWith('"""', index) ? '"""' : "'''";
+      index += 2;
+      continue;
+    }
     if (char === "\n") {
-      // Unterminated single-line strings do not carry across lines; multi-line
-      // forms are handled conservatively by treating their quotes the same way,
-      // which can only ever make this answer "no comment" less often.
+      // A single-line string cannot span lines, so an unterminated one ends
+      // here rather than swallowing the rest of the file.
       inBasic = false;
       inLiteral = false;
       continue;
