@@ -126,7 +126,11 @@ export abstract class AbstractScraper<T extends ConversationChunk = Conversation
 
   private readonly stateManager: ScraperStateManager;
 
+  /** Where this scraper's drift log is kept; passed to `withDriftReport`. */
+  protected readonly stateDir: string;
+
   constructor(stateDir: string) {
+    this.stateDir = stateDir;
     this.stateManager = new ScraperStateManager(stateDir);
   }
 

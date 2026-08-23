@@ -80,11 +80,11 @@ export class CopilotCliScraper extends AbstractScraper<CopilotCliChunk> {
   async *scrape(since?: Date): AsyncIterable<CopilotCliChunk> {
     const state = await this.getLastScrapedPosition();
     const cutoff = since ?? state.lastTimestamp;
-    yield* withDriftReport(SCRAPER_NAME, this.readAllSessions(cutoff));
+    yield* withDriftReport(SCRAPER_NAME, this.readAllSessions(cutoff), this.stateDir);
   }
 
   async *fullSync(): AsyncIterable<CopilotCliChunk> {
-    yield* withDriftReport(SCRAPER_NAME, this.readAllSessions(new Date(0)));
+    yield* withDriftReport(SCRAPER_NAME, this.readAllSessions(new Date(0)), this.stateDir);
   }
 
   private async *readAllSessions(since: Date): AsyncIterable<CopilotCliChunk> {

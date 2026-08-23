@@ -85,11 +85,11 @@ export class CopilotScraper extends AbstractScraper<CopilotChunk> {
   }
 
   async *scrape(since?: Date): AsyncIterable<CopilotChunk> {
-    yield* withDriftReport(SCRAPER_NAME, this.readAllMessages(since));
+    yield* withDriftReport(SCRAPER_NAME, this.readAllMessages(since), this.stateDir);
   }
 
   async *fullSync(): AsyncIterable<CopilotChunk> {
-    yield* withDriftReport(SCRAPER_NAME, this.readAllMessages());
+    yield* withDriftReport(SCRAPER_NAME, this.readAllMessages(), this.stateDir);
   }
 
   parseRaw(raw: unknown): CopilotChunk {

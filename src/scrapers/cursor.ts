@@ -132,11 +132,11 @@ export class CursorScraper extends AbstractScraper<CursorChunk> {
   async *scrape(since?: Date): AsyncIterable<CursorChunk> {
     const state = await this.getLastScrapedPosition();
     const cutoff = since ?? state.lastTimestamp;
-    yield* withDriftReport(SCRAPER_NAME, this.readAllMessages(cutoff));
+    yield* withDriftReport(SCRAPER_NAME, this.readAllMessages(cutoff), this.stateDir);
   }
 
   async *fullSync(): AsyncIterable<CursorChunk> {
-    yield* withDriftReport(SCRAPER_NAME, this.readAllMessages(new Date(0)));
+    yield* withDriftReport(SCRAPER_NAME, this.readAllMessages(new Date(0)), this.stateDir);
   }
 
   private async *readAllMessages(since: Date): AsyncIterable<CursorChunk> {

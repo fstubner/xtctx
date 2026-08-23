@@ -46,6 +46,55 @@ describe("status", () => {
     }
   });
 
+  /**
+   * A persisted drift log nobody surfaces is the same dead end as the stderr
+   * it replaced. Status is where a person looks, so it is where a reader's
+   * complaints about another tool's format have to show up.
+   */
+  it("surfaces a reader's persisted format surprises", async () => {
+    await setupProject({ projectPath: projectRoot, homeDir, yes: true });
+    await writeFile(
+      join(projectRoot, ".xtctx", "state", "codex-drift.json"),
+      JSON.stringify({
+        tool: "codex",
+        updatedAt: "2026-08-23T10:00:00.000Z",
+        droppedSurprises: 0,
+        surprises: [
+          {
+            surprise: "unknown 'type' value \"world_state\"",
+            firstLocation: "/store/a.jsonl:4",
+            firstSeen: "2026-08-20T10:00:00.000Z",
+            lastSeen: "2026-08-23T10:00:00.000Z",
+            records: 12,
+          },
+        ],
+      }),
+      "utf-8",
+    );
+
+    const services = await createProjectServices(projectRoot);
+    try {
+      const status = await renderStatusBlock(services, { homeDir });
+
+      expect(status).toContain("Format surprises:");
+      expect(status).toContain("world_state");
+      expect(status).toContain("12 records");
+    } finally {
+      await services.sessions.close();
+    }
+  });
+
+  it("says nothing about surprises when no reader has hit one", async () => {
+    await setupProject({ projectPath: projectRoot, homeDir, yes: true });
+
+    const services = await createProjectServices(projectRoot);
+    try {
+      expect(await renderStatusBlock(services, { homeDir })).not.toContain("Format surprises:");
+    } finally {
+      await services.sessions.close();
+    }
+  });
+
   it("reports synced skill inventory and target drift", async () => {
     await setupProject({ projectPath: projectRoot, homeDir, yes: true });
     await writeFile(
