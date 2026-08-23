@@ -33,6 +33,10 @@ const KNOWN_EVENT_TYPES = new Set([
   "event_msg",
   "response_item",
   "compacted",
+  // Environment state, not a conversation turn: it carries the AGENTS.md text
+  // codex was running under. Recognised so it stops being reported as drift on
+  // every scan; no branch reads it, so nothing is indexed from it.
+  "world_state",
 ]);
 
 function warnDrift(sourcePath: string, surprise: string, _recordsAffected: number): void {
