@@ -105,11 +105,20 @@ export async function renderStatusBlock(
     lines.push("Format surprises:");
     for (const { tool, log } of drift) {
       const kinds = plural(log.surprises.length, "kind");
-      const dropped = log.droppedSurprises > 0 ? `, ${log.droppedSurprises} older dropped` : "";
-      lines.push(`  ${tool.padEnd(13)} ${kinds}, last seen ${log.updatedAt}${dropped}`);
+      // `droppedSurprises` counts what the last write discarded, so it is only
+      // ever about that write — not a running total of everything ever lost.
+      const dropped =
+        log.droppedSurprises > 0 ? `, ${log.droppedSurprises} dropped at the ceiling` : "";
+      lines.push(`  ${tool.padEnd(13)} ${kinds}${dropped}`);
       for (const entry of log.surprises.slice(0, 3)) {
         lines.push(`      ${entry.surprise}`);
-        lines.push(`        ${plural(entry.records, "record")}, first at ${entry.firstLocation}`);
+        // The entry's own last sighting, not the file's write time: with the
+        // whole-file timestamp a surprise that stopped months ago read exactly
+        // like one still happening. And "sightings" rather than "records",
+        // because the count accumulates across scans — a re-scan of the same
+        // file raises it without a single new transcript record.
+        lines.push(`        ${plural(entry.records, "sighting")}, last seen ${entry.lastSeen}`);
+        lines.push(`        first at ${entry.firstLocation}`);
       }
       if (log.surprises.length > 3) {
         lines.push(`      ... and ${log.surprises.length - 3} more in ${tool}-drift.json`);

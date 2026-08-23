@@ -120,6 +120,15 @@ export async function setupProject(options: SetupOptions = {}): Promise<SetupRes
     } else if (file.warning) {
       warnings.push(file.warning);
     }
+    // Antigravity has no per-project MCP config, so wiring it edits a file
+    // shared by every project on the machine. `disconnect` says so when it
+    // removes the entry; setup said nothing when it added one, which is the
+    // half that needs consent.
+    if (file.tool === "antigravity" && file.scope === "global" && (file.updated || file.created)) {
+      warnings.push(
+        `Antigravity MCP config is app-level: ${file.path} applies to every project for this user account, not just this one.`,
+      );
+    }
   }
 
   for (const target of memoryTargets(projectRoot)) {

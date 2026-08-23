@@ -176,7 +176,9 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
         if (!KNOWN_EVENT_TYPES.has(eventType)) {
           // Unknown event type — could be a new event kind added by a newer
           // codex version. Warn so drift is observable; continue reading.
-          warnDrift(filePath, `unknown event type '${eventType}'`, 1);
+          // JSON.stringify, not raw interpolation: the value comes from a
+          // transcript, and the other readers quote it the same way.
+          warnDrift(filePath, `unknown event type ${JSON.stringify(eventType)}`, 1);
           continue;
         }
 
