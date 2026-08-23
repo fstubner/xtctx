@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.18.0](https://github.com/fstubner/xtctx/compare/xtctx-v0.17.0...xtctx-v0.18.0) (2026-08-23)
+
+
+### Features
+
+* extract ask-question, subagent and MCP steps from antigravity ([#169](https://github.com/fstubner/xtctx/issues/169)) ([0648fc3](https://github.com/fstubner/xtctx/commit/0648fc34c3be4d22a82296e02e39b922aeac2f86))
+
 ## [0.17.0](https://github.com/fstubner/xtctx/compare/xtctx-v0.16.1...xtctx-v0.17.0) (2026-08-23)
 
 
