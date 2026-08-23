@@ -12,33 +12,24 @@ const SCRAPER_NAME = "antigravity";
 const LANGUAGE_SERVER_SERVICE = "exa.language_server_pb.LanguageServerService";
 
 /**
- * Step types this reader knows how to turn into a message.
- *
- * Kept beside `parseRuntimeStep` and checked against it by a test, because the
- * whole point of the drift report below is that this set says what "known"
- * means — a type handled there but missing here would be reported as drift on
- * every scan, and one listed here but silently dropped there would never be.
- */
-/**
  * Step types Antigravity emits that this reader knowingly does not extract.
  *
- * Observed 2026-08-23 against a live language server, across 24 trajectories:
- * every one of these carries text, and together they account for roughly six
- * thousand dropped steps against the thousand this reader keeps. They are a
- * gap in coverage, not evidence that Antigravity changed anything, so they
- * must not be reported as drift — a warning that fires on every scan for a
- * known limitation is the crying-wolf failure this project has already made
- * once (`atis-latch`, 4ee257a).
+ * Observed 2026-08-23 against a live language server across 24 trajectories.
+ * Every one carries text, so they are a gap in coverage — not evidence that
+ * Antigravity changed anything, and so not drift. A warning that fires on
+ * every scan for a known limitation is the crying-wolf failure this project
+ * has already made once (`atis-latch`, 4ee257a).
  *
  * Listing them is what makes the drift check mean something: a type in neither
  * this set nor `HANDLED_STEP_TYPES` really is new.
  *
- * Whether any of these should be extracted instead is an open product
- * question — `ASK_QUESTION`, `INVOKE_SUBAGENT` and `MCP_TOOL` look like real
- * conversation; `CHECKPOINT` and `EPHEMERAL_MESSAGE` look like bookkeeping.
+ * What remains here is bookkeeping and bulk. `CHECKPOINT` and
+ * `CONVERSATION_HISTORY` restate steps recorded elsewhere; `EPHEMERAL_MESSAGE`
+ * is transient UI; `ERROR_MESSAGE` and `GENERIC` are the two largest by far
+ * and are mostly retry and status noise. Extracting any of them would add
+ * volume without adding much a later session could act on.
  */
 export const KNOWN_UNHANDLED_STEP_TYPES = new Set([
-  "CORTEX_STEP_TYPE_ASK_QUESTION",
   "CORTEX_STEP_TYPE_CHECKPOINT",
   "CORTEX_STEP_TYPE_CONVERSATION_HISTORY",
   "CORTEX_STEP_TYPE_EPHEMERAL_MESSAGE",
@@ -46,12 +37,18 @@ export const KNOWN_UNHANDLED_STEP_TYPES = new Set([
   "CORTEX_STEP_TYPE_GENERATE_IMAGE",
   "CORTEX_STEP_TYPE_GENERIC",
   "CORTEX_STEP_TYPE_GREP_SEARCH",
-  "CORTEX_STEP_TYPE_INVOKE_SUBAGENT",
   "CORTEX_STEP_TYPE_KNOWLEDGE_ARTIFACTS",
-  "CORTEX_STEP_TYPE_MCP_TOOL",
   "CORTEX_STEP_TYPE_SYSTEM_MESSAGE",
 ]);
 
+/**
+ * Step types this reader turns into a message.
+ *
+ * Kept beside `parseRuntimeStep` and checked against it by a test, because
+ * this set is what the drift report means by "known": a type handled there but
+ * missing here would be reported as drift on every scan, and one listed here
+ * but silently dropped there would never be reported at all.
+ */
 export const HANDLED_STEP_TYPES = new Set([
   "CORTEX_STEP_TYPE_USER_INPUT",
   "CORTEX_STEP_TYPE_PLANNER_RESPONSE",
@@ -63,6 +60,9 @@ export const HANDLED_STEP_TYPES = new Set([
   "CORTEX_STEP_TYPE_SEARCH_WEB",
   "CORTEX_STEP_TYPE_READ_URL_CONTENT",
   "CORTEX_STEP_TYPE_COMMAND_STATUS",
+  "CORTEX_STEP_TYPE_ASK_QUESTION",
+  "CORTEX_STEP_TYPE_INVOKE_SUBAGENT",
+  "CORTEX_STEP_TYPE_MCP_TOOL",
 ]);
 
 interface AntigravityArtifactMetadata {
@@ -575,7 +575,163 @@ function parseRuntimeStep(
       toolName: "command_status",
     });
   }
+  if (stepType === "CORTEX_STEP_TYPE_ASK_QUESTION") {
+    return parseAskQuestionStep(sessionId, step, stepType, timestamp);
+  }
+  if (stepType === "CORTEX_STEP_TYPE_INVOKE_SUBAGENT") {
+    return parseInvokeSubagentStep(sessionId, step, stepType, timestamp);
+  }
+  if (stepType === "CORTEX_STEP_TYPE_MCP_TOOL") {
+    return parseMcpToolStep(sessionId, step, stepType, timestamp);
+  }
   return null;
+}
+
+/**
+ * A question the agent put to the user, with the options offered and whichever
+ * was chosen.
+ *
+ * The chosen option is a decision the user made, which is exactly the kind of
+ * thing a later session needs and cannot recover from the code. Antigravity
+ * repeats the same questions under `requestedInteraction` and
+ * `completedInteractions`; the top-level `askQuestion` is the one that carries
+ * the selection, so it is preferred and the request is only a fallback.
+ */
+function parseAskQuestionStep(
+  sessionId: string,
+  step: Record<string, unknown>,
+  stepType: string,
+  timestamp: Date,
+): AntigravityRuntimeMessage | null {
+  const direct = isRecord(step.askQuestion) ? step.askQuestion : {};
+  const requested = isRecord(step.requestedInteraction) ? step.requestedInteraction : {};
+  const fallback = isRecord(requested.askQuestion) ? requested.askQuestion : {};
+  const questions = Array.isArray(direct.questions)
+    ? direct.questions
+    : Array.isArray(fallback.questions)
+      ? fallback.questions
+      : [];
+
+  const sections: string[] = [];
+  for (const entry of questions) {
+    if (!isRecord(entry)) continue;
+    const question = toStringValue(entry.question);
+    if (!question) continue;
+
+    const options = Array.isArray(entry.options) ? entry.options.filter(isRecord) : [];
+    const selectedIds = new Set(toStringArray(entry.selectedOptionIds));
+    sections.push(`[Question] ${question}`);
+    for (const option of options) {
+      const text = toStringValue(option.text);
+      if (!text) continue;
+      const id = toStringValue(option.id);
+      // Marked inline rather than reported separately, so the answer cannot be
+      // read back without the question it answered.
+      sections.push(`  ${id && selectedIds.has(id) ? "[chosen]" : "[ ]"} ${text}`);
+    }
+  }
+
+  if (sections.length === 0) {
+    // A step that only carries its status: the question lives in another step.
+    return null;
+  }
+
+  const content = sections.join("\n");
+  return runtimeMessage(sessionId, timestamp, "assistant", content, extractReferencedFiles(content), {
+    stepType,
+    toolName: "ask_question",
+  });
+}
+
+/**
+ * Subagents the session dispatched, and the prompt each was given.
+ *
+ * The prompt is the instruction that produced whatever the subagent did, so
+ * without it a later reader sees the result of work with no record of what was
+ * asked for. The subagent's own transcript is a separate conversation that
+ * Antigravity stores elsewhere; only the pointer to it is kept here.
+ */
+function parseInvokeSubagentStep(
+  sessionId: string,
+  step: Record<string, unknown>,
+  stepType: string,
+  timestamp: Date,
+): AntigravityRuntimeMessage | null {
+  const invokeSubagent = isRecord(step.invokeSubagent) ? step.invokeSubagent : {};
+  const subagents = Array.isArray(invokeSubagent.subagents)
+    ? invokeSubagent.subagents.filter(isRecord)
+    : [];
+  const results = Array.isArray(invokeSubagent.results)
+    ? invokeSubagent.results.filter(isRecord)
+    : [];
+
+  const sections: string[] = [];
+  for (const [index, subagent] of subagents.entries()) {
+    const label = toStringValue(subagent.typeName) ?? toStringValue(subagent.role) ?? "subagent";
+    const model = toStringValue(subagent.model);
+    sections.push(`[Subagent] ${label}${model ? ` (${model})` : ""}`);
+
+    const prompt = toStringValue(subagent.initialPrompt);
+    if (prompt) sections.push(prompt);
+
+    const log = toStringValue(results[index]?.logAbsoluteUri);
+    if (log) sections.push(`Log: ${log}`);
+  }
+
+  if (sections.length === 0) {
+    return null;
+  }
+
+  const content = sections.join("\n");
+  const models = subagents
+    .map((subagent) => toStringValue(subagent.model))
+    .filter((model): model is string => Boolean(model));
+
+  return runtimeMessage(sessionId, timestamp, "tool", content, extractReferencedFiles(content), {
+    stepType,
+    toolName: "invoke_subagent",
+    // One model when they agree, so the common case reads as a plain value
+    // rather than a repeated list.
+    model: new Set(models).size === 1 ? models[0] : undefined,
+  });
+}
+
+/**
+ * An MCP tool call: which server, which tool, its arguments and its result.
+ *
+ * A failed call is kept too, and with its error — the fact that a tool was
+ * tried and did not work is often the reason a session went the way it did.
+ */
+function parseMcpToolStep(
+  sessionId: string,
+  step: Record<string, unknown>,
+  stepType: string,
+  timestamp: Date,
+): AntigravityRuntimeMessage | null {
+  const mcpTool = isRecord(step.mcpTool) ? step.mcpTool : {};
+  const toolCall = isRecord(mcpTool.toolCall) ? mcpTool.toolCall : {};
+  const serverName = toStringValue(mcpTool.serverName);
+  const toolName = toStringValue(toolCall.name);
+  if (!serverName && !toolName) {
+    return null;
+  }
+
+  const qualifiedName = [serverName, toolName].filter(Boolean).join("/");
+  const error = isRecord(step.error) ? step.error : {};
+  const sections = [
+    `[MCP] ${qualifiedName}`,
+    // `originalArgumentsJson` is what the model actually wrote; the other is
+    // Antigravity's rewrite of it, and only differs when it rewrote something.
+    toStringValue(toolCall.argumentsJson) ?? toStringValue(toolCall.originalArgumentsJson),
+    toStringValue(mcpTool.resultString) ? `Result:\n${toStringValue(mcpTool.resultString)}` : undefined,
+    toStringValue(error.shortError) ?? toStringValue(error.userErrorMessage),
+  ].filter((line): line is string => Boolean(line));
+
+  const content = sections.join("\n");
+  return runtimeMessage(sessionId, timestamp, "tool", content, extractReferencedFiles(content), {
+    stepType,
+    toolName: qualifiedName ? `mcp:${qualifiedName}` : "mcp",
+  });
 }
 
 function parseUserInputStep(
