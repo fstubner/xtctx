@@ -671,6 +671,15 @@ function stepTypeFixture(stepType: string): Record<string, unknown> {
     CORTEX_STEP_TYPE_SEARCH_WEB: { searchWeb: { query: "needle" } },
     CORTEX_STEP_TYPE_READ_URL_CONTENT: { readUrlContent: { url: "https://example.com" } },
     CORTEX_STEP_TYPE_COMMAND_STATUS: {},
+    CORTEX_STEP_TYPE_ASK_QUESTION: {
+      askQuestion: { questions: [{ question: "Which one?", options: [{ id: "a", text: "This one" }] }] },
+    },
+    CORTEX_STEP_TYPE_INVOKE_SUBAGENT: {
+      invokeSubagent: { subagents: [{ typeName: "reviewer", initialPrompt: "look at it" }], results: [] },
+    },
+    CORTEX_STEP_TYPE_MCP_TOOL: {
+      mcpTool: { serverName: "xtctx", toolCall: { name: "xtctx_recent_sessions" } },
+    },
   };
 
   return { type: stepType, metadata, ...(payloads[stepType] ?? {}) };
@@ -715,5 +724,179 @@ describe("known-unhandled antigravity step types", () => {
     } finally {
       console.warn = originalWarn;
     }
+  });
+});
+
+describe("antigravity steps that record a decision", () => {
+  const summary = { createdTime: "2026-05-10T12:00:00.000Z" };
+
+  /**
+   * Which option the user picked is a decision that exists nowhere else — not
+   * in the code, not in the diff. It is the reason a later session can tell
+   * what was chosen from what was merely considered.
+   */
+  it("keeps a question, its options, and which one was chosen", () => {
+    const [message] = parseAntigravityRuntimeSteps(
+      "cascade-ask",
+      [
+        {
+          type: "CORTEX_STEP_TYPE_ASK_QUESTION",
+          metadata: { createdAt: "2026-05-10T12:00:00.000Z" },
+          status: "COMPLETED",
+          askQuestion: {
+            questions: [
+              {
+                question: "Which store should the index live in?",
+                options: [
+                  { id: "a", text: "SQLite" },
+                  { id: "b", text: "Flat JSON" },
+                ],
+                selectedOptionIds: ["a"],
+              },
+            ],
+          },
+        },
+      ],
+      summary,
+    );
+
+    expect(message.content).toContain("Which store should the index live in?");
+    expect(message.content).toContain("[chosen] SQLite");
+    expect(message.content).toContain("[ ] Flat JSON");
+    expect(message.toolName).toBe("ask_question");
+    expect(message.role).toBe("assistant");
+  });
+
+  it("falls back to the requested interaction when the answer has not come back", () => {
+    const [message] = parseAntigravityRuntimeSteps(
+      "cascade-ask-pending",
+      [
+        {
+          type: "CORTEX_STEP_TYPE_ASK_QUESTION",
+          metadata: {},
+          status: "PENDING",
+          requestedInteraction: {
+            askQuestion: { questions: [{ question: "Ship it?", options: [{ id: "y", text: "Yes" }] }] },
+          },
+        },
+      ],
+      summary,
+    );
+
+    expect(message.content).toContain("Ship it?");
+    expect(message.content).toContain("[ ] Yes");
+  });
+
+  it("drops an ask-question step that carries only its status", () => {
+    expect(
+      parseAntigravityRuntimeSteps(
+        "cascade-ask-empty",
+        [{ type: "CORTEX_STEP_TYPE_ASK_QUESTION", metadata: {}, status: "RUNNING" }],
+        summary,
+      ),
+    ).toEqual([]);
+  });
+
+  it("keeps the prompt each subagent was given, and where its log went", () => {
+    const [message] = parseAntigravityRuntimeSteps(
+      "cascade-subagent",
+      [
+        {
+          type: "CORTEX_STEP_TYPE_INVOKE_SUBAGENT",
+          metadata: {},
+          invokeSubagent: {
+            subagents: [
+              { typeName: "reviewer", role: "REVIEW", initialPrompt: "Audit the retry logic", model: "gemini-3-pro" },
+            ],
+            results: [{ conversationId: "sub-1", logAbsoluteUri: "file:///logs/sub-1.md" }],
+          },
+        },
+      ],
+      summary,
+    );
+
+    expect(message.content).toContain("[Subagent] reviewer (gemini-3-pro)");
+    expect(message.content).toContain("Audit the retry logic");
+    expect(message.content).toContain("file:///logs/sub-1.md");
+    expect(message.toolName).toBe("invoke_subagent");
+    expect(message.model).toBe("gemini-3-pro");
+  });
+
+  it("does not claim a single model when subagents used different ones", () => {
+    const [message] = parseAntigravityRuntimeSteps(
+      "cascade-subagent-mixed",
+      [
+        {
+          type: "CORTEX_STEP_TYPE_INVOKE_SUBAGENT",
+          metadata: {},
+          invokeSubagent: {
+            subagents: [
+              { typeName: "a", initialPrompt: "one", model: "gemini-3-pro" },
+              { typeName: "b", initialPrompt: "two", model: "gemini-3-flash" },
+            ],
+            results: [],
+          },
+        },
+      ],
+      summary,
+    );
+
+    expect(message.model).toBeUndefined();
+    expect(message.content).toContain("one");
+    expect(message.content).toContain("two");
+  });
+
+  it("keeps an MCP call with its server, arguments and result", () => {
+    const [message] = parseAntigravityRuntimeSteps(
+      "cascade-mcp",
+      [
+        {
+          type: "CORTEX_STEP_TYPE_MCP_TOOL",
+          metadata: {},
+          mcpTool: {
+            serverName: "xtctx",
+            toolCall: { id: "1", name: "xtctx_recent_sessions", argumentsJson: '{"limit":5}' },
+            resultString: "3 sessions",
+          },
+        },
+      ],
+      summary,
+    );
+
+    expect(message.content).toContain("[MCP] xtctx/xtctx_recent_sessions");
+    expect(message.content).toContain('{"limit":5}');
+    expect(message.content).toContain("Result:\n3 sessions");
+    expect(message.toolName).toBe("mcp:xtctx/xtctx_recent_sessions");
+  });
+
+  /**
+   * A tool that was tried and failed is often why a session went the way it
+   * did, so the failure is kept rather than dropped as an empty result.
+   */
+  it("keeps a failed MCP call and its error", () => {
+    const [message] = parseAntigravityRuntimeSteps(
+      "cascade-mcp-error",
+      [
+        {
+          type: "CORTEX_STEP_TYPE_MCP_TOOL",
+          metadata: {},
+          error: { shortError: "server not reachable", isBenign: false },
+          mcpTool: { serverName: "xtctx", toolCall: { id: "1", name: "xtctx_search_sessions" } },
+        },
+      ],
+      summary,
+    );
+
+    expect(message.content).toContain("server not reachable");
+  });
+
+  it("drops an MCP step that names neither a server nor a tool", () => {
+    expect(
+      parseAntigravityRuntimeSteps(
+        "cascade-mcp-empty",
+        [{ type: "CORTEX_STEP_TYPE_MCP_TOOL", metadata: {}, mcpTool: { toolCall: {} } }],
+        summary,
+      ),
+    ).toEqual([]);
   });
 });
