@@ -39,6 +39,10 @@ class FixtureSessionService implements SessionService {
     return {
       project_root: "/repo",
       db_path: "/repo/.xtctx/state/xtctx.db",
+      // Healthy embeddings: the real service reports a message here when the
+
+      // model fails, and the status contract requires the field either way.
+      embedding_error: null,
       last_scan_at: "2026-05-10T10:02:00.000Z",
       sessions: 1,
       messages: 1,

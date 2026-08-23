@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-// @ts-expect-error -- plain Node ESM script helper, no type declarations
 import {
   fingerprintsDiffer,
   isTransientSidecar,

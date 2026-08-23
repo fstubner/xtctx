@@ -30,11 +30,12 @@
     "landing:preview": "npm --prefix landing run preview",
     "prepack": "npm run build",
     "smoke:cli": "node dist/src/cli/index.js --help",
-    "verify:release": "npm run lint && npm test && npm run test:security && npm run security:checklist && npm audit --omit=dev && npm --prefix landing audit && npm run test:drift && npm run test:integration && npm run test:smoke && npm run test:eval && npm run build && npm pack --dry-run && npm run demo:public && npm run landing:build && npm run smoke:cli",
+    "verify:release": "npm run lint && npm run typecheck && npm test && npm run test:security && npm run security:checklist && npm audit --omit=dev && npm --prefix landing audit && npm run test:drift && npm run test:integration && npm run test:smoke && npm run test:eval && npm run build && npm pack --dry-run && npm run demo:public && npm run landing:build && npm run smoke:cli",
     "test:eval": "vitest run tests/eval",
     "test:smoke": "vitest run tests/smoke",
     "capture:formats": "node scripts/capture-format-fingerprint.mjs",
-    "check:upstream": "node scripts/check-upstream-versions.mjs"
+    "check:upstream": "node scripts/check-upstream-versions.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.test.json"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",

@@ -36,6 +36,10 @@ class DetailFixtureService implements SessionService {
     return {
       project_root: "/fixture",
       db_path: "/fixture/.xtctx/state/xtctx.db",
+      // Healthy embeddings: the real service reports a message here when the
+
+      // model fails, and the status contract requires the field either way.
+      embedding_error: null,
       last_scan_at: null,
       sessions: 0,
       messages: 0,

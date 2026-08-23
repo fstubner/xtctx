@@ -90,6 +90,9 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Typecheck (including the test tree)
+        run: npm run typecheck
+
       - name: Root security tests and checklist
         run: |
           npm run test:security
