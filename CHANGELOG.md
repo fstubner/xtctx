@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.14.6](https://github.com/fstubner/xtctx/compare/xtctx-v0.14.5...xtctx-v0.14.6) (2026-08-23)
+
+
+### Bug Fixes
+
+* **drift:** stop the fingerprint reporting the sample as a change ([#136](https://github.com/fstubner/xtctx/issues/136)) ([c1cae16](https://github.com/fstubner/xtctx/commit/c1cae16c705b6f544d7933f6d089663a99508e92))
+
 ## [0.14.5](https://github.com/fstubner/xtctx/compare/xtctx-v0.14.4...xtctx-v0.14.5) (2026-08-23)
 
 
