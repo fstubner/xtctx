@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.16.0](https://github.com/fstubner/xtctx/compare/xtctx-v0.15.10...xtctx-v0.16.0) (2026-08-23)
+
+
+### Features
+
+* keep scraper drift warnings after the scan that found them ([#163](https://github.com/fstubner/xtctx/issues/163)) ([5c1ff09](https://github.com/fstubner/xtctx/commit/5c1ff095054239e05c00652b757681c119969fd3))
+
 ## [0.15.10](https://github.com/fstubner/xtctx/compare/xtctx-v0.15.9...xtctx-v0.15.10) (2026-08-23)
 
 
