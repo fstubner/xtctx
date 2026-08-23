@@ -221,6 +221,36 @@ describe("ClaudeCodeScraper", () => {
     }
   });
 
+  /**
+   * Two more bookkeeping types the format fingerprint caught: `ai-title`
+   * carries a generated session title, `frame-link` a path reference. Neither
+   * holds a conversation turn, and both are the same shape as `custom-title`
+   * and `pr-link`, which were already known.
+   */
+  it("does not treat ai-title or frame-link records as drift", async () => {
+    const warnings: string[] = [];
+    const origWarn = console.warn;
+    console.warn = (...args) => warnings.push(args.join(" "));
+    try {
+      const projectDir = join(tempDir, "title-and-link");
+      await mkdir(projectDir, { recursive: true });
+      await writeFile(
+        join(projectDir, "bookkeeping.jsonl"),
+        [
+          '{"type":"ai-title","aiTitle":"Switch to direct SSH","sessionId":"abc"}',
+          '{"type":"frame-link","sessionId":"abc","path":"/tmp/frame","title":"x"}',
+        ].join("\n") + "\n",
+      );
+
+      const chunks: ClaudeCodeChunk[] = [];
+      for await (const chunk of scraper.fullSync()) chunks.push(chunk);
+
+      expect(warnings).toEqual([]);
+    } finally {
+      console.warn = origWarn;
+    }
+  });
+
   it("scrapes conversation chunks from JSONL", async () => {
     const chunks: ClaudeCodeChunk[] = [];
 

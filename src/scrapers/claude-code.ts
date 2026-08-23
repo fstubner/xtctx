@@ -37,9 +37,13 @@ const NON_MESSAGE_TYPES = new Set([
   // `{"type":"atis-latch","atis":"","sessionId":"..."}` — bookkeeping, no
   // conversational content. Found by the format fingerprint the day Claude
   // Code started writing it, 18 in a single transcript.
+  // A generated session title, alongside the user-set `custom-title` below.
+  "ai-title",
   "atis-latch",
   "attachment",
   "custom-title",
+  // A path/URL reference, alongside `pr-link` below.
+  "frame-link",
   "last-prompt",
   // Session mode markers (`{"type":"mode","mode":"normal",…}`). Bookkeeping,
   // no conversational content — and frequent: 169 of them in a single
