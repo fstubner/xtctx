@@ -89,7 +89,10 @@ describe("disconnectProject", () => {
   it("does not leave behind files that hold nothing but xtctx scaffolding", async () => {
     await setupProject({ projectPath: projectRoot, homeDir, yes: true });
 
-    await disconnectProject({ projectPath: projectRoot, homeDir, all: true, yes: true });
+    // No `yes` here: confirmation belongs to the CLI wrapper, and
+    // `disconnectProject` never took such an option — passing one was a no-op
+    // that read as if this test were exercising the non-interactive path.
+    await disconnectProject({ projectPath: projectRoot, homeDir, all: true });
 
     // A managed file whose only content was the xtctx block, and configs that
     // now hold an empty xtctx container, are litter created by setup.

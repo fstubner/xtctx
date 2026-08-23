@@ -1,0 +1,19 @@
+{
+  // Type-checks the test tree, which the build config deliberately excludes
+  // because tests are never emitted. Nothing checked them at all until an
+  // optional interface method and a silently-no-op `?.()` call site were able
+  // to coexist unnoticed — a test that quietly stopped waiting for the thing it
+  // was asserting about.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    // Test doubles implement the service interfaces, so they are checked
+    // against the same contracts the product is.
+    "types": ["node"]
+  },
+  "include": ["src/**/*", "tests/**/*"],
+  "exclude": ["node_modules", "dist", "web", "landing"]
+}

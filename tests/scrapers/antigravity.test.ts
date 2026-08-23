@@ -13,10 +13,10 @@ import {
   type AntigravityRuntimeClient,
   type AntigravityRuntimeConversation,
 } from "@xtctx/scrapers/antigravity";
-import type { ConversationChunk } from "@xtctx/types/scraper";
+import type { AntigravityChunk } from "@xtctx/types/scraper";
 
-async function collect(scraper: AntigravityScraper): Promise<ConversationChunk[]> {
-  const chunks: ConversationChunk[] = [];
+async function collect(scraper: AntigravityScraper): Promise<AntigravityChunk[]> {
+  const chunks: AntigravityChunk[] = [];
   for await (const chunk of scraper.fullSync()) {
     chunks.push(chunk);
   }
@@ -157,7 +157,7 @@ describe("AntigravityScraper", () => {
     );
 
     const scraper = new AntigravityScraper(rootDir, stateDir, projectRoot, emptyRuntimeClient());
-    const chunks: ConversationChunk[] = [];
+    const chunks: AntigravityChunk[] = [];
     for await (const chunk of scraper.scrape(new Date("2026-05-10T12:00:00.000Z"))) {
       chunks.push(chunk);
     }

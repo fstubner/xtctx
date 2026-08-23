@@ -11,7 +11,7 @@ vi.mock("@xtctx/config/setup", () => {
 });
 
 describe("runSetup CLI wrapper", () => {
-  let originalExitCode: number | undefined;
+  let originalExitCode: typeof process.exitCode;
 
   beforeEach(() => {
     originalExitCode = process.exitCode;
