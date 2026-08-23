@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.14.7](https://github.com/fstubner/xtctx/compare/xtctx-v0.14.6...xtctx-v0.14.7) (2026-08-23)
+
+
+### Miscellaneous
+
+* **drift:** record new claude-code attachment and error fields ([#138](https://github.com/fstubner/xtctx/issues/138)) ([8b39a59](https://github.com/fstubner/xtctx/commit/8b39a5998421f8276a6b8b0f7a3530609e5a6d73))
+
 ## [0.14.6](https://github.com/fstubner/xtctx/compare/xtctx-v0.14.5...xtctx-v0.14.6) (2026-08-23)
 
 
