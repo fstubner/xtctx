@@ -26,7 +26,11 @@ allowed to trust.
   summarised once per scan and kept in `.xtctx/state/<tool>-drift.json`.
   Warnings alone reach only the host agent's stderr, which nothing retains;
   `xtctx status` reads these files back. Bounded: 50 distinct surprises per
-  tool, discards counted rather than silent.
+  tool, discards counted rather than silent, and ties broken towards the
+  newest so a full log still records a fresh format break. Writes take a lock
+  file, because one project is normally served by several xtctx processes at
+  once. Surprises quote untrusted transcript values, so control characters are
+  stripped on the way in and on the way out.
 - **Config writers** (`src/config/`) — setup/disconnect logic that edits
   other tools' config files (MCP config, managed instruction blocks,
   synced skills, the Claude Code hook in `.claude/settings.json`).

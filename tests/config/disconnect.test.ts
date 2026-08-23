@@ -21,6 +21,40 @@ describe("disconnectProject", () => {
     await rm(homeDir, { recursive: true, force: true });
   });
 
+  /**
+   * `disconnect --all` deliberately leaves `.xtctx/state/` alone, because the
+   * transcript index is the user's data. Removing the ignore file that keeps
+   * that index out of git therefore hands them a repo where the next `git add`
+   * commits raw conversation text — the one thing the product promises never
+   * leaves the machine.
+   */
+  it("keeps the ignore file while the transcript index it protects is still there", async () => {
+    await setupProject({ projectPath: projectRoot, homeDir, yes: true });
+    const stateDir = join(projectRoot, ".xtctx", "state");
+    await mkdir(stateDir, { recursive: true });
+    await writeFile(join(stateDir, "xtctx.db"), "pretend index with transcript text", "utf-8");
+
+    await disconnectProject({ projectPath: projectRoot, homeDir, all: true });
+
+    expect(existsSync(join(projectRoot, ".xtctx", ".gitignore"))).toBe(true);
+    expect(await readFile(join(projectRoot, ".xtctx", ".gitignore"), "utf-8")).toContain("state/");
+  });
+
+  it("removes the ignore file once there is no index left to protect", async () => {
+    await setupProject({ projectPath: projectRoot, homeDir, yes: true });
+    await rm(join(projectRoot, ".xtctx", "state"), { recursive: true, force: true });
+
+    const result = await disconnectProject({ projectPath: projectRoot, homeDir, all: true });
+
+    expect(existsSync(join(projectRoot, ".xtctx", ".gitignore"))).toBe(false);
+    // Reported for what it is, not as a synced skill.
+    expect(result.writes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "gitignore", changed: true }),
+      ]),
+    );
+  });
+
   it("disconnects Antigravity by removing MCP, managed GEMINI.md, and disabling the tool", async () => {
     await setupProject({ projectPath: projectRoot, homeDir, yes: true });
 

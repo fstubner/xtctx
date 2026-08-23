@@ -64,7 +64,8 @@ describe("status", () => {
             surprise: "unknown 'type' value \"world_state\"",
             firstLocation: "/store/a.jsonl:4",
             firstSeen: "2026-08-20T10:00:00.000Z",
-            lastSeen: "2026-08-23T10:00:00.000Z",
+            // Deliberately older than the file's updatedAt above.
+            lastSeen: "2026-08-21T10:00:00.000Z",
             records: 12,
           },
         ],
@@ -78,7 +79,12 @@ describe("status", () => {
 
       expect(status).toContain("Format surprises:");
       expect(status).toContain("world_state");
-      expect(status).toContain("12 records");
+      // "sightings", not "records": the count accumulates across scans, so a
+      // re-scan of the same file raises it without any new transcript record.
+      expect(status).toContain("12 sightings");
+      // Each entry's own last sighting, not the file's write time — otherwise
+      // a surprise fixed months ago reads exactly like a live one.
+      expect(status).toContain("2026-08-21T10:00:00.000Z");
     } finally {
       await services.sessions.close();
     }

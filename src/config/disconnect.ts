@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { readdir, readFile, rm, rmdir, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative as relativePath, resolve } from "node:path";
 import { writeFileAtomic } from "../utils/atomic-file.js";
@@ -127,17 +128,33 @@ export async function disconnectProject(options: DisconnectOptions = {}): Promis
   writes.push(...(await removeSyncedSkillsForTools(projectRoot, tools)));
 
   if (options.all === true) {
-    // Nothing is left managing skills, so the synced source and the ignore
-    // file setup wrote are xtctx's own scaffolding, not user content.
-    // Transcript data under .xtctx/state is deliberately untouched.
-    for (const path of [
-      join(projectRoot, ".xtctx", "skills"),
-      join(projectRoot, ".xtctx", ".gitignore"),
-    ]) {
+    // Nothing is left managing skills, so the synced source setup wrote is
+    // xtctx's own scaffolding, not user content.
+    writes.push({
+      path: join(projectRoot, ".xtctx", "skills"),
+      kind: "skill-source",
+      changed: await removeIfPresent(join(projectRoot, ".xtctx", "skills")),
+    });
+
+    // The ignore file only goes when the index it protects has gone too.
+    // Transcript data under .xtctx/state is deliberately untouched, and that
+    // index holds raw conversation text — so removing its ignore rule while
+    // leaving it in place hands the user a repo whose next `git add` commits
+    // their transcripts. The two are removed together or not at all.
+    const stateDir = join(projectRoot, ".xtctx", "state");
+    const gitignorePath = join(projectRoot, ".xtctx", ".gitignore");
+    if (!existsSync(stateDir)) {
       writes.push({
-        path,
-        kind: "skill-source",
-        changed: await removeIfPresent(path),
+        path: gitignorePath,
+        kind: "gitignore",
+        changed: await removeIfPresent(gitignorePath),
+      });
+    } else {
+      writes.push({
+        path: gitignorePath,
+        kind: "gitignore",
+        changed: false,
+        note: "kept: .xtctx/state still holds the transcript index",
       });
     }
   }

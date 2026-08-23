@@ -19,6 +19,19 @@ describe("setupProject", () => {
     await rm(homeDir, { recursive: true, force: true });
   });
 
+  /**
+   * Antigravity has no per-project MCP config, so wiring it edits a file every
+   * project on the machine shares. `disconnect` has always said so on the way
+   * out; setup said nothing on the way in, which is the half where consent
+   * actually matters.
+   */
+  it("says when it has written a machine-wide Antigravity config", async () => {
+    const result = await setupProject({ projectPath: projectRoot, homeDir, yes: true });
+
+    expect(result.warnings.join("\n")).toMatch(/Antigravity MCP config is app-level/);
+    expect(result.warnings.join("\n")).toContain("every project");
+  });
+
   it("writes the greenfield setup surfaces with npx -y xtctx MCP config", async () => {
     const result = await setupProject({ projectPath: projectRoot, homeDir, yes: true });
 
