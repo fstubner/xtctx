@@ -5,9 +5,65 @@ import { promisify } from "node:util";
 import { basename, extname, join } from "node:path";
 import type { AntigravityChunk } from "../types/scraper.js";
 import { AbstractScraper, estimateTokens, toDate } from "./base.js";
+import { recordDrift, withDriftReport } from "./drift-log.js";
 
 const execFileAsync = promisify(execFile);
+const SCRAPER_NAME = "antigravity";
 const LANGUAGE_SERVER_SERVICE = "exa.language_server_pb.LanguageServerService";
+
+/**
+ * Step types this reader knows how to turn into a message.
+ *
+ * Kept beside `parseRuntimeStep` and checked against it by a test, because the
+ * whole point of the drift report below is that this set says what "known"
+ * means — a type handled there but missing here would be reported as drift on
+ * every scan, and one listed here but silently dropped there would never be.
+ */
+/**
+ * Step types Antigravity emits that this reader knowingly does not extract.
+ *
+ * Observed 2026-08-23 against a live language server, across 24 trajectories:
+ * every one of these carries text, and together they account for roughly six
+ * thousand dropped steps against the thousand this reader keeps. They are a
+ * gap in coverage, not evidence that Antigravity changed anything, so they
+ * must not be reported as drift — a warning that fires on every scan for a
+ * known limitation is the crying-wolf failure this project has already made
+ * once (`atis-latch`, 4ee257a).
+ *
+ * Listing them is what makes the drift check mean something: a type in neither
+ * this set nor `HANDLED_STEP_TYPES` really is new.
+ *
+ * Whether any of these should be extracted instead is an open product
+ * question — `ASK_QUESTION`, `INVOKE_SUBAGENT` and `MCP_TOOL` look like real
+ * conversation; `CHECKPOINT` and `EPHEMERAL_MESSAGE` look like bookkeeping.
+ */
+export const KNOWN_UNHANDLED_STEP_TYPES = new Set([
+  "CORTEX_STEP_TYPE_ASK_QUESTION",
+  "CORTEX_STEP_TYPE_CHECKPOINT",
+  "CORTEX_STEP_TYPE_CONVERSATION_HISTORY",
+  "CORTEX_STEP_TYPE_EPHEMERAL_MESSAGE",
+  "CORTEX_STEP_TYPE_ERROR_MESSAGE",
+  "CORTEX_STEP_TYPE_GENERATE_IMAGE",
+  "CORTEX_STEP_TYPE_GENERIC",
+  "CORTEX_STEP_TYPE_GREP_SEARCH",
+  "CORTEX_STEP_TYPE_INVOKE_SUBAGENT",
+  "CORTEX_STEP_TYPE_KNOWLEDGE_ARTIFACTS",
+  "CORTEX_STEP_TYPE_MCP_TOOL",
+  "CORTEX_STEP_TYPE_SYSTEM_MESSAGE",
+]);
+
+export const HANDLED_STEP_TYPES = new Set([
+  "CORTEX_STEP_TYPE_USER_INPUT",
+  "CORTEX_STEP_TYPE_PLANNER_RESPONSE",
+  "CORTEX_STEP_TYPE_CODE_ACTION",
+  "CORTEX_STEP_TYPE_RUN_COMMAND",
+  "CORTEX_STEP_TYPE_VIEW_FILE",
+  "CORTEX_STEP_TYPE_FIND",
+  "CORTEX_STEP_TYPE_LIST_DIRECTORY",
+  "CORTEX_STEP_TYPE_SEARCH_WEB",
+  "CORTEX_STEP_TYPE_READ_URL_CONTENT",
+  "CORTEX_STEP_TYPE_COMMAND_STATUS",
+]);
 
 interface AntigravityArtifactMetadata {
   artifactType?: string;
@@ -100,11 +156,11 @@ export class AntigravityScraper extends AbstractScraper<AntigravityChunk> {
   async *scrape(since?: Date): AsyncIterable<AntigravityChunk> {
     const state = await this.getLastScrapedPosition();
     const cutoff = since ?? state.lastTimestamp;
-    yield* this.readArtifacts(cutoff);
+    yield* withDriftReport(SCRAPER_NAME, this.readArtifacts(cutoff), this.stateDir);
   }
 
   async *fullSync(): AsyncIterable<AntigravityChunk> {
-    yield* this.readArtifacts(new Date(0));
+    yield* withDriftReport(SCRAPER_NAME, this.readArtifacts(new Date(0)), this.stateDir);
   }
 
   parseRaw(raw: unknown): AntigravityChunk {
@@ -354,11 +410,21 @@ class AntigravityLanguageServerClient implements AntigravityRuntimeClient {
         { cascadeId: sessionId, startIndex: 0, endIndex: stepCount + 10 },
         30_000,
       );
-      const steps = Array.isArray(response?.steps)
-        ? response.steps
-        : Array.isArray(response?.messages)
-          ? response.messages
-          : [];
+      let steps: unknown[] = [];
+      if (Array.isArray(response?.steps)) {
+        steps = response.steps;
+      } else if (Array.isArray(response?.messages)) {
+        steps = response.messages;
+      } else if (response !== null) {
+        // The server answered, but with neither field this reader knows. Every
+        // message in the session is dropped, and without this it is dropped in
+        // silence — indistinguishable from a session that is simply empty.
+        recordDrift(
+          SCRAPER_NAME,
+          `antigravity-ls:${sessionId}`,
+          `trajectory response has neither 'steps' nor 'messages' (keys: ${Object.keys(response).sort().join(", ") || "none"})`,
+        );
+      }
       const messages = parseAntigravityRuntimeSteps(sessionId, steps, entry.summary);
       if (messages.length === 0) {
         return null;
@@ -413,9 +479,13 @@ export function parseAntigravityRuntimeSteps(
 ): AntigravityRuntimeMessage[] {
   const fallbackTimestamp = toDate(summary.createdTime);
   const messages: AntigravityRuntimeMessage[] = [];
+  // The transcript comes off the language server, not off disk, so the session
+  // is the only location there is to point at.
+  const location = `antigravity-ls:${sessionId}`;
 
   for (const step of steps) {
     if (!isRecord(step)) {
+      recordDrift(SCRAPER_NAME, location, `trajectory step is ${describeValue(step)}, not an object`);
       continue;
     }
 
@@ -425,6 +495,31 @@ export function parseAntigravityRuntimeSteps(
     const message = parseRuntimeStep(sessionId, step, stepType, timestamp);
     if (message) {
       messages.push(message);
+      continue;
+    }
+
+    // An unhandled step type is only worth reporting when something was
+    // actually lost. Antigravity's trajectories carry plenty of bookkeeping
+    // steps that hold no conversation at all, and warning about those would
+    // report normal operation as drift — the failure this project has already
+    // made once, with `atis-latch`. A step whose payload holds text is a
+    // different matter: that text was dropped.
+    if (
+      !HANDLED_STEP_TYPES.has(stepType) &&
+      !KNOWN_UNHANDLED_STEP_TYPES.has(stepType) &&
+      stepCarriesText(step)
+    ) {
+      // Deliberately just the type. Naming the payload fields was tried and
+      // reverted: protobuf leaves optional fields out, so one type produced a
+      // dozen distinct field lists — `CHECKPOINT` alone filled a fifth of the
+      // ceiling on one machine. The type name is the actionable part anyway.
+      recordDrift(
+        SCRAPER_NAME,
+        location,
+        stepType.length === 0
+          ? "trajectory step carrying text has no 'type' field — likely renamed"
+          : `unhandled step type ${JSON.stringify(stepType)} carrying text`,
+      );
     }
   }
 
@@ -1120,7 +1215,11 @@ async function readArtifactMetadata(path: string): Promise<AntigravityArtifactMe
       updatedAt: toStringValue(parsed.updatedAt),
       version: toStringValue(parsed.version),
     };
-  } catch {
+  } catch (err) {
+    // The file is there and unreadable, which is not the same as absent: the
+    // artifact keeps its content but loses its type, summary and timestamp,
+    // and the timestamp is what decides whether an incremental scan sees it.
+    recordDrift(SCRAPER_NAME, path, `artifact metadata is not valid JSON: ${(err as Error).message}`);
     return {};
   }
 }
@@ -1216,4 +1315,40 @@ function toMessageIndex(value: unknown): number {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function describeValue(value: unknown): string {
+  if (value === null) return "null";
+  return Array.isArray(value) ? "an array" : `a ${typeof value}`;
+}
+
+/**
+ * Whether a step holds text a reader would have wanted.
+ *
+ * Used to decide whether an unhandled step type is worth reporting. Antigravity
+ * emits bookkeeping steps that carry no conversation, and treating those as
+ * drift would report ordinary operation as a format change. Text in the payload
+ * means the opposite: something was there and this reader dropped it.
+ *
+ * `type` and `metadata` are excluded because every step has them; the payload
+ * lives under a key named after the step.
+ */
+function stepCarriesText(step: Record<string, unknown>): boolean {
+  for (const [key, value] of Object.entries(step)) {
+    if (key === "type" || key === "metadata") continue;
+    if (containsNonEmptyString(value, 0)) return true;
+  }
+  return false;
+}
+
+function containsNonEmptyString(value: unknown, depth: number): boolean {
+  // Bounded: a trajectory step is a protobuf message, not an arbitrary graph,
+  // and an unbounded walk over one is a needless risk on every scan.
+  if (depth > 4) return false;
+  if (typeof value === "string") return value.trim().length > 0;
+  if (Array.isArray(value)) return value.some((item) => containsNonEmptyString(item, depth + 1));
+  if (isRecord(value)) {
+    return Object.values(value).some((item) => containsNonEmptyString(item, depth + 1));
+  }
+  return false;
 }
