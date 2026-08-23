@@ -1,5 +1,5 @@
-import { readFile, rm, stat } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { readdir, readFile, rm, rmdir, stat } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import { writeFileAtomic } from "../utils/atomic-file.js";
 import { matchLineEndings, normalizeNewlines, removeManagedBlocks } from "./managed-block.js";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
@@ -162,6 +162,20 @@ export async function disconnectProject(options: DisconnectOptions = {}): Promis
     warnings.push(
       "Antigravity MCP config is app-level; xtctx was removed from the Antigravity config for this user account.",
     );
+  }
+
+  // Files are removed by several different paths above, so pruning happens
+  // once at the end over everything that actually changed.
+  // Deliberately not gated on `changed`: several removal paths report false
+  // even when they deleted something, and "is this directory empty" is the
+  // real guard — a directory with anything else in it is never touched.
+  // Deepest first, so a nested directory is gone before its parent is judged.
+  const parents = writes
+    .map((write) => write.path)
+    .filter((path) => path.startsWith(projectRoot))
+    .sort((left, right) => right.split(/[\\/]/).length - left.split(/[\\/]/).length);
+  for (const path of parents) {
+    await pruneEmptyParents(dirname(path));
   }
 
   return { projectRoot, tools, writes, warnings };
@@ -361,6 +375,44 @@ async function removeIfPresent(path: string): Promise<boolean> {
   }
   await rm(path, { recursive: true, force: true });
   return true;
+}
+
+/**
+ * Remove directories that only existed to hold what was just deleted.
+ *
+ * Disconnect left `.vscode/`, `.github/instructions/` and
+ * `.cursor/rules/xtctx-skills/` standing empty — directories xtctx created,
+ * now holding nothing, in projects that never had them. It walks upward while
+ * each directory is genuinely empty, so anything the user keeps alongside our
+ * files stops it immediately.
+ */
+async function pruneEmptyParents(directory: string): Promise<void> {
+  let current = directory;
+
+  // Bounded: three levels covers the deepest xtctx creates
+  // (`.cursor/rules/xtctx-skills`), and a bound is cheaper than reasoning
+  // about how far up an unexpected path could walk.
+  for (let depth = 0; depth < 3; depth += 1) {
+    let entries: string[];
+    try {
+      entries = await readdir(current);
+    } catch {
+      return;
+    }
+    if (entries.length > 0) {
+      return;
+    }
+    try {
+      // `rmdir`, not `rm`: it refuses a non-empty directory, so it is its own
+      // safety net. (`rm` without `recursive` throws on any directory at all,
+      // which the catch below silently turned into "give up" — the prune
+      // looked implemented and did nothing.)
+      await rmdir(current);
+    } catch {
+      return;
+    }
+    current = dirname(current);
+  }
 }
 
 /** True when nothing survives but a single YAML frontmatter block. */
