@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.14.5](https://github.com/fstubner/xtctx/compare/xtctx-v0.14.4...xtctx-v0.14.5) (2026-08-23)
+
+
+### Bug Fixes
+
+* **scrapers:** recognise three more bookkeeping record types ([#134](https://github.com/fstubner/xtctx/issues/134)) ([564976b](https://github.com/fstubner/xtctx/commit/564976b4de96795d5feff91ff440c2f1db9d4b3d))
+
 ## [0.14.4](https://github.com/fstubner/xtctx/compare/xtctx-v0.14.3...xtctx-v0.14.4) (2026-08-23)
 
 
