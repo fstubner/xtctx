@@ -59,6 +59,66 @@ export function isTransientSidecar(name) {
   return /\.[A-Za-z0-9]+-(wal|shm|journal)$/.test(name);
 }
 
+/**
+ * Sorted field entries with empty-array noise removed.
+ *
+ * `[]` says nothing about what a field holds, so a field recorded as
+ * `array<string>` gains a second `array<empty>` entry the first time the tool
+ * happens to write an empty one — a property of the data that day, not of the
+ * format. That fired the alarm for `toolUseResult.matches` because a search
+ * found nothing. Where a path has a typed array, the empty variant is dropped;
+ * where empty is all that was ever seen, it stays, because that is all we know.
+ */
+export function normalizeFieldEntries(entries) {
+  const typed = new Set(
+    entries
+      .filter((entry) => /: array<(?!empty>)[^>]*>$/.test(entry))
+      .map((entry) => entry.slice(0, entry.lastIndexOf(": "))),
+  );
+
+  return [...new Set(entries)]
+    .filter((entry) => {
+      if (!entry.endsWith(": array<empty>")) {
+        return true;
+      }
+      return !typed.has(entry.slice(0, entry.lastIndexOf(": ")));
+    })
+    .sort();
+}
+
+/**
+ * What is known about a format, accumulated rather than replaced.
+ *
+ * A capture samples the newest N files, so the window moves as the tool is
+ * used: a record type last written a month ago drops out, and the fingerprint
+ * reports it as a change for having sampled different files. Merging keeps
+ * everything ever recorded, so the alarm only ever fires on something new —
+ * which is the question it exists to answer.
+ *
+ * The cost is that a field genuinely removed upstream is not detected. That
+ * was never reliable here anyway: with a moving sample, "gone" and "not
+ * sampled this time" are the same observation.
+ */
+export function mergeFingerprints(previous, next) {
+  if (Array.isArray(previous) && Array.isArray(next)) {
+    return normalizeFieldEntries([...previous, ...next]);
+  }
+  if (!isPlainObject(previous) || !isPlainObject(next)) {
+    // Scalars and shape changes take the newer value.
+    return next;
+  }
+
+  const merged = { ...previous };
+  for (const [key, value] of Object.entries(next)) {
+    merged[key] = key in previous ? mergeFingerprints(previous[key], value) : value;
+  }
+  return merged;
+}
+
+function isPlainObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
 /** True when two serialized fingerprints describe a different shape. */
 export function fingerprintsDiffer(previousText, nextText) {
   return normalizeForCompare(previousText) !== normalizeForCompare(nextText);

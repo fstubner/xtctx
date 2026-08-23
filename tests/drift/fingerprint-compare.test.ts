@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   fingerprintsDiffer,
   isTransientSidecar,
+  mergeFingerprints,
+  normalizeFieldEntries,
   serializeFingerprint,
   withoutVolumeCounters,
 } from "../../scripts/lib/fingerprint-compare.mjs";
@@ -70,5 +72,63 @@ describe("transient sidecar files", () => {
     expect(isTransientSidecar("walkthrough.md")).toBe(false);
     // Not a sidecar just because the name contains one of those words.
     expect(isTransientSidecar("shm-notes.md")).toBe(false);
+  });
+});
+
+/**
+ * An empty array says nothing about what a field holds, so recording
+ * `array<empty>` beside `array<string>` makes the alarm depend on whether the
+ * tool happened to write an empty one that day. It fired for
+ * `toolUseResult.matches` because a search returned no results.
+ */
+describe("empty-array entries", () => {
+  it("drops the empty variant when the field has a known element type", () => {
+    expect(
+      normalizeFieldEntries(["a.matches: array<string>", "a.matches: array<empty>"]),
+    ).toEqual(["a.matches: array<string>"]);
+  });
+
+  it("keeps it when empty is all that has ever been seen", () => {
+    expect(normalizeFieldEntries(["a.unknown: array<empty>"])).toEqual([
+      "a.unknown: array<empty>",
+    ]);
+  });
+
+  it("leaves every other entry alone, sorted and deduplicated", () => {
+    expect(
+      normalizeFieldEntries(["b: string", "a: number", "b: string"]),
+    ).toEqual(["a: number", "b: string"]);
+  });
+});
+
+/**
+ * A capture samples the newest files, so the window moves as a tool is used.
+ * Record types written a month ago drop out and the check reports them as a
+ * change — for having sampled different files, not for anything upstream.
+ */
+describe("accumulating what is known", () => {
+  it("keeps a record type that fell out of the sample window", () => {
+    const previous = { recordTypes: { "ai-title": ["aiTitle: string"] } };
+    const next = { recordTypes: { user: ["text: string"] } };
+
+    expect(mergeFingerprints(previous, next)).toEqual({
+      recordTypes: {
+        "ai-title": ["aiTitle: string"],
+        user: ["text: string"],
+      },
+    });
+  });
+
+  it("unions the fields of a type seen in both", () => {
+    const merged = mergeFingerprints(
+      { recordTypes: { user: ["a: string"] } },
+      { recordTypes: { user: ["b: number"] } },
+    );
+
+    expect(merged.recordTypes.user).toEqual(["a: string", "b: number"]);
+  });
+
+  it("takes the newer value for a scalar", () => {
+    expect(mergeFingerprints({ kind: "jsonl" }, { kind: "sqlite" })).toEqual({ kind: "sqlite" });
   });
 });
