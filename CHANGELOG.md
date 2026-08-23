@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.15.4](https://github.com/fstubner/xtctx/compare/xtctx-v0.15.3...xtctx-v0.15.4) (2026-08-23)
+
+
+### Dependencies
+
+* **landing:** bump typescript to 7.0.2 ([#147](https://github.com/fstubner/xtctx/issues/147)) ([7671bfa](https://github.com/fstubner/xtctx/commit/7671bfa42dcbdda9388bd3810a14dd836a255901))
+
 ## [0.15.3](https://github.com/fstubner/xtctx/compare/xtctx-v0.15.2...xtctx-v0.15.3) (2026-08-23)
 
 
