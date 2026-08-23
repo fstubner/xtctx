@@ -292,6 +292,9 @@ async function writeMcpConfig(
     if (existingContent !== null) {
       try {
         existing = parseConfig(existingContent, format);
+        // Parsing succeeding is not the same as rewriting being safe: the TOML
+        // parser drops comments, so a file that reads fine still loses them.
+        hadComments = format === "toml" && tomlHasComments(existingContent);
       } catch (error) {
         // VS Code-family configs are JSONC in practice: retry with comments
         // stripped before declaring the file unparsable.
@@ -373,6 +376,58 @@ function parseConfig(raw: string, format: "json" | "toml"): Record<string, unkno
     return parseToml(raw) as Record<string, unknown>;
   }
   return JSON.parse(raw) as Record<string, unknown>;
+}
+
+/**
+ * Does this TOML carry comments we would destroy by rewriting it?
+ *
+ * `@iarna/toml` parses comments and drops them, so a config that parses
+ * cleanly still loses every `#` line when re-serialised. That silently deleted
+ * four hand-written comments from a codex config, reported as a successful
+ * update. The JSONC path had a guard for exactly this; TOML never reached it
+ * because it never failed to parse.
+ *
+ * A `#` inside a string is data, not a comment, so string state is tracked —
+ * otherwise `tag = "release#1"` would make the file permanently unwritable.
+ */
+export function tomlHasComments(raw: string): boolean {
+  let inBasic = false;
+  let inLiteral = false;
+  let escaped = false;
+
+  for (let index = 0; index < raw.length; index += 1) {
+    const char = raw[index];
+
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (inBasic && char === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (char === "\n") {
+      // Unterminated single-line strings do not carry across lines; multi-line
+      // forms are handled conservatively by treating their quotes the same way,
+      // which can only ever make this answer "no comment" less often.
+      inBasic = false;
+      inLiteral = false;
+      continue;
+    }
+    if (!inLiteral && char === '"') {
+      inBasic = !inBasic;
+      continue;
+    }
+    if (!inBasic && char === "'") {
+      inLiteral = !inLiteral;
+      continue;
+    }
+    if (!inBasic && !inLiteral && char === "#") {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 /** Remove // and /* *\/ comments outside strings (JSONC tolerance). */
