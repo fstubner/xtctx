@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdir, readdir, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import Database from "better-sqlite3";
@@ -49,6 +50,16 @@ interface SqliteHandoffIndexOptions {
   refreshBudgetMs?: number;
   /** How long one search spends building vectors before answering with what it has. */
   vectorBudgetMs?: number;
+  /**
+   * Whether opening the index may create it.
+   *
+   * `xtctx status` is a diagnostic — it should be able to report on a
+   * project without leaving a database behind in one it was only asked to
+   * look at. When false and no index exists, reads run against an in-memory
+   * database and report zeros, which is the truth for a project that has
+   * never been set up.
+   */
+  createIfMissing?: boolean;
 }
 
 /**
@@ -168,10 +179,19 @@ const MIN_SEMANTIC_COSINE = 0.15;
  * sessions", which is the honest answer. When something does clear it, the
  * weaker windows around it are kept.
  *
- * The value is bounded from both sides and the gap is narrow: gibberish tops
- * out near 0.31 against this index, genuine queries reach 0.44-0.59, and the
- * ranking eval starts losing vector recall above 0.32. If it needs to move,
- * move it against the eval rather than against one query.
+ * The value is bounded from both sides, and as the corpus has grown those
+ * bounds have crossed. Genuine queries reach 0.44-0.59, but gibberish now
+ * reaches 0.331 — and every value above 0.32 costs the eval real vector
+ * recall, measured: 0.34 takes recall@5 from 0.70 to 0.60, 0.36 to 0.55, 0.40
+ * to 0.40. So 0.32 is not a comfortable gap any more, it is the best available
+ * compromise, and a nonsense query can clear it.
+ *
+ * Separating those cases needs something a single global cosine cannot give —
+ * a per-query sense of whether the best match stands out from the rest of the
+ * corpus, rather than an absolute number. Worth doing when it matters enough;
+ * raising this constant is not that, and costs recall people rely on.
+ *
+ * If it needs to move, move it against the eval rather than against one query.
  */
 const MIN_CONFIDENT_COSINE = 0.32;
 /**
@@ -199,6 +219,7 @@ export class SqliteHandoffIndex implements SessionService {
   private readonly refreshBudgetMs: number;
   private readonly vectorBudgetMs: number;
   private scanStartedMs = 0;
+  private readonly createIfMissing: boolean;
   /** Windows still waiting to be vectorized after the last search gave up its budget. */
   private vectorBacklog = 0;
   private readonly embeddingProvider: EmbeddingProvider;
@@ -217,6 +238,7 @@ export class SqliteHandoffIndex implements SessionService {
     this.windowStride = Math.max(1, Math.floor(options.windowStride ?? DEFAULT_WINDOW_STRIDE));
     this.refreshBudgetMs = Math.max(0, options.refreshBudgetMs ?? DEFAULT_REFRESH_BUDGET_MS);
     this.vectorBudgetMs = Math.max(0, options.vectorBudgetMs ?? DEFAULT_VECTOR_BUDGET_MS);
+    this.createIfMissing = options.createIfMissing ?? true;
     this.initialized = this.initialize();
     // Attach a no-op handler so a failed open cannot become an unhandled
     // rejection (which would kill the process) before the first caller
@@ -1105,6 +1127,12 @@ export class SqliteHandoffIndex implements SessionService {
   }
 
   private async initialize(): Promise<void> {
+    if (!this.createIfMissing && !existsSync(this.dbPath)) {
+      // Nothing to read and nothing to leave behind.
+      this.db = openDatabase(":memory:");
+      return;
+    }
+
     await mkdir(dirname(this.dbPath), { recursive: true });
     try {
       this.db = openDatabase(this.dbPath);
@@ -1546,14 +1574,33 @@ function normalizeToolFilter(value?: string[]): string[] {
   return [...new Set(value.filter((item) => typeof item === "string" && item.length > 0))];
 }
 
+/**
+ * Words too common to be evidence of anything.
+ *
+ * Terms are OR-ed, so one match anywhere returns a session. That made a
+ * question about sourdough bread return five results from a corpus about a
+ * TypeScript project, because it contains "how", "do" and "make" — and hybrid
+ * then presented them beside a similarity of 0.130 as though they were finds.
+ * Deliberately short: it holds words that carry no signal in any corpus, not a
+ * general English stoplist, because a term like "test" or "index" is exactly
+ * what someone searching a transcript means.
+ */
+const FTS_STOPWORDS = new Set([
+  "a", "about", "all", "an", "and", "any", "are", "as", "at", "be", "been", "but", "by", "can",
+  "did", "do", "does", "for", "from", "get", "had", "has", "have", "how", "i", "if", "in", "into",
+  "is", "it", "its", "just", "make", "me", "my", "no", "not", "of", "on", "or", "our", "out",
+  "should", "so", "some", "than", "that", "the", "their", "them", "then", "there", "these",
+  "they", "this", "to", "up", "us", "want", "was", "we", "were", "what", "when", "which", "who",
+  "why", "will", "with", "would", "you", "your",
+]);
+
 function toFtsQuery(query: string): string {
-  return (
-    query
-      .toLowerCase()
-      .match(/[a-z0-9_./:-]{2,}/g)
-      ?.map((term) => `"${term.replace(/"/g, "\"\"")}"`)
-      .join(" OR ") ?? ""
-  );
+  const terms = query.toLowerCase().match(/[a-z0-9_./:-]{2,}/g) ?? [];
+  const meaningful = terms.filter((term) => !FTS_STOPWORDS.has(term));
+
+  // A query of nothing but common words has nothing to search for. Returning
+  // no results is the honest answer; matching on "how" is not.
+  return meaningful.map((term) => `"${term.replace(/"/g, '""')}"`).join(" OR ");
 }
 
 function placeholders(countValue: number): string {
