@@ -12,7 +12,9 @@ export interface StatusOptions {
 
 export async function runStatus(options: StatusOptions = {}): Promise<void> {
   const projectRoot = resolve(options.projectPath ?? process.cwd());
-  const services = await createProjectServices(projectRoot);
+  // Diagnostics do not configure. Running `status` on a project left a
+  // database behind in one it had only been asked to look at.
+  const services = await createProjectServices(projectRoot, { createIfMissing: false });
   try {
     process.stdout.write((await renderStatusBlock(services)) + "\n");
   } finally {
@@ -99,17 +101,23 @@ export async function renderStatusBlock(services: ProjectServices): Promise<stri
   // Status always ends with one concrete next step, as ux-walkthrough.md
   // promises. Repairing wiring outranks indexing advice: a drifted managed
   // file or missing skill target is why an agent would see nothing at all.
+  // A project that was never set up has not "drifted" — there is nothing to
+  // repair, and telling a first-time user to run a repair command reads as
+  // though something is already broken. Never configured and configured-then-
+  // damaged are different states and get different advice.
   const needsRepair =
-    !configPresent ||
-    managed.some((file) => file.exists && (file.blockCount !== 1 || file.staleReferences.length > 0)) ||
+    configPresent &&
+    (managed.some((file) => file.exists && (file.blockCount !== 1 || file.staleReferences.length > 0)) ||
     skills.selected.some((skill) => !skill.exists) ||
     // Only `missing` and `drift` are faults. `managed-block` and
     // `unsupported` are the normal, healthy states for tools that carry
     // skills inside their instruction file or not at all.
-    skills.targets.some((target) => target.state === "missing" || target.state === "drift");
+    skills.targets.some((target) => target.state === "missing" || target.state === "drift"));
 
   lines.push("");
-  if (needsRepair) {
+  if (!configPresent) {
+    lines.push("Next     This project is not set up yet. Run: xtctx setup");
+  } else if (needsRepair) {
     lines.push("Next     Wiring has drifted. Run: xtctx setup --repair");
   } else if (status.sessions === 0) {
     lines.push("Next     No sessions are indexed yet. Ask a configured agent to call xtctx_recent_sessions.");

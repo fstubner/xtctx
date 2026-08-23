@@ -228,6 +228,67 @@ describe("syncToolMcpConfigs", () => {
     await expect(readFile(configPath, "utf-8")).resolves.toBe(jsonc);
   });
 
+  it("does not clobber comments in a TOML config", async () => {
+    // The JSONC guard above only ever fired when parsing failed. TOML parses
+    // fine with comments, so codex configs were re-serialised without them:
+    // four hand-written comments came back as zero, exit 0, no warning.
+    const configPath = join(projectDir, ".codex", "config.toml");
+    await mkdir(join(projectDir, ".codex"), { recursive: true });
+    const toml = [
+      "# my codex config",
+      'model = "gpt-5"  # trailing note',
+      "",
+      "[tools]",
+      "web_search = true",
+      "",
+    ].join("\n");
+    await writeFile(configPath, toml, "utf-8");
+
+    const result = await syncToolMcpConfigs(
+      projectDir,
+      [{ name: "xtctx", command: "npx", args: ["-y", "xtctx"], transport: "stdio" }],
+      ["codex"],
+    );
+
+    const row = result.results[0];
+    expect(row?.failed).not.toBe(true);
+    expect(row?.skipped).toBe(true);
+    expect(row?.warning).toMatch(/comment/i);
+    await expect(readFile(configPath, "utf-8")).resolves.toBe(toml);
+  });
+
+  it("still writes a TOML config that has no comments", async () => {
+    const configPath = join(projectDir, ".codex", "config.toml");
+    await mkdir(join(projectDir, ".codex"), { recursive: true });
+    await writeFile(configPath, 'model = "gpt-5"\n', "utf-8");
+
+    await syncToolMcpConfigs(
+      projectDir,
+      [{ name: "xtctx", command: "npx", args: ["-y", "xtctx"], transport: "stdio" }],
+      ["codex"],
+    );
+
+    const raw = await readFile(configPath, "utf-8");
+    expect(raw).toContain("mcp_servers");
+    expect(raw).toContain('model = "gpt-5"');
+  });
+
+  it("treats a # inside a TOML string as data, not a comment", async () => {
+    const configPath = join(projectDir, ".codex", "config.toml");
+    await mkdir(join(projectDir, ".codex"), { recursive: true });
+    await writeFile(configPath, 'tag = "release#1"\n', "utf-8");
+
+    await syncToolMcpConfigs(
+      projectDir,
+      [{ name: "xtctx", command: "npx", args: ["-y", "xtctx"], transport: "stdio" }],
+      ["codex"],
+    );
+
+    // Nothing to preserve, so the entry is written rather than refused.
+    const raw = await readFile(configPath, "utf-8");
+    expect(raw).toContain("mcp_servers");
+  });
+
   it("reports an up-to-date JSONC config as clean, with no warning", async () => {
     const configPath = join(projectDir, ".vscode", "mcp.json");
     await mkdir(join(projectDir, ".vscode"), { recursive: true });
