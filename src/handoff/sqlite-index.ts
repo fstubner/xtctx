@@ -1587,12 +1587,24 @@ function normalizeToolFilter(value?: string[]): string[] {
  */
 const FTS_STOPWORDS = new Set([
   "a", "about", "all", "an", "and", "any", "are", "as", "at", "be", "been", "but", "by", "can",
-  "did", "do", "does", "for", "from", "get", "had", "has", "have", "how", "i", "if", "in", "into",
-  "is", "it", "its", "just", "make", "me", "my", "no", "not", "of", "on", "or", "our", "out",
+  "did", "do", "does", "for", "from", "had", "has", "have", "how", "i", "if", "in", "into",
+  "is", "it", "its", "just", "me", "my", "no", "not", "of", "on", "or", "our", "out",
   "should", "so", "some", "than", "that", "the", "their", "them", "then", "there", "these",
-  "they", "this", "to", "up", "us", "want", "was", "we", "were", "what", "when", "which", "who",
+  "they", "this", "to", "up", "us", "want", "was", "we", "were", "what", "when",
   "why", "will", "with", "would", "you", "your",
 ]);
+
+/**
+ * `make`, `get` and `which` were on this list and should not have been. Each is
+ * a real search term in a corpus of developer transcripts — a keyword search
+ * for `make` returned nothing at all against 1475 windows. A stoplist that
+ * swallows the vocabulary of the thing being searched is worse than the noise
+ * it removes.
+ *
+ * The rest stay because they carry no signal as bare words. `so` is on the list
+ * and `libfoo.so` still searches fine: the tokenizer keeps dotted and
+ * hyphenated terms whole, so only the bare word is dropped.
+ */
 
 function toFtsQuery(query: string): string {
   const terms = query.toLowerCase().match(/[a-z0-9_./:-]{2,}/g) ?? [];
