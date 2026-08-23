@@ -45,14 +45,18 @@ export async function main(argv = process.argv): Promise<void> {
     process.once("SIGINT", () => shutdown(true));
     process.once("SIGTERM", () => shutdown(true));
     // Exit once the transport closes, rather than waiting for the event loop
-    // to drain. The client is gone, so there is nothing left to serve — and
-    // something in the scan path keeps a handle alive long after the work is
-    // done: the server sat there for 84 seconds after stdin closed, with the
-    // index already closed in 3ms. An MCP host that spawns a server per
-    // session accumulates those.
+    // to drain. The client is gone, so there is nothing left to serve, and the
+    // server otherwise sat there for 84 seconds while a scan finished. An MCP
+    // host that spawns a server per session accumulates those.
     //
-    // Safe to exit here because `close()` waits for any in-flight scan to
-    // settle first, so nothing is cut off mid-write.
+    // Nothing is lost by leaving before a scan finishes: the index is derived
+    // data, every chunk is committed as it is written, and a scraper's cursor
+    // only advances once its loop completes, so interrupted work is re-read
+    // rather than skipped.
+    //
+    // A tool call still in flight when stdin closes may go unanswered — the
+    // grace window above is enough for ordinary calls, not for one waiting on
+    // a scan. The client has closed its side by then, so nothing is listening.
     await startMcpServer({ sessions: services.sessions }, () => shutdown(true));
     return;
   }
