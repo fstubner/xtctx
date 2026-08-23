@@ -39,3 +39,6 @@ tests/eval/results/ranking-latest.json
 
 # Checker output from the agent-skills acceptance gate
 .agent-evidence/
+
+# Next-gen implementation plan
+IMPLEMENTATION_PLAN.md
