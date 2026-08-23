@@ -39,7 +39,15 @@ async function canonicalProjectRoot(projectPath: string): Promise<string> {
   }
 }
 
-export async function createProjectServices(projectPath?: string): Promise<ProjectServices> {
+export interface ProjectServicesOptions {
+  /** Diagnostics pass false so inspecting a project does not create one. */
+  createIfMissing?: boolean;
+}
+
+export async function createProjectServices(
+  projectPath?: string,
+  options: ProjectServicesOptions = {},
+): Promise<ProjectServices> {
   const projectRoot = await canonicalProjectRoot(projectPath ?? process.cwd());
   const xtctxDir = join(projectRoot, ".xtctx");
   const stateDir = join(xtctxDir, "state");
@@ -60,6 +68,7 @@ export async function createProjectServices(projectPath?: string): Promise<Proje
     dbPath,
     projectRoot,
     scrapers.map((scraper) => ({ tool: scraper.tool, scraper })),
+    { createIfMissing: options.createIfMissing },
   );
 
   return {
