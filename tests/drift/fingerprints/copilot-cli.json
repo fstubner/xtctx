@@ -14,7 +14,6 @@
       "data.reasoningText: string",
       "data.requestId: string",
       "data.serviceRequestId: string",
-      "data.toolRequests: array<empty>",
       "data.toolRequests: array<object>",
       "data.turnId: string",
       "id: string",
@@ -58,7 +57,6 @@
       "data.permissionRequest.intention: string",
       "data.permissionRequest.kind: string",
       "data.permissionRequest.newFileContents: string",
-      "data.permissionRequest.possiblePaths: array<empty>",
       "data.permissionRequest.possiblePaths: array<string>",
       "data.permissionRequest.possibleUrls: array<empty>",
       "data.permissionRequest.toolCallId: string",
@@ -100,7 +98,6 @@
       "type: string"
     ],
     "session.shutdown": [
-      "data.codeChanges.filesModified: array<empty>",
       "data.codeChanges.filesModified: array<string>",
       "data.codeChanges.linesAdded: number",
       "data.codeChanges.linesRemoved: number",
@@ -307,7 +304,6 @@
       "data.model: string",
       "data.parentToolCallId: string",
       "data.shellToolInfo.hasWriteFileRedirection: boolean",
-      "data.shellToolInfo.possiblePaths: array<empty>",
       "data.shellToolInfo.possiblePaths: array<string>",
       "data.toolCallId: string",
       "data.toolName: string",

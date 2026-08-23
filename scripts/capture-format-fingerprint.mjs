@@ -23,6 +23,8 @@ import { basename, dirname, join, resolve } from "node:path";
 import {
   fingerprintsDiffer,
   isTransientSidecar,
+  mergeFingerprints,
+  normalizeFieldEntries,
   normalizeForCompare,
   serializeFingerprint,
 } from "./lib/fingerprint-compare.mjs";
@@ -178,7 +180,7 @@ async function jsonlFingerprint(root, matcher) {
     filesSampled: files,
     recordsSampled: records,
     recordTypes: Object.fromEntries(
-      [...byType.entries()].sort().map(([type, fields]) => [type, [...fields].sort()]),
+      [...byType.entries()].sort().map(([type, fields]) => [type, normalizeFieldEntries([...fields])]),
     ),
   };
 }
@@ -238,7 +240,7 @@ async function sqliteFingerprint(dbPath, jsonColumns = []) {
         const sample = Array.isArray(parsed) ? parsed[0] : parsed;
         for (const entry of shapeOf(sample)) fields.add(entry);
       }
-      if (fields.size > 0) embedded[`${table}.${column}`] = [...fields].sort();
+      if (fields.size > 0) embedded[`${table}.${column}`] = normalizeFieldEntries([...fields]);
     }
 
     return { kind: "sqlite", tables: schema, embeddedJson: embedded };
@@ -299,7 +301,7 @@ async function keyValueFingerprint(dbPath, table, keyColumn, valueColumn, prefix
         const sample = Array.isArray(parsed) ? parsed[0] : parsed;
         for (const entry of shapeOf(sample)) fields.add(entry);
       }
-      if (fields.size > 0) byPrefix[prefix] = [...fields].sort();
+      if (fields.size > 0) byPrefix[prefix] = normalizeFieldEntries([...fields]);
     }
 
     return Object.keys(byPrefix).length > 0
@@ -411,7 +413,7 @@ async function antigravityFingerprint() {
     layout,
     brainArtifactExtensions: await extensionsIn("brain", 1),
     conversationExtensions: await extensionsIn("conversations", 0),
-    artifactMetadata: { filesSampled: files, fields: [...sidecar].sort() },
+    artifactMetadata: { filesSampled: files, fields: normalizeFieldEntries([...sidecar]) },
   };
 }
 
@@ -466,8 +468,31 @@ let changed = 0;
 
 for (const [tool, fingerprint] of Object.entries(captured)) {
   const path = join(outDir, `${tool}.json`);
-  const next = serializeFingerprint(fingerprint);
   const previous = existsSync(path) ? await readFile(path, "utf-8") : null;
+
+  // Merged with what is already recorded, not compared against it. The sample
+  // is the newest N files, so it moves as the tool is used, and a record type
+  // last written weeks ago drops out — reported as a change for having read
+  // different files. Accumulating means the check only ever fires on something
+  // new, which is the question it exists to answer.
+  let merged = fingerprint;
+  if (previous !== null) {
+    let committed = null;
+    try {
+      committed = JSON.parse(previous);
+    } catch {
+      // A committed fingerprint that will not parse is not worth preserving.
+      console.warn(`         committed fingerprint for ${tool} is not valid JSON — replacing it`);
+    }
+    // Deliberately outside the try: a failure in the merge itself is a bug,
+    // and swallowing it silently discarded everything already recorded — which
+    // is exactly what a missing import did here, quietly, until a diff showed
+    // record types disappearing.
+    if (committed !== null) {
+      merged = mergeFingerprints(committed, fingerprint);
+    }
+  }
+  const next = serializeFingerprint(merged);
 
   if (previous === null) {
     if (write) {
