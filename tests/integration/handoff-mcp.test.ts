@@ -59,34 +59,56 @@ class FixtureSessionService implements SessionService {
     };
   }
 
+  /** Nothing scans here, so there is never anything to wait for. */
+  async whenScanSettled(): Promise<void> {
+    return;
+  }
+
   async close(): Promise<void> {
     return;
   }
 }
 
 describe("handoff MCP integration", () => {
-  it("returns recent sessions, detail, search, status, and handoff manifests through handlers", async () => {
-    const handlers = createToolHandlers({ sessions: new FixtureSessionService() });
+  /**
+   * One assertion per tool. These were a single test covering all five, which
+   * meant a break anywhere produced one red result whose name did not say
+   * which contract had moved.
+   */
+  const handlers = () => createToolHandlers({ sessions: new FixtureSessionService() });
 
-    await expect(handlers.get("xtctx_recent_sessions")?.({ format: "json" })).resolves.toMatchObject({
+  it("lists recent sessions", async () => {
+    await expect(handlers().get("xtctx_recent_sessions")?.({ format: "json" })).resolves.toMatchObject({
       sessions: [{ session_ref: "codex:session-a" }],
     });
+  });
+
+  it("returns a session's raw messages", async () => {
     await expect(
-      handlers.get("xtctx_session_detail")?.({ session_ref: "codex:session-a", format: "json" }),
+      handlers().get("xtctx_session_detail")?.({ session_ref: "codex:session-a", format: "json" }),
     ).resolves.toMatchObject({
       messages: [{ content: "continue the setup refactor" }],
     });
+  });
+
+  it("searches indexed content", async () => {
     await expect(
-      handlers.get("xtctx_search_sessions")?.({ query: "setup", format: "json" }),
+      handlers().get("xtctx_search_sessions")?.({ query: "setup", format: "json" }),
     ).resolves.toMatchObject({
       sessions: [{ session_ref: "codex:session-a" }],
     });
-    await expect(handlers.get("xtctx_continuity_status")?.({ format: "json" })).resolves.toMatchObject({
+  });
+
+  it("reports continuity status", async () => {
+    await expect(handlers().get("xtctx_continuity_status")?.({ format: "json" })).resolves.toMatchObject({
       sessions: 1,
       messages: 1,
     });
+  });
+
+  it("builds a handoff manifest an orchestrator can act on", async () => {
     await expect(
-      handlers.get("xtctx_handoff_manifest")?.({
+      handlers().get("xtctx_handoff_manifest")?.({
         format: "json",
         correlation_id: "orchestrator:task-42",
         session_refs: ["codex:session-a"],
