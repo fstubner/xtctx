@@ -81,11 +81,11 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
   async *scrape(since?: Date): AsyncIterable<ClaudeCodeChunk> {
     const state = await this.getLastScrapedPosition();
     const cutoff = since ?? state.lastTimestamp;
-    yield* withDriftReport(SCRAPER_NAME, this.readAllSessions(cutoff));
+    yield* withDriftReport(SCRAPER_NAME, this.readAllSessions(cutoff), this.stateDir);
   }
 
   async *fullSync(): AsyncIterable<ClaudeCodeChunk> {
-    yield* withDriftReport(SCRAPER_NAME, this.readAllSessions(new Date(0)));
+    yield* withDriftReport(SCRAPER_NAME, this.readAllSessions(new Date(0)), this.stateDir);
   }
 
   parseRaw(raw: unknown): ClaudeCodeChunk {

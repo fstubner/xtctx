@@ -4,6 +4,7 @@ import { inspectManagedFile, pathExists } from "../config/setup.js";
 import { inspectMcpWiring } from "../config/mcp-config.js";
 import { inspectSkillStatus } from "../config/skills.js";
 import { createProjectServices, type ProjectServices } from "../runtime/services.js";
+import { readDriftLog, type DriftLogFile } from "../scrapers/drift-log.js";
 import { SUPPORTED_TOOLS } from "../tools/sources.js";
 import { readXtctxPackage } from "../utils/package-info.js";
 
@@ -84,6 +85,35 @@ export async function renderStatusBlock(
     );
     for (const note of storePathNotes(definition, tool.store_paths)) {
       lines.push(`      ${note}`);
+    }
+  }
+
+  const drift = (
+    await Promise.all(
+      status.tools.map(async (tool) => ({
+        tool: tool.tool,
+        log: await readDriftLog(services.stateDir, tool.tool),
+      })),
+    )
+  ).filter((entry): entry is { tool: string; log: DriftLogFile } => (entry.log?.surprises.length ?? 0) > 0);
+
+  if (drift.length > 0) {
+    lines.push("");
+    // Named for what it means rather than what the code calls it: these are
+    // the places another tool's transcripts did not look the way this reader
+    // expected, which is the first sign a tool has changed its format.
+    lines.push("Format surprises:");
+    for (const { tool, log } of drift) {
+      const kinds = plural(log.surprises.length, "kind");
+      const dropped = log.droppedSurprises > 0 ? `, ${log.droppedSurprises} older dropped` : "";
+      lines.push(`  ${tool.padEnd(13)} ${kinds}, last seen ${log.updatedAt}${dropped}`);
+      for (const entry of log.surprises.slice(0, 3)) {
+        lines.push(`      ${entry.surprise}`);
+        lines.push(`        ${plural(entry.records, "record")}, first at ${entry.firstLocation}`);
+      }
+      if (log.surprises.length > 3) {
+        lines.push(`      ... and ${log.surprises.length - 3} more in ${tool}-drift.json`);
+      }
     }
   }
 
@@ -170,6 +200,10 @@ export async function renderStatusBlock(
   }
 
   return lines.join("\n");
+}
+
+function plural(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
 
 function managedTargets(projectRoot: string): Array<{ label: string; path: string }> {

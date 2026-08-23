@@ -21,6 +21,12 @@ allowed to trust.
   messages, retrieval windows, FTS index, and embedding vectors. Refreshed
   on demand from the scrapers; fully derived, rebuilt from scratch on
   corruption or schema mismatch.
+- **Drift log** (`src/scrapers/drift-log.ts`) — per-tool record of the
+  places another tool's transcripts did not match what the scraper expected,
+  summarised once per scan and kept in `.xtctx/state/<tool>-drift.json`.
+  Warnings alone reach only the host agent's stderr, which nothing retains;
+  `xtctx status` reads these files back. Bounded: 50 distinct surprises per
+  tool, discards counted rather than silent.
 - **Config writers** (`src/config/`) — setup/disconnect logic that edits
   other tools' config files (MCP config, managed instruction blocks,
   synced skills, the Claude Code hook in `.claude/settings.json`).
