@@ -1,4 +1,5 @@
 import type { SessionService, SessionSummary } from "../../handoff/types.js";
+import { indexingPayload } from "./sessions.js";
 
 interface HandoffManifestParams {
   session_refs?: string[];
@@ -51,7 +52,7 @@ export function createHandoffManifestHandler(service: SessionService) {
         indexed_sessions: status.sessions,
         // An orchestrator holding these refs needs to know the set is still
         // filling, or it treats a partial index as the whole history.
-        indexing: service.getIndexProgress?.() ?? null,
+        indexing: indexingPayload(service) ?? null,
       },
       sessions: selected.map(formatSession),
       missing_session_refs: missingRefs,
