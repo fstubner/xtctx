@@ -34,26 +34,35 @@ function managedBlockPattern(trailingNewline: boolean): RegExp {
  */
 export function removeManagedBlocks(content: string): string {
   const normalized = normalizeNewlines(content);
-  const parts = normalized.split(managedBlockPattern(true));
+  // Deliberately without the trailing-newline variant: letting the pattern eat
+  // a newline after the block takes one from the user's text when a block sits
+  // between paragraphs. The separator handled below is the only whitespace
+  // removal that belongs to xtctx.
+  const parts = normalized.split(managedBlockPattern(false));
   if (parts.length === 1) {
     return normalized;
   }
 
+  // Take back exactly what setup put in: a block, and the "\n\n" it writes
+  // before one when there is content above it. Nothing else.
+  //
+  // Trimming the seam from both sides instead was lossy the moment a file held
+  // two blocks — which a merge conflict resolved keeping both sides produces.
+  // The second pass took the newline ending the user's own line between them,
+  // turning "MIDDLE\n" into "MIDDLE". Removing "at most two" newlines rather
+  // than exactly the separator has the same flaw: once the blocks are gone
+  // there is no way to tell the user's blank lines from ours, so the only safe
+  // rule is to remove the exact sequence that was added.
   let result = parts[0];
   for (let index = 1; index < parts.length; index += 1) {
-    // At most the two newlines setup inserts as a separator. Removing every
-    // trailing newline took the user's own blank lines with it, and there is
-    // no way to tell those apart afterwards — so only ever give back what was
-    // added.
-    const left = result.replace(/\n{1,2}$/, "");
-    const right = parts[index].replace(/^\n{1,2}/, "");
-    if (!left) {
-      result = right;
-    } else if (!right) {
-      result = left;
-    } else {
-      result = `${left}\n\n${right}`;
-    }
+    const isLast = index === parts.length - 1;
+    // Setup writes "\n\n" before the block and a single "\n" after it, and the
+    // one after only exists because the block is appended at the end of the
+    // file. So a lone "\n" trailing the final block is ours; a "\n" followed by
+    // anything else is the user's, and taking it is what lost a byte when a
+    // merge left two blocks in one file.
+    const tail = isLast && parts[index] === "\n" ? "" : parts[index];
+    result = result.replace(/\n\n$/, "") + tail;
   }
   return result;
 }

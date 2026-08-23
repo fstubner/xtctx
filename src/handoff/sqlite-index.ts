@@ -199,8 +199,6 @@ export class SqliteHandoffIndex implements SessionService {
   private readonly refreshBudgetMs: number;
   private readonly vectorBudgetMs: number;
   private scanStartedMs = 0;
-  /** The embedding model is loading, so this answer came from keyword search alone. */
-  private embeddingWarming = false;
   /** Windows still waiting to be vectorized after the last search gave up its budget. */
   private vectorBacklog = 0;
   private readonly embeddingProvider: EmbeddingProvider;
@@ -350,10 +348,8 @@ export class SqliteHandoffIndex implements SessionService {
     // different matter: there is no other route, so that one waits.
     if (normalizedMode === "hybrid" && this.embeddingProvider.isReady?.() === false) {
       this.embeddingProvider.warm?.();
-      this.embeddingWarming = true;
       return this.keywordSearch(trimmed, limit, toolFilter, branchFilter);
     }
-    this.embeddingWarming = false;
 
     try {
       const results = await this.semanticSearch(
@@ -516,7 +512,10 @@ export class SqliteHandoffIndex implements SessionService {
     return {
       scanning: this.isScanning(),
       vectorBacklog: this.countUnvectorizedUnits(),
-      embeddingWarming: this.embeddingWarming,
+      // Asked, not remembered. The flag was only ever written by a search, so
+      // the scan-time warm left it reading false while the model was loading —
+      // and two more tools now publish it.
+      embeddingWarming: this.embeddingProvider.isReady?.() === false,
     };
   }
 
@@ -617,6 +616,13 @@ export class SqliteHandoffIndex implements SessionService {
     // Same cap as a search, so this cannot become an unbounded CPU burn, and
     // failures are swallowed: warming is opportunistic, and a broken embedding
     // provider is already reported by the search path that depends on it.
+    //
+    // It does not finish quickly, and raising the cap would not change that:
+    // embedding runs at roughly 1.3 windows a second here, so a cold
+    // 1300-window index is about 17 minutes of CPU however it is spent — at
+    // this cap, ~8 windows a scan. What makes that acceptable is the order:
+    // `ensureVectors` takes the most recent windows first, so the history a
+    // handoff actually reaches for is covered long before the archive is.
     // Only when the model is already loaded. Loading it is a one-off that can
     // take minutes on a cold cache and is not covered by the cap, and `close()`
     // waits for the scan — so warming through an unloaded model would turn
