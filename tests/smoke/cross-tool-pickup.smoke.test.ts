@@ -77,7 +77,7 @@ describe("cross-tool pickup", () => {
       // opencode, copilot-cli) were simply missing, and whether that happened
       // depended on how fast the machine was.
       await services.sessions.listRecentSessions(50);
-      await services.sessions.whenScanSettled?.();
+      await services.sessions.whenScanSettled();
     } finally {
       for (const key of Object.keys(process.env)) delete process.env[key];
       Object.assign(process.env, saved);

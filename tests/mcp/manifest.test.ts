@@ -46,6 +46,11 @@ class LimitHonoringService implements SessionService {
     };
   }
 
+  /** Nothing scans here, so there is never anything to wait for. */
+  async whenScanSettled(): Promise<void> {
+    return;
+  }
+
   async close(): Promise<void> {
     return;
   }

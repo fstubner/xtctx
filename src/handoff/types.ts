@@ -92,8 +92,14 @@ export interface SessionService {
    * shutdown, or a test asserting that every tool was picked up — has to be
    * able to say so. Without this the only way to wait is to guess a duration,
    * which is a race dressed up as a test.
+   *
+   * Required rather than optional: callers had to write `whenScanSettled?.()`,
+   * which silently does nothing when the method is absent. The one caller that
+   * matters is the cross-tool smoke test, and "silently did not wait" is
+   * exactly the failure it exists to catch. An implementation with no scan to
+   * wait for returns an already-resolved promise.
    */
-  whenScanSettled?(): Promise<void>;
+  whenScanSettled(): Promise<void>;
 }
 
 export interface IndexProgress {

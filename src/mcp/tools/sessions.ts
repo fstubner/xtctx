@@ -39,7 +39,7 @@ export function createRecentSessionsHandler(service: SessionService) {
     const sessions = await service.listRecentSessions(limit, params.tool_filter, params.branch_filter);
 
     if (format === "json") {
-      return { sessions, indexing: service.getIndexProgress?.() };
+      return { sessions, indexing: indexingPayload(service) };
     }
 
     return formatRecentSessionsMarkdown(sessions) + progressNote(service);
@@ -58,7 +58,7 @@ export function createSessionDetailHandler(service: SessionService) {
     );
 
     if (format === "json") {
-      return { session_ref: sessionRef, offset, limit, messages, indexing: service.getIndexProgress?.() };
+      return { session_ref: sessionRef, offset, limit, messages, indexing: indexingPayload(service) };
     }
 
     // Without this, "no messages found" during a first scan reads as "that
@@ -83,7 +83,7 @@ export function createSearchSessionsHandler(service: SessionService) {
     );
 
     if (format === "json") {
-      return { query, mode, sessions, indexing: service.getIndexProgress?.() };
+      return { query, mode, sessions, indexing: indexingPayload(service) };
     }
 
     // Echo a bounded form of the query: a 10k-character query came back
@@ -94,6 +94,29 @@ export function createSearchSessionsHandler(service: SessionService) {
         `## Search Results: ${inlineSafe(truncateQueryEcho(query))}`,
       ) + progressNote(service)
     );
+  };
+}
+
+/**
+ * Indexing state in the wire shape.
+ *
+ * `IndexProgress` is camelCase because it is TypeScript; every other key these
+ * tools emit is snake_case, and `xtctx/handoff-manifest/v1` is a versioned
+ * contract an orchestrator parses. Publishing `vectorBacklog` beside
+ * `last_scan_at` made a consumer guess which convention applied where.
+ */
+export function indexingPayload(
+  service: SessionService,
+): { scanning: boolean; vector_backlog: number; embedding_warming: boolean } | undefined {
+  const progress = service.getIndexProgress?.();
+  if (!progress) {
+    return undefined;
+  }
+
+  return {
+    scanning: progress.scanning,
+    vector_backlog: progress.vectorBacklog,
+    embedding_warming: progress.embeddingWarming,
   };
 }
 
