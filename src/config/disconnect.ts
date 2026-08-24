@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import { readdir, readFile, rm, rmdir, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative as relativePath, resolve } from "node:path";
 import { writeFileAtomic } from "../utils/atomic-file.js";
@@ -141,9 +140,13 @@ export async function disconnectProject(options: DisconnectOptions = {}): Promis
     // index holds raw conversation text — so removing its ignore rule while
     // leaving it in place hands the user a repo whose next `git add` commits
     // their transcripts. The two are removed together or not at all.
+    //
+    // Judged on what the directory holds, not on whether it exists: `setup`
+    // always creates it, so an existence check made the removal unreachable
+    // and reported "still holds the transcript index" over an empty directory.
     const stateDir = join(projectRoot, ".xtctx", "state");
     const gitignorePath = join(projectRoot, ".xtctx", ".gitignore");
-    if (!existsSync(stateDir)) {
+    if (await directoryIsEmpty(stateDir)) {
       writes.push({
         path: gitignorePath,
         kind: "gitignore",
@@ -384,6 +387,16 @@ async function removeManagedBlocksFromFile(filePath: string): Promise<boolean> {
   // in `repaired`, and adding one is an edit to content xtctx does not own.
   await writeFileAtomic(filePath, matchLineEndings(repaired, existing));
   return true;
+}
+
+/** True when the directory is missing or holds nothing. */
+async function directoryIsEmpty(path: string): Promise<boolean> {
+  try {
+    return (await readdir(path)).length === 0;
+  } catch {
+    // Missing, or not a directory: either way there is no index to protect.
+    return true;
+  }
 }
 
 async function removeIfPresent(path: string): Promise<boolean> {

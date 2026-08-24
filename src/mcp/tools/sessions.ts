@@ -232,9 +232,25 @@ function formatSessionDetailMarkdown(
  * fencing would be unreadable. Collapsing them to a single line is what makes
  * them safe: content that cannot start a line cannot forge the `###` headings
  * or `~~~` fences the reading agent treats as structure.
+ *
+ * `\s` does not cover ESC or BEL, so collapsing whitespace alone left terminal
+ * escape sequences intact on their way to a console. Control characters are
+ * replaced rather than stripped, so text either side of one cannot be joined
+ * into a word that was never written.
  */
 function inlineSafe(value: string): string {
-  return value.replace(/\s+/g, " ").trim();
+  return replaceControlCharacters(value).replace(/\s+/g, " ").trim();
+}
+
+function replaceControlCharacters(value: string): string {
+  let out = "";
+  for (const ch of value) {
+    const code = ch.codePointAt(0) ?? 0;
+    // Tab, newline and carriage return are left for the whitespace collapse.
+    const isFormatting = code === 0x09 || code === 0x0a || code === 0x0d;
+    out += (code < 0x20 && !isFormatting) || code === 0x7f ? " " : ch;
+  }
+  return out;
 }
 
 const MAX_QUERY_ECHO_CHARS = 200;
