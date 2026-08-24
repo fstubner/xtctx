@@ -7,6 +7,8 @@ import {
   parseAntigravityRuntimeSteps,
   HANDLED_STEP_TYPES,
   KNOWN_UNHANDLED_STEP_TYPES,
+  reportHandledStepRenames,
+  describeUnreachableServer,
   listConversationFileIds,
   mapWithConcurrency,
   parsePosixListeningPorts,
@@ -999,10 +1001,71 @@ describe("antigravity field renames inside handled step types", () => {
     ["user input", { type: "CORTEX_STEP_TYPE_USER_INPUT", metadata: {}, userInput: { userText: "renamed from userResponse" } }],
     ["mcp server name", { type: "CORTEX_STEP_TYPE_MCP_TOOL", metadata: {}, mcpTool: { server: "xtctx", call: { name: "a_tool" } } }],
   ])("reports a renamed field in the %s step", (_label, step) => {
-    const messages = parseAntigravityRuntimeSteps("cascade-renamed", [step], {});
+    // Repeated, because one empty step is ordinary and only a type that never
+    // yields anything looks like a rename.
+    const steps = Array.from({ length: 6 }, () => step);
+    const messages = parseAntigravityRuntimeSteps("cascade-renamed", steps, {});
 
     expect(messages).toEqual([]);
-    expect(warnings.join("\n")).toContain("produced no message");
+    expect(warnings.join("\n")).toContain("yielded no messages at all");
+  });
+
+  /**
+   * The judgement is scan-wide, not per session. `PLANNER_RESPONSE` produced
+   * 408 messages across a live scan while yielding nothing in two individual
+   * sessions; reporting per session called a working parser broken.
+   */
+  it("does not call a type broken when other sessions in the scan used it", () => {
+    const tally = new Map<string, { seen: number; produced: number }>();
+    const empty = { type: "CORTEX_STEP_TYPE_PLANNER_RESPONSE", metadata: {}, plannerResponse: {} };
+    const working = {
+      type: "CORTEX_STEP_TYPE_PLANNER_RESPONSE",
+      metadata: {},
+      plannerResponse: { response: "a real answer" },
+    };
+
+    // One session of nothing but empty placeholders...
+    parseAntigravityRuntimeSteps("cascade-quiet", Array.from({ length: 6 }, () => empty), {}, tally);
+    // ...and another where the same type works fine.
+    parseAntigravityRuntimeSteps("cascade-busy", [working], {}, tally);
+    reportHandledStepRenames(tally, "antigravity-ls:scan");
+
+    expect(warnings).toEqual([]);
+  });
+
+  it("reports a type that yielded nothing anywhere in the scan", () => {
+    const tally = new Map<string, { seen: number; produced: number }>();
+    const broken = { type: "CORTEX_STEP_TYPE_FIND", metadata: {}, find: { renamedField: "x" } };
+
+    parseAntigravityRuntimeSteps("cascade-a", Array.from({ length: 3 }, () => broken), {}, tally);
+    parseAntigravityRuntimeSteps("cascade-b", Array.from({ length: 3 }, () => broken), {}, tally);
+    reportHandledStepRenames(tally, "antigravity-ls:scan");
+
+    expect(warnings.join("\n")).toContain("CORTEX_STEP_TYPE_FIND");
+  });
+
+  /**
+   * Both of these were real: `find.query` and `listDirectory.directoryPath`
+   * had never matched what the language server sends, so every such step was
+   * dropped in silence until the rename check pointed at them. Fixing them
+   * took a live scan from 1151 chunks to 1246.
+   */
+  it.each([
+    [
+      "find",
+      { type: "CORTEX_STEP_TYPE_FIND", metadata: {}, find: { pattern: "needle", searchDirectory: "/src" } },
+      "needle",
+    ],
+    [
+      "list directory",
+      { type: "CORTEX_STEP_TYPE_LIST_DIRECTORY", metadata: {}, listDirectory: { directoryPathUri: "/src/cli" } },
+      "/src/cli",
+    ],
+  ])("reads the live field names for a %s step", (_label, step, expected) => {
+    const [message] = parseAntigravityRuntimeSteps("cascade-live-fields", [step], {});
+
+    expect(message?.content).toContain(expected);
+    expect(warnings).toEqual([]);
   });
 
   it("stays quiet when a handled step genuinely holds nothing", () => {
@@ -1070,5 +1133,117 @@ describe("antigravity subagent index alignment", () => {
     const logLine = message.content.indexOf("file:///logs/perf.md");
     expect(logLine).toBeGreaterThan(perfLine);
     expect(perfLine).toBeGreaterThan(securityLine);
+  });
+});
+
+/**
+ * The reader falls back to brain artifacts when the language server gives it
+ * nothing. That is correct when Antigravity is closed, and a near-total loss
+ * of content when Antigravity is running but slow: a live server here holds
+ * 1151 chunks where the fallback holds 5. Both looked identical — no warning,
+ * no error, and a cursor advanced to the handful of recent artifacts, putting
+ * the thousand older messages permanently behind it.
+ */
+describe("antigravity degraded runtime scans", () => {
+  let rootDir = "";
+  let stateDir = "";
+  let warnings: string[] = [];
+  let originalWarn: typeof console.warn;
+
+  beforeEach(async () => {
+    rootDir = await mkdtemp(join(tmpdir(), "xtctx-ag-degraded-root-"));
+    stateDir = await mkdtemp(join(tmpdir(), "xtctx-ag-degraded-state-"));
+    await mkdir(join(rootDir, "brain", "session-a"), { recursive: true });
+    await writeFile(
+      join(rootDir, "brain", "session-a", "task.md"),
+      "Use file:///h:/projects/private/needs-work/xtctx/src/index.ts",
+      "utf-8",
+    );
+    await writeFile(
+      join(rootDir, "brain", "session-a", "task.md.metadata.json"),
+      JSON.stringify({ updatedAt: "2026-05-10T12:00:00.000Z" }),
+      "utf-8",
+    );
+    warnings = [];
+    originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => warnings.push(args.map(String).join(" "));
+  });
+
+  afterEach(async () => {
+    console.warn = originalWarn;
+    await rm(rootDir, { recursive: true, force: true });
+    await rm(stateDir, { recursive: true, force: true });
+  });
+
+  const projectRoot = join("H:", "projects", "private", "needs-work", "xtctx");
+
+  it("stays silent and falls back when Antigravity is simply not running", async () => {
+    const scraper = new AntigravityScraper(rootDir, stateDir, projectRoot, {
+      // A bare array is the "this is everything" answer.
+      listConversations: async () => [],
+    });
+
+    const chunks = await collect(scraper);
+
+    expect(chunks).toHaveLength(1);
+    expect(warnings).toEqual([]);
+  });
+
+  it("reports a scan that could not read the transcripts that are there", async () => {
+    const scraper = new AntigravityScraper(rootDir, stateDir, projectRoot, {
+      listConversations: async () => ({
+        conversations: [],
+        degradation: "3 of 24 trajectories could not be fetched",
+      }),
+    });
+
+    await expect(collect(scraper)).rejects.toThrow(/antigravity scan incomplete/);
+    expect(warnings.join("\n")).toContain("could not be fetched");
+  });
+
+  /**
+   * The throw is what stops the cursor moving: the index deliberately does not
+   * advance a scraper's position when its scan fails. Whatever was readable is
+   * still yielded first, so a degraded scan is worth something.
+   */
+  it("still yields what it could read before failing", async () => {
+    const scraper = new AntigravityScraper(rootDir, stateDir, projectRoot, {
+      listConversations: async () => ({ conversations: [], degradation: "server stopped answering" }),
+    });
+
+    const chunks: AntigravityChunk[] = [];
+    await expect(
+      (async () => {
+        for await (const chunk of scraper.fullSync()) chunks.push(chunk);
+      })(),
+    ).rejects.toThrow();
+
+    expect(chunks).toHaveLength(1);
+  });
+
+  it("treats a listing that threw as a failed read, not an empty one", async () => {
+    const scraper = new AntigravityScraper(rootDir, stateDir, projectRoot, {
+      listConversations: async () => {
+        throw new Error("ECONNRESET");
+      },
+    });
+
+    await expect(collect(scraper)).rejects.toThrow(/runtime listing failed: ECONNRESET/);
+  });
+});
+
+/**
+ * The one branch that decides whether a silent fallback is honest. It is
+ * silent by construction when wrong, and the first version of this fix got it
+ * wrong: it checked only the trajectory fetches, so discovery timing out
+ * against a running-but-loaded server still read as "Antigravity is closed".
+ */
+describe("unreachable antigravity language server", () => {
+  it("says nothing when there is no language server to reach", () => {
+    expect(describeUnreachableServer(0)).toBeUndefined();
+  });
+
+  it.each([1, 3])("reports a server that is running but did not answer (%i processes)", (count) => {
+    expect(describeUnreachableServer(count)).toContain("none answered discovery");
   });
 });

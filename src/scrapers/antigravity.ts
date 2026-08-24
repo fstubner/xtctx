@@ -114,8 +114,31 @@ interface AntigravityProcess {
   csrf: string;
 }
 
+/**
+ * What a runtime listing came back with, and whether it is the whole picture.
+ *
+ * A bare array means "this is everything" — the shape every existing caller and
+ * test stub already returns. `degradation` is set when the language server was
+ * there but could not be fully read: the transcripts exist, this scan just did
+ * not get them. That difference decides whether the reader may advance its
+ * incremental cursor, so it cannot be flattened into an empty array.
+ */
+export interface AntigravityRuntimeListing {
+  conversations: AntigravityRuntimeConversation[];
+  /** Human-readable reason the listing is incomplete, if it is. */
+  degradation?: string;
+}
+
 export interface AntigravityRuntimeClient {
-  listConversations(conversationsDir: string): Promise<AntigravityRuntimeConversation[]>;
+  listConversations(
+    conversationsDir: string,
+  ): Promise<AntigravityRuntimeConversation[] | AntigravityRuntimeListing>;
+}
+
+function normalizeListing(
+  value: AntigravityRuntimeConversation[] | AntigravityRuntimeListing,
+): AntigravityRuntimeListing {
+  return Array.isArray(value) ? { conversations: value } : value;
 }
 
 export class AntigravityScraper extends AbstractScraper<AntigravityChunk> {
@@ -187,11 +210,15 @@ export class AntigravityScraper extends AbstractScraper<AntigravityChunk> {
   }
 
   private async *readArtifacts(since: Date): AsyncIterable<AntigravityChunk> {
-    const runtimeChunks = await this.readRuntimeChunks(since);
+    const { chunks: runtimeChunks, degradation } = await this.readRuntimeChunks(since);
+    if (degradation) {
+      recordDrift(SCRAPER_NAME, `antigravity-ls:${this.antigravityRoot}`, degradation);
+    }
     if (runtimeChunks.length > 0) {
       for (const chunk of runtimeChunks) {
         yield chunk;
       }
+      failIfDegraded(degradation);
       return;
     }
 
@@ -225,6 +252,8 @@ export class AntigravityScraper extends AbstractScraper<AntigravityChunk> {
         });
       }
     }
+
+    failIfDegraded(degradation);
   }
 
   private async readSessionArtifacts(
@@ -268,8 +297,10 @@ export class AntigravityScraper extends AbstractScraper<AntigravityChunk> {
     return artifacts;
   }
 
-  private async readRuntimeChunks(since: Date): Promise<AntigravityChunk[]> {
-    const conversations = await this.safeListRuntimeConversations();
+  private async readRuntimeChunks(
+    since: Date,
+  ): Promise<{ chunks: AntigravityChunk[]; degradation?: string }> {
+    const { conversations, degradation } = await this.safeListRuntimeConversations();
     const chunks: AntigravityChunk[] = [];
 
     for (const conversation of conversations) {
@@ -306,14 +337,18 @@ export class AntigravityScraper extends AbstractScraper<AntigravityChunk> {
       }
     }
 
-    return chunks;
+    return degradation ? { chunks, degradation } : { chunks };
   }
 
-  private async safeListRuntimeConversations(): Promise<AntigravityRuntimeConversation[]> {
+  private async safeListRuntimeConversations(): Promise<AntigravityRuntimeListing> {
     try {
-      return await this.runtimeClient.listConversations(join(this.antigravityRoot, "conversations"));
-    } catch {
-      return [];
+      return normalizeListing(
+        await this.runtimeClient.listConversations(join(this.antigravityRoot, "conversations")),
+      );
+    } catch (err) {
+      // The listing threw rather than returning nothing, which is a failure to
+      // read Antigravity — not evidence that Antigravity has nothing to read.
+      return { conversations: [], degradation: `runtime listing failed: ${(err as Error).message}` };
     }
   }
 }
@@ -352,11 +387,19 @@ export function shouldFetchTrajectory(
 class AntigravityLanguageServerClient implements AntigravityRuntimeClient {
   constructor(private readonly projectRoot?: string) {}
 
-  async listConversations(conversationsDir: string): Promise<AntigravityRuntimeConversation[]> {
-    const endpoints = await discoverLanguageServerEndpoints();
+  async listConversations(conversationsDir: string): Promise<AntigravityRuntimeListing> {
+    const { endpoints, processesFound } = await discoverLanguageServerEndpoints();
     if (endpoints.length === 0) {
-      return [];
+      const degradation = describeUnreachableServer(processesFound);
+      return degradation ? { conversations: [], degradation } : { conversations: [] };
     }
+
+    // Answering endpoints exist, so from here on an empty result means this
+    // scan failed to read transcripts that are there — a different thing
+    // entirely, and the one that used to be silent.
+    const handledTally: HandledStepTally = new Map();
+    let unanswered = 0;
+    let unfetched = 0;
 
     const bySession = new Map<string, {
       endpoint: AntigravityEndpoint;
@@ -365,6 +408,11 @@ class AntigravityLanguageServerClient implements AntigravityRuntimeClient {
 
     for (const endpoint of endpoints) {
       const response = await callLanguageServer(endpoint, "GetAllCascadeTrajectories", {}, 5_000);
+      if (response === null) {
+        // The endpoint answered during discovery and has stopped answering
+        // now, so its sessions are missing from this listing.
+        unanswered += 1;
+      }
       const summaries = isRecord(response?.trajectorySummaries)
         ? response.trajectorySummaries
         : {};
@@ -411,11 +459,15 @@ class AntigravityLanguageServerClient implements AntigravityRuntimeClient {
         30_000,
       );
       let steps: unknown[] = [];
-      if (Array.isArray(response?.steps)) {
+      if (response === null) {
+        // Timed out or errored. The transcript is still there; this scan just
+        // did not get it, which must not be mistaken for an empty session.
+        unfetched += 1;
+      } else if (Array.isArray(response.steps)) {
         steps = response.steps;
-      } else if (Array.isArray(response?.messages)) {
+      } else if (Array.isArray(response.messages)) {
         steps = response.messages;
-      } else if (response !== null) {
+      } else {
         // The server answered, but with neither field this reader knows. Every
         // message in the session is dropped, and without this it is dropped in
         // silence — indistinguishable from a session that is simply empty.
@@ -425,7 +477,7 @@ class AntigravityLanguageServerClient implements AntigravityRuntimeClient {
           `trajectory response has neither 'steps' nor 'messages' (keys: ${Object.keys(response).sort().join(", ") || "none"})`,
         );
       }
-      const messages = parseAntigravityRuntimeSteps(sessionId, steps, entry.summary);
+      const messages = parseAntigravityRuntimeSteps(sessionId, steps, entry.summary, handledTally);
       if (messages.length === 0) {
         return null;
       }
@@ -439,7 +491,23 @@ class AntigravityLanguageServerClient implements AntigravityRuntimeClient {
       };
     });
 
-    return fetched.filter((entry): entry is AntigravityRuntimeConversation => entry !== null);
+    const conversations = fetched.filter(
+      (entry): entry is AntigravityRuntimeConversation => entry !== null,
+    );
+
+    reportHandledStepRenames(handledTally, `antigravity-ls:${conversationsDir}`);
+
+    const reasons: string[] = [];
+    if (unanswered > 0) {
+      reasons.push(`${unanswered} of ${endpoints.length} language server endpoints stopped answering`);
+    }
+    if (unfetched > 0) {
+      reasons.push(`${unfetched} of ${worthFetching.length} trajectories could not be fetched`);
+    }
+
+    return reasons.length > 0
+      ? { conversations, degradation: reasons.join("; ") }
+      : { conversations };
   }
 }
 
@@ -472,16 +540,27 @@ export async function mapWithConcurrency<T, R>(
   return results;
 }
 
+export type HandledStepTally = Map<string, { seen: number; produced: number }>;
+
 export function parseAntigravityRuntimeSteps(
   sessionId: string,
   steps: unknown[],
   summary: Record<string, unknown>,
+  /**
+   * Scan-wide tally of handled step types. Judging a rename needs every
+   * session: one session can hold nothing but empty planner responses while
+   * the scan as a whole has four hundred good ones, and reporting per session
+   * called a working parser broken. Omitted, the check falls back to this
+   * session alone, which is what the unit tests exercise.
+   */
+  tally?: HandledStepTally,
 ): AntigravityRuntimeMessage[] {
   const fallbackTimestamp = toDate(summary.createdTime);
   const messages: AntigravityRuntimeMessage[] = [];
   // The transcript comes off the language server, not off disk, so the session
   // is the only location there is to point at.
   const location = `antigravity-ls:${sessionId}`;
+  const handledTally: HandledStepTally = tally ?? new Map();
 
   for (const step of steps) {
     if (!isRecord(step)) {
@@ -495,6 +574,12 @@ export function parseAntigravityRuntimeSteps(
     const message = parseRuntimeStep(sessionId, step, stepType, timestamp);
     if (message) {
       messages.push(message);
+      if (HANDLED_STEP_TYPES.has(stepType)) {
+        const tally = handledTally.get(stepType) ?? { seen: 0, produced: 0 };
+        tally.seen += 1;
+        tally.produced += 1;
+        handledTally.set(stepType, tally);
+      }
       continue;
     }
 
@@ -504,18 +589,16 @@ export function parseAntigravityRuntimeSteps(
     // report normal operation as drift — the failure this project has already
     // made once, with `atis-latch`. A step whose payload holds text is a
     // different matter: that text was dropped.
-    // A step type this reader claims to handle, which nonetheless produced
-    // nothing while carrying text. That is what a renamed *field* looks like —
-    // `plannerResponse.response` becoming `.text` would silently drop every
-    // assistant message — and for a proprietary protobuf a field rename is a
-    // likelier change than a new step type. Checking only the type left the
-    // more probable break undetectable.
-    if (HANDLED_STEP_TYPES.has(stepType) && stepCarriesText(step)) {
-      recordDrift(
-        SCRAPER_NAME,
-        location,
-        `handled step type ${JSON.stringify(stepType)} produced no message — its payload fields may have been renamed`,
-      );
+    // Counted, not reported here. A handled step producing nothing is
+    // ordinary: plenty of planner responses are empty placeholders. Reporting
+    // each one made this fire 4047 times for a step type that was working
+    // perfectly — the same crying-wolf failure, in a new place. What actually
+    // indicates a renamed field is a type that yields nothing *at all*, and
+    // that can only be judged once the whole session has been read.
+    if (HANDLED_STEP_TYPES.has(stepType)) {
+      const tally = handledTally.get(stepType) ?? { seen: 0, produced: 0 };
+      tally.seen += 1;
+      handledTally.set(stepType, tally);
       continue;
     }
 
@@ -538,8 +621,44 @@ export function parseAntigravityRuntimeSteps(
     }
   }
 
+  if (!tally) {
+    reportHandledStepRenames(handledTally, location);
+  }
+
   return messages;
 }
+
+/**
+ * Report handled step types that appeared repeatedly and yielded nothing.
+ *
+ * That is the shape of a renamed field: if the parser still matched, at least
+ * one of them would have produced a message. It found two real breaks the day
+ * it was written — `find.query` and `listDirectory.directoryPath` had both
+ * been gone for as long as anyone had looked, dropping every such step.
+ *
+ * A minimum count keeps a scan that happens to hold a couple of empty
+ * placeholders from reading as a break.
+ */
+export function reportHandledStepRenames(tally: HandledStepTally, location: string): void {
+  for (const [stepType, { seen, produced }] of tally) {
+    if (produced === 0 && seen >= MIN_STEPS_BEFORE_RENAME_SUSPECTED) {
+      recordDrift(
+        SCRAPER_NAME,
+        location,
+        // No step count in the text: sessions differ in length, so embedding
+        // it produced a distinct surprise per session and ate the ceiling. The
+        // stored `records` count already says how often this was hit.
+        `handled step type ${JSON.stringify(stepType)} yielded no messages at all — its payload fields may have been renamed`,
+      );
+    }
+  }
+}
+
+/**
+ * How many times a handled step type must appear, having produced nothing,
+ * before it is treated as broken rather than merely empty.
+ */
+const MIN_STEPS_BEFORE_RENAME_SUSPECTED = 5;
 
 function parseRuntimeStep(
   sessionId: string,
@@ -567,10 +686,20 @@ function parseRuntimeStep(
     ]);
   }
   if (stepType === "CORTEX_STEP_TYPE_FIND") {
-    return parseSimpleToolStep(sessionId, step, stepType, timestamp, "find", "find", ["query"]);
+    // `pattern` and `searchDirectory` are what the live server sends; `query`
+    // was never present, so every find step was silently dropped until the
+    // rename check above pointed at it. The old name is kept as a fallback.
+    return parseSimpleToolStep(sessionId, step, stepType, timestamp, "find", "find", [
+      "pattern",
+      "searchDirectory",
+      "query",
+    ]);
   }
   if (stepType === "CORTEX_STEP_TYPE_LIST_DIRECTORY") {
+    // `directoryPathUri` is the live field name; the two below never appeared,
+    // so every list-directory step was dropped in silence.
     return parsePathToolStep(sessionId, step, stepType, timestamp, "list_dir", "listDirectory", [
+      "directoryPathUri",
       "directoryPath",
       "path",
     ]);
@@ -954,7 +1083,42 @@ function runtimeMessage(
   };
 }
 
-async function discoverLanguageServerEndpoints(): Promise<AntigravityEndpoint[]> {
+/**
+ * Endpoints that answered, and how many language server processes were there
+ * to answer.
+ *
+ * The count is what separates "Antigravity is not running" from "Antigravity
+ * is running and did not reply in time". Discovery probes each port with a
+ * five-second call, and on a loaded machine that call times out — so an empty
+ * endpoint list alone was read as "closed", the reader fell back to brain
+ * artifacts, and the scan looked healthy while capturing almost nothing. That
+ * is the exact case this reporting was added for, and it slipped through the
+ * first version of the fix.
+ */
+interface AntigravityDiscovery {
+  endpoints: AntigravityEndpoint[];
+  processesFound: number;
+}
+
+/**
+ * Why no endpoint answered, when that is worth reporting.
+ *
+ * Undefined means it is not: no language server process exists, so Antigravity
+ * is closed, nothing has been lost, and warning would fire on every scan with
+ * the app shut. A process that is running and did not answer is the opposite —
+ * its transcripts are there and this scan cannot see them.
+ *
+ * Split out because this one branch is the whole distinction, and getting it
+ * wrong is silent by construction: the first version of this fix only checked
+ * the fetches and left discovery reading a slow server as a closed one.
+ */
+export function describeUnreachableServer(processesFound: number): string | undefined {
+  return processesFound === 0
+    ? undefined
+    : `${processesFound} language server process(es) running but none answered discovery`;
+}
+
+async function discoverLanguageServerEndpoints(): Promise<AntigravityDiscovery> {
   const processes = await discoverLanguageServerProcesses();
   const endpoints: AntigravityEndpoint[] = [];
   const seenPorts = new Set<number>();
@@ -979,7 +1143,7 @@ async function discoverLanguageServerEndpoints(): Promise<AntigravityEndpoint[]>
     }
   }
 
-  return endpoints;
+  return { endpoints, processesFound: processes.length };
 }
 
 async function discoverLanguageServerProcesses(): Promise<AntigravityProcess[]> {
@@ -1513,6 +1677,23 @@ function toMessageIndex(value: unknown): number {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * End a degraded scan by throwing, after everything readable has been yielded.
+ *
+ * The chunks already yielded are kept — the index upserts as it goes — but the
+ * index deliberately does not advance a scraper's cursor when its scan throws,
+ * and that is the point. A degraded scan can fall back to a handful of recent
+ * brain artifacts while the language server holds a thousand older messages;
+ * advancing the cursor to those recent timestamps would put every one of those
+ * messages permanently behind the cursor. Failing loudly also puts the reason
+ * in `last_error`, which `xtctx status` shows.
+ */
+function failIfDegraded(degradation?: string): void {
+  if (degradation) {
+    throw new Error(`antigravity scan incomplete: ${degradation}`);
+  }
 }
 
 function describeValue(value: unknown): string {
