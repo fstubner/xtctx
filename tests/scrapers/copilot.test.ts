@@ -447,3 +447,106 @@ describe("CopilotScraper against VS Code's real container shape", () => {
     expect(warnings.join("\n")).toContain("expected interactive.sessions to be an object or array");
   });
 });
+
+/**
+ * Current VS Code keeps each chat in its own file under
+ * `<workspace>/chatSessions/` rather than in the `interactive.sessions` blob.
+ * A reader that only opened state.vscdb therefore saw nothing from any recent
+ * session — 12 workspaces on a real machine hold 24 such sessions.
+ */
+describe("CopilotScraper reading per-session chat files", () => {
+  let workspaceStorageDir = "";
+  let stateDir = "";
+  let sessionsDir = "";
+  let warnings: string[] = [];
+  let originalWarn: typeof console.warn;
+
+  const session = {
+    sessionId: "modern-session",
+    creationDate: new Date("2026-02-24T10:00:00Z").getTime(),
+    requests: [
+      {
+        message: { parts: [{ text: "how does the index get rebuilt" }] },
+        response: [{ value: "it is derived, so it is dropped and re-scraped" }],
+        isCanceled: false,
+      },
+    ],
+  };
+
+  async function collectAll(): Promise<CopilotChunk[]> {
+    const scraper = new CopilotScraper(workspaceStorageDir, stateDir);
+    const chunks: CopilotChunk[] = [];
+    for await (const chunk of scraper.fullSync()) chunks.push(chunk);
+    return chunks;
+  }
+
+  beforeEach(async () => {
+    workspaceStorageDir = await mkdtemp(join(tmpdir(), "xtctx-copilot-files-"));
+    stateDir = await mkdtemp(join(tmpdir(), "xtctx-copilot-files-state-"));
+    // A workspace needs a database for its directory to be discovered at all.
+    await createWorkspaceDb(workspaceStorageDir, "modernhash", []);
+    sessionsDir = join(workspaceStorageDir, "modernhash", "chatSessions");
+    await mkdir(sessionsDir, { recursive: true });
+    warnings = [];
+    originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => warnings.push(args.map(String).join(" "));
+  });
+
+  afterEach(async () => {
+    console.warn = originalWarn;
+    await rm(workspaceStorageDir, { recursive: true, force: true });
+    await rm(stateDir, { recursive: true, force: true });
+  });
+
+  it("reads a .json session file", async () => {
+    await writeFile(join(sessionsDir, "modern-session.json"), JSON.stringify(session), "utf-8");
+
+    const chunks = await collectAll();
+
+    expect(chunks.map((chunk) => chunk.content)).toEqual([
+      "how does the index get rebuilt",
+      "it is derived, so it is dropped and re-scraped",
+    ]);
+    expect(warnings).toEqual([]);
+  });
+
+  /** The newest format wraps each record under `v`, one per line. */
+  it("reads a .jsonl session file and ignores its bookkeeping records", async () => {
+    const lines = [
+      JSON.stringify({ kind: 1, v: { version: 3, inputState: { attachments: [] } } }),
+      JSON.stringify({ kind: 1, v: session }),
+      "",
+    ].join("\n");
+    await writeFile(join(sessionsDir, "modern-session.jsonl"), lines, "utf-8");
+
+    const chunks = await collectAll();
+
+    expect(chunks.map((chunk) => chunk.content)).toEqual([
+      "how does the index get rebuilt",
+      "it is derived, so it is dropped and re-scraped",
+    ]);
+    // A record with no requests array is editor state, not a missing chat.
+    expect(warnings).toEqual([]);
+  });
+
+  it("reports a session file that cannot be parsed", async () => {
+    await writeFile(join(sessionsDir, "broken.json"), "{ not json", "utf-8");
+
+    expect(await collectAll()).toEqual([]);
+    expect(warnings.join("\n")).toContain("chat session file is not valid JSON");
+  });
+
+  it("says nothing when a workspace has no chat-session directory", async () => {
+    await rm(sessionsDir, { recursive: true, force: true });
+
+    expect(await collectAll()).toEqual([]);
+    expect(warnings).toEqual([]);
+  });
+
+  it("ignores files that are not sessions", async () => {
+    await writeFile(join(sessionsDir, "notes.txt"), "not a session", "utf-8");
+
+    expect(await collectAll()).toEqual([]);
+    expect(warnings).toEqual([]);
+  });
+});
