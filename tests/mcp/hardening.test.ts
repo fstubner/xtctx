@@ -192,3 +192,73 @@ describe("sanitizeErrorMessage", () => {
     expect(posix).toContain("<path>");
   });
 });
+
+/**
+ * A filter the caller got wrong used to normalize to an empty list, and an
+ * empty list means *no filter* — so asking for one tool silently returned
+ * every tool. Widening is the wrong direction to fail in.
+ */
+describe("filter arguments that are not arrays of strings", () => {
+  class RecordingService implements SessionService {
+    lastToolFilter: string[] | undefined = undefined;
+    called = false;
+
+    async listRecentSessions(_limit?: number, toolFilter?: string[]): Promise<SessionSummary[]> {
+      this.called = true;
+      this.lastToolFilter = toolFilter;
+      return [];
+    }
+    async getSessionByRef(): Promise<SessionSummary | null> {
+      return null;
+    }
+    async getSessionDetail(): Promise<SessionMessage[]> {
+      return [];
+    }
+    async searchSessions(
+      _query: string,
+      _limit?: number,
+      toolFilter?: string[],
+    ): Promise<SessionSummary[]> {
+      this.called = true;
+      this.lastToolFilter = toolFilter;
+      return [];
+    }
+    async getStatus(): Promise<HandoffStatus> {
+      return {} as HandoffStatus;
+    }
+    async whenScanSettled(): Promise<void> {}
+    async close(): Promise<void> {}
+  }
+
+  it.each([
+    ["a bare string", "cursor"],
+    ["a number", 3],
+    ["an object", { tool: "cursor" }],
+    ["an array holding a non-string", [{}]],
+    ["an array holding an empty string", [""]],
+  ])("rejects %s rather than returning every tool", async (_label, value) => {
+    const service = new RecordingService();
+    const handler = createRecentSessionsHandler(service);
+
+    await expect(handler({ tool_filter: value } as Record<string, unknown>)).rejects.toThrow(
+      /tool_filter/,
+    );
+    // And it never reached the service to be quietly widened.
+    expect(service.called).toBe(false);
+  });
+
+  it("still treats an omitted filter as no filter", async () => {
+    const service = new RecordingService();
+    await createRecentSessionsHandler(service)({});
+
+    expect(service.called).toBe(true);
+    expect(service.lastToolFilter).toBeUndefined();
+  });
+
+  it("applies a valid filter unchanged", async () => {
+    const service = new RecordingService();
+    await createSearchSessionsHandler(service)({ query: "anything", tool_filter: ["cursor"] });
+
+    expect(service.lastToolFilter).toEqual(["cursor"]);
+  });
+});

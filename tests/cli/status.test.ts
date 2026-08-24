@@ -206,3 +206,66 @@ describe("storePathNotes", () => {
     expect(storePathNotes(definitionFor(real), [real])).toEqual([]);
   });
 });
+
+/**
+ * `enabled: false` is the only control a user has over which transcript stores
+ * xtctx reads. A YAML typo used to make the whole file parse as "no
+ * preferences expressed", which silently re-enabled every tool they had
+ * switched off — and `status` said nothing about it.
+ */
+describe("status with a config that cannot be parsed", () => {
+  let projectRoot = "";
+  let homeDir = "";
+
+  beforeEach(async () => {
+    projectRoot = await realpath(await mkdtemp(join(tmpdir(), "xtctx-badconfig-")));
+    homeDir = await realpath(await mkdtemp(join(tmpdir(), "xtctx-badconfig-home-")));
+  });
+
+  afterEach(async () => {
+    await rm(projectRoot, { recursive: true, force: true });
+    await rm(homeDir, { recursive: true, force: true });
+  });
+
+  it("says so, and scans nothing, rather than falling back to defaults", async () => {
+    await setupProject({ projectPath: projectRoot, homeDir, yes: true });
+    // A tab where YAML requires spaces: one keystroke, whole file unreadable.
+    await writeFile(
+      join(projectRoot, ".xtctx", "config.yaml"),
+      "tools:\n  cursor:\n\tenabled: false\n",
+      "utf-8",
+    );
+
+    const services = await createProjectServices(projectRoot);
+    try {
+      const status = await renderStatusBlock(services, { homeDir });
+
+      expect(services.config.error).toBeDefined();
+      expect(status).toContain("UNREADABLE");
+      expect(status).toContain("No transcripts are being read");
+      // Nothing is scanned while the file is broken, so no tool reports as
+      // detected off the back of a guess.
+      expect(status).not.toMatch(/\+ cursor\s+detected/);
+    } finally {
+      await services.sessions.close();
+    }
+  });
+
+  it("still reads a valid config normally", async () => {
+    await setupProject({ projectPath: projectRoot, homeDir, yes: true });
+    await writeFile(
+      join(projectRoot, ".xtctx", "config.yaml"),
+      "tools:\n  cursor:\n    enabled: false\n",
+      "utf-8",
+    );
+
+    const services = await createProjectServices(projectRoot);
+    try {
+      expect(services.config.error).toBeUndefined();
+      expect(services.config.tools.cursor?.enabled).toBe(false);
+      expect(await renderStatusBlock(services, { homeDir })).not.toContain("UNREADABLE");
+    } finally {
+      await services.sessions.close();
+    }
+  });
+});

@@ -61,6 +61,13 @@ export async function renderStatusBlock(
   lines.push("");
   lines.push(`Project  ${services.projectRoot}`);
   lines.push(`Config   ${configPresent ? services.configPath : "missing (run xtctx setup)"}`);
+  if (services.config.error) {
+    // Loud, and immediately under the path it refers to: nothing is being
+    // scanned at all while this holds, which is otherwise invisible — the
+    // tools below would simply report zero sessions each.
+    lines.push(`         UNREADABLE: ${services.config.error}`);
+    lines.push(`         No transcripts are being read until this is fixed.`);
+  }
   lines.push(`Index    ${services.dbPath}`);
   lines.push(`MCP      npx -y xtctx`);
   lines.push(`Scan     ${status.last_scan_at ?? "never"}`);

@@ -7,6 +7,13 @@ import { createDefaultScrapers } from "../tools/sources.js";
 
 export interface ProjectConfig {
   tools: Record<string, { enabled?: boolean; storePath?: string }>;
+  /**
+   * Why the config on disk could not be read, when it exists but is broken.
+   * Nothing is scanned while this is set: the file is the only place a user
+   * says which transcript stores may be read, and guessing at that is not a
+   * default worth having.
+   */
+  error?: string;
 }
 
 export interface ProjectServices {
@@ -59,10 +66,15 @@ export async function createProjectServices(
       .filter(([, value]) => value.enabled !== false)
       .map(([tool, value]) => [tool, value.storePath]),
   );
-  const scrapers = createDefaultScrapers(stateDir, overrides, projectRoot).filter((scraper) => {
-    const toolConfig = config.tools[scraper.tool];
-    return toolConfig?.enabled !== false;
-  });
+  // A config that cannot be read leaves no scrapers at all. Scanning on
+  // defaults would read stores the user may have switched off, and the whole
+  // point of the file is that they get to decide.
+  const scrapers = config.error
+    ? []
+    : createDefaultScrapers(stateDir, overrides, projectRoot).filter((scraper) => {
+        const toolConfig = config.tools[scraper.tool];
+        return toolConfig?.enabled !== false;
+      });
 
   const sessions = new SqliteHandoffIndex(
     dbPath,
@@ -83,20 +95,32 @@ export async function createProjectServices(
 }
 
 export async function loadProjectConfig(configPath: string): Promise<ProjectConfig> {
+  let raw: string;
   try {
-    const raw = await readFile(configPath, "utf-8");
+    raw = await readFile(configPath, "utf-8");
+  } catch {
+    // Missing config is valid: setup owns writing it, MCP can still run.
+    return { tools: {} };
+  }
+
+  try {
     const parsed = parseYaml(raw);
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       const root = parsed as Record<string, unknown>;
-      return {
-        tools: normalizeTools(root.tools),
-      };
+      return { tools: normalizeTools(root.tools) };
     }
-  } catch {
-    // Missing config is valid: setup owns writing it, MCP can still run.
+    return { tools: {}, error: "expected a mapping at the top level" };
+  } catch (err) {
+    // A config that exists but will not parse is not the same as no config.
+    // `enabled: false` is the only control a user has over which transcript
+    // stores get read, so reading a stray tab as "no preferences expressed"
+    // silently re-enabled a tool they had switched off — and said nothing.
+    //
+    // Reported rather than thrown: `status` has to keep working, since
+    // explaining a broken config is exactly what a diagnostic is for. What
+    // does change is that nothing is scanned until it is fixed.
+    return { tools: {}, error: err instanceof Error ? err.message : String(err) };
   }
-
-  return { tools: {} };
 }
 
 function normalizeTools(input: unknown): ProjectConfig["tools"] {

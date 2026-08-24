@@ -31,12 +31,44 @@ export class ToolInputError extends Error {}
 /** Hard cap on a single message body returned to the model. */
 const MAX_MESSAGE_CHARS = 16_000;
 
+/**
+ * A filter the caller got wrong is refused, not ignored.
+ *
+ * `tool_filter: "cursor"` — a bare string where an array belongs — used to
+ * normalize to an empty list further down, and an empty list means *no
+ * filter*. So a caller asking to see one tool silently received every tool,
+ * with nothing to say the filter had been discarded. Widening is the wrong
+ * direction to fail in: they asked for less and got more.
+ *
+ * Checked here rather than in the index, because this is the boundary the
+ * untrusted argument arrives at.
+ */
+function validatedFilter(value: unknown, field: string): string[] | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (!Array.isArray(value)) {
+    throw new ToolInputError(`${field} must be an array of strings`);
+  }
+
+  if (value.some((item) => typeof item !== "string" || item.trim().length === 0)) {
+    throw new ToolInputError(`${field} must contain only non-empty strings`);
+  }
+
+  return value as string[];
+}
+
 export function createRecentSessionsHandler(service: SessionService) {
   return async (raw: Record<string, unknown> = {}) => {
     const params = raw as unknown as RecentSessionsParams;
     const limit = numberOrDefault(params.limit, 5);
     const format = params.format ?? "markdown";
-    const sessions = await service.listRecentSessions(limit, params.tool_filter, params.branch_filter);
+    const sessions = await service.listRecentSessions(
+      limit,
+      validatedFilter(params.tool_filter, "tool_filter"),
+      validatedFilter(params.branch_filter, "branch_filter"),
+    );
 
     if (format === "json") {
       return { sessions, indexing: indexingPayload(service) };
@@ -77,9 +109,9 @@ export function createSearchSessionsHandler(service: SessionService) {
     const sessions = await service.searchSessions(
       query,
       limit,
-      params.tool_filter,
+      validatedFilter(params.tool_filter, "tool_filter"),
       mode,
-      params.branch_filter,
+      validatedFilter(params.branch_filter, "branch_filter"),
     );
 
     if (format === "json") {

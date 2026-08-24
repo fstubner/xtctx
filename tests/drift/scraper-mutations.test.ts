@@ -278,9 +278,23 @@ async function cleanupTemp(dirs: string[]): Promise<void> {
 }
 
 // Claude Code: JSONL per line.
+//
+// This shape is taken from tests/drift/fingerprints/claude-code.json, which is
+// captured from a real store. It previously used `{type:"human", content}` —
+// a type Claude Code does not emit, with content at a path it does not use —
+// so every mutation below rewrote a field nothing reads, and the battery
+// proved only that the scraper ignores a format it never sees.
 const CLAUDE_BASELINE_LINES = [
-  { type: "human", content: "help me", timestamp: "2026-02-24T10:00:00Z" },
-  { type: "assistant", content: "sure", timestamp: "2026-02-24T10:00:05Z" },
+  {
+    type: "user",
+    message: { role: "user", content: "help me" },
+    timestamp: "2026-02-24T10:00:00Z",
+  },
+  {
+    type: "assistant",
+    message: { role: "assistant", content: "sure" },
+    timestamp: "2026-02-24T10:00:05Z",
+  },
 ];
 
 // Codex: JSONL event stream.
@@ -638,11 +652,27 @@ describe("Scraper mutation drift", () => {
   });
 
   it("copilot-cli: events.jsonl mutations", async () => {
+    // Paths match the real record: the turn's text is at `data.content`, and
+    // the speaker is carried by `type` (`user.message` / `assistant.message`)
+    // rather than a `role` field. The previous list mutated `role` and a
+    // top-level `content`, neither of which copilot-cli writes.
     const cases: MutationCase[] = [
-      { name: "rename role", mutation: { kind: "rename", path: "role", newKey: "rol" } },
-      { name: "null content", mutation: { kind: "null", path: "content" } },
-      { name: "retype content to number", mutation: { kind: "retype", path: "content", to: "number" } },
-      { name: "drop role", mutation: { kind: "drop", path: "role" } },
+      { name: "rename type", mutation: { kind: "rename", path: "type", newKey: "typ" } },
+      {
+        // `data.text` is a documented alternative the reader already accepts
+        // (extractContent step 5), so this rename moves the turn between two
+        // names it understands and loses nothing. Silence is correct here —
+        // not a gap being papered over.
+        name: "rename data.content to data.text",
+        mutation: { kind: "rename", path: "data.content", newKey: "text" },
+        expectation: "silent-ok",
+      },
+      { name: "null data.content", mutation: { kind: "null", path: "data.content" } },
+      {
+        name: "retype data.content to number",
+        mutation: { kind: "retype", path: "data.content", to: "number" },
+      },
+      { name: "drop data", mutation: { kind: "drop", path: "data" } },
       {
         name: "unknown field alongside",
         mutation: { kind: "unknown", path: "", key: "newKey" },
@@ -650,11 +680,14 @@ describe("Scraper mutation drift", () => {
       },
     ];
 
+    // From tests/drift/fingerprints/copilot-cli.json, captured from a real
+    // store. It previously used `{type:"message", role, content}` — a type
+    // copilot-cli does not emit, with content at a path it does not use.
     const COPILOT_CLI_BASELINE = {
-      type: "message",
-      role: "user",
-      content: "hello copilot cli",
+      type: "user.message",
+      id: "evt-1",
       timestamp: "2026-02-24T10:00:00Z",
+      data: { content: "hello copilot cli" },
     };
 
     await runScraperMutationBattery(

@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { request as httpsRequest } from "node:https";
 import { promisify } from "node:util";
-import { basename, extname, join } from "node:path";
+import { basename, dirname, extname, join } from "node:path";
 import type { AntigravityChunk } from "../types/scraper.js";
 import { AbstractScraper, estimateTokens, toDate } from "./base.js";
 import { recordDrift, withDriftReport } from "./drift-log.js";
@@ -288,7 +288,7 @@ export class AntigravityScraper extends AbstractScraper<AntigravityChunk> {
         referencedFiles: extractReferencedFiles(body),
       };
 
-      if (this.projectRoot && !artifactMatchesProject(candidate, this.projectRoot)) {
+      if (this.projectRoot && !artifactMatchesProject(candidate, this.projectRoot, this.antigravityRoot)) {
         continue;
       }
 
@@ -305,7 +305,7 @@ export class AntigravityScraper extends AbstractScraper<AntigravityChunk> {
     const chunks: AntigravityChunk[] = [];
 
     for (const conversation of conversations) {
-      if (this.projectRoot && !runtimeConversationMatchesProject(conversation, this.projectRoot)) {
+      if (this.projectRoot && !runtimeConversationMatchesProject(conversation, this.projectRoot, this.antigravityRoot)) {
         continue;
       }
 
@@ -372,6 +372,7 @@ export class AntigravityScraper extends AbstractScraper<AntigravityChunk> {
 export function shouldFetchTrajectory(
   summary: Record<string, unknown>,
   projectRoot?: string,
+  antigravityRoot?: string,
 ): boolean {
   if (!projectRoot) {
     return true;
@@ -382,7 +383,9 @@ export function shouldFetchTrajectory(
     return true;
   }
 
-  return workspaces.some((workspace) => textMentionsProject(workspace, projectRoot));
+  return workspaces.some((workspace) =>
+    textMentionsProject(workspace, projectRoot, antigravityRoot),
+  );
 }
 
 class AntigravityLanguageServerClient implements AntigravityRuntimeClient {
@@ -449,7 +452,7 @@ class AntigravityLanguageServerClient implements AntigravityRuntimeClient {
     }
 
     const worthFetching = [...bySession.entries()].filter(([, entry]) =>
-      shouldFetchTrajectory(entry.summary, this.projectRoot),
+      shouldFetchTrajectory(entry.summary, this.projectRoot, dirname(conversationsDir)),
     );
 
     // Sessions Antigravity records no workspace for still have to be fetched
@@ -1441,7 +1444,11 @@ function formatArtifactContent(artifact: AntigravityArtifact): string {
   return `${header.join("\n")}\n\n${artifact.body.trim()}`;
 }
 
-function artifactMatchesProject(artifact: AntigravityArtifact, projectRoot: string): boolean {
+function artifactMatchesProject(
+  artifact: AntigravityArtifact,
+  projectRoot: string,
+  antigravityRoot: string,
+): boolean {
   const text = normalizeSearchText(
     [
       artifact.sourcePath,
@@ -1450,18 +1457,19 @@ function artifactMatchesProject(artifact: AntigravityArtifact, projectRoot: stri
       ...artifact.referencedFiles,
     ].join("\n"),
   );
-  const root = normalizeSearchText(projectRoot);
-  const projectName = normalizeSearchText(basename(projectRoot));
-
-  return text.includes(root) || text.includes(`/playground/${projectName}/`) ||
-    text.endsWith(`/playground/${projectName}`);
+  return textMentionsProject(text, projectRoot, antigravityRoot);
 }
 
 function runtimeConversationMatchesProject(
   conversation: AntigravityRuntimeConversation,
   projectRoot: string,
+  antigravityRoot: string,
 ): boolean {
-  if (conversation.workspaces.some((workspace) => textMentionsProject(workspace, projectRoot))) {
+  if (
+    conversation.workspaces.some((workspace) =>
+      textMentionsProject(workspace, projectRoot, antigravityRoot),
+    )
+  ) {
     return true;
   }
 
@@ -1479,16 +1487,49 @@ function runtimeConversationMatchesProject(
         ...message.referencedFiles,
       ].join("\n"),
       projectRoot,
+      antigravityRoot,
     ),
   );
 }
 
-function textMentionsProject(value: string, projectRoot: string): boolean {
+/**
+ * Whether text records a file belonging to this project.
+ *
+ * The project's own path is the real evidence. Antigravity additionally keeps
+ * a copy of some projects under `<its own root>/playground/<name>`, and those
+ * conversations belong to the project they mirror — but only when that
+ * playground is *this* install's.
+ *
+ * Matching `/playground/<name>/` anywhere was a name match wearing a path's
+ * clothes: a conversation naming
+ * `c:/Users/Someone/.gemini/antigravity/playground/api/...` was filed under a
+ * project at `D:/work/api` — different drive, different user account. Any two
+ * projects sharing a basename cross-contaminated, which is the boundary
+ * PRODUCT.md promises and the comment above this one already says was
+ * supposed to have been removed.
+ *
+ * What remains: a playground directory inside this reader's own Antigravity
+ * install, sharing the project's name, is still treated as the project. Two
+ * same-named projects in one user's own playground would still collide — that
+ * case is genuinely ambiguous from a path alone, and it is a far narrower
+ * claim than "anywhere on the machine".
+ */
+function textMentionsProject(
+  value: string,
+  projectRoot: string,
+  antigravityRoot?: string,
+): boolean {
   const text = normalizeSearchText(value);
-  const root = normalizeSearchText(projectRoot);
-  const projectName = normalizeSearchText(basename(projectRoot));
-  return text.includes(root) || text.includes(`/playground/${projectName}/`) ||
-    text.endsWith(`/playground/${projectName}`);
+  if (text.includes(normalizeSearchText(projectRoot))) {
+    return true;
+  }
+
+  if (!antigravityRoot) {
+    return false;
+  }
+
+  const playground = `${normalizeSearchText(antigravityRoot)}/playground/${normalizeSearchText(basename(projectRoot))}`;
+  return text.includes(`${playground}/`) || text.endsWith(playground);
 }
 
 function extractWorkspaceUris(summary: Record<string, unknown>): string[] {
