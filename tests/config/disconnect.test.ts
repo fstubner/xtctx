@@ -40,6 +40,27 @@ describe("disconnectProject", () => {
     expect(await readFile(join(projectRoot, ".xtctx", ".gitignore"), "utf-8")).toContain("state/");
   });
 
+  /**
+   * An empty `state/` is the ordinary case after a project that was set up but
+   * never scanned. Deciding on existence rather than contents made this branch
+   * unreachable — `setup` always creates the directory — so disconnect claimed
+   * to be keeping the ignore file for an index that was not there.
+   */
+  it("removes the ignore file when the state directory is present but empty", async () => {
+    await setupProject({ projectPath: projectRoot, homeDir, yes: true });
+    await mkdir(join(projectRoot, ".xtctx", "state"), { recursive: true });
+
+    const result = await disconnectProject({ projectPath: projectRoot, homeDir, all: true });
+
+    expect(existsSync(join(projectRoot, ".xtctx", ".gitignore"))).toBe(false);
+    expect(result.writes).toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: "gitignore", changed: true })]),
+    );
+    // And it does not claim to be protecting something that is not there.
+    const gitignoreWrite = result.writes.find((write) => write.kind === "gitignore");
+    expect(gitignoreWrite?.note).toBeUndefined();
+  });
+
   it("removes the ignore file once there is no index left to protect", async () => {
     await setupProject({ projectPath: projectRoot, homeDir, yes: true });
     await rm(join(projectRoot, ".xtctx", "state"), { recursive: true, force: true });

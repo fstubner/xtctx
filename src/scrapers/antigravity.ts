@@ -504,6 +504,21 @@ export function parseAntigravityRuntimeSteps(
     // report normal operation as drift — the failure this project has already
     // made once, with `atis-latch`. A step whose payload holds text is a
     // different matter: that text was dropped.
+    // A step type this reader claims to handle, which nonetheless produced
+    // nothing while carrying text. That is what a renamed *field* looks like —
+    // `plannerResponse.response` becoming `.text` would silently drop every
+    // assistant message — and for a proprietary protobuf a field rename is a
+    // likelier change than a new step type. Checking only the type left the
+    // more probable break undetectable.
+    if (HANDLED_STEP_TYPES.has(stepType) && stepCarriesText(step)) {
+      recordDrift(
+        SCRAPER_NAME,
+        location,
+        `handled step type ${JSON.stringify(stepType)} produced no message — its payload fields may have been renamed`,
+      );
+      continue;
+    }
+
     if (
       !HANDLED_STEP_TYPES.has(stepType) &&
       !KNOWN_UNHANDLED_STEP_TYPES.has(stepType) &&
@@ -611,6 +626,7 @@ function parseAskQuestionStep(
     : Array.isArray(fallback.questions)
       ? fallback.questions
       : [];
+  const location = `antigravity-ls:${sessionId}`;
 
   const sections: string[] = [];
   for (const entry of questions) {
@@ -620,10 +636,35 @@ function parseAskQuestionStep(
 
     const options = Array.isArray(entry.options) ? entry.options.filter(isRecord) : [];
     const selectedIds = new Set(toStringArray(entry.selectedOptionIds));
+    const optionIds = options
+      .map((option) => toStringValue(option.id))
+      .filter((id): id is string => Boolean(id));
+
+    // Only claim a selection when the data can actually express one. If
+    // `selectedOptionIds` or `option.id` were renamed, marking every option
+    // `[ ]` would state that the user chose nothing — a confident, false record
+    // of a decision, which is worse than dropping the step. "Unknown" and "not
+    // chosen" have to look different.
+    const canShowSelection = selectedIds.size > 0 && optionIds.length > 0;
+    const matched = optionIds.some((id) => selectedIds.has(id));
+    if (selectedIds.size > 0 && !matched) {
+      recordDrift(
+        SCRAPER_NAME,
+        location,
+        "ask-question selection matches none of the option ids — one of them may have been renamed",
+      );
+    }
+
     sections.push(`[Question] ${question}`);
     for (const option of options) {
       const text = toStringValue(option.text);
       if (!text) continue;
+      if (!canShowSelection || !matched) {
+        // Listed without a verdict: these were the choices, and which was taken
+        // is not recorded here.
+        sections.push(`  - ${text}`);
+        continue;
+      }
       const id = toStringValue(option.id);
       // Marked inline rather than reported separately, so the answer cannot be
       // read back without the question it answered.
@@ -658,23 +699,28 @@ function parseInvokeSubagentStep(
   timestamp: Date,
 ): AntigravityRuntimeMessage | null {
   const invokeSubagent = isRecord(step.invokeSubagent) ? step.invokeSubagent : {};
-  const subagents = Array.isArray(invokeSubagent.subagents)
-    ? invokeSubagent.subagents.filter(isRecord)
-    : [];
-  const results = Array.isArray(invokeSubagent.results)
-    ? invokeSubagent.results.filter(isRecord)
-    : [];
+  const subagents = Array.isArray(invokeSubagent.subagents) ? invokeSubagent.subagents : [];
+  // Deliberately not filtered: `subagents` and `results` are matched by index,
+  // so dropping a malformed entry from one shifts every later entry of the
+  // other — printing one subagent's log under another subagent's name. Bad
+  // entries are skipped where they are read instead.
+  const results = Array.isArray(invokeSubagent.results) ? invokeSubagent.results : [];
 
   const sections: string[] = [];
-  for (const [index, subagent] of subagents.entries()) {
+  const models: string[] = [];
+  for (const [index, entry] of subagents.entries()) {
+    if (!isRecord(entry)) continue;
+    const subagent = entry;
     const label = toStringValue(subagent.typeName) ?? toStringValue(subagent.role) ?? "subagent";
     const model = toStringValue(subagent.model);
+    if (model) models.push(model);
     sections.push(`[Subagent] ${label}${model ? ` (${model})` : ""}`);
 
     const prompt = toStringValue(subagent.initialPrompt);
     if (prompt) sections.push(prompt);
 
-    const log = toStringValue(results[index]?.logAbsoluteUri);
+    const result = results[index];
+    const log = isRecord(result) ? toStringValue(result.logAbsoluteUri) : undefined;
     if (log) sections.push(`Log: ${log}`);
   }
 
@@ -683,10 +729,6 @@ function parseInvokeSubagentStep(
   }
 
   const content = sections.join("\n");
-  const models = subagents
-    .map((subagent) => toStringValue(subagent.model))
-    .filter((model): model is string => Boolean(model));
-
   return runtimeMessage(sessionId, timestamp, "tool", content, extractReferencedFiles(content), {
     stepType,
     toolName: "invoke_subagent",
@@ -1486,21 +1528,28 @@ function describeValue(value: unknown): string {
  * drift would report ordinary operation as a format change. Text in the payload
  * means the opposite: something was there and this reader dropped it.
  *
- * `type` and `metadata` are excluded because every step has them; the payload
- * lives under a key named after the step.
+ * Bookkeeping fields every step carries are excluded by name. `status` matters
+ * most: it is a non-empty enum string on essentially every step, so counting it
+ * made this answer "yes" for steps holding nothing at all — which turned any
+ * new bookkeeping type into a false drift report, the very outcome this
+ * predicate exists to avoid.
  */
+const NON_CONTENT_STEP_FIELDS = new Set(["type", "metadata", "status"]);
+
 function stepCarriesText(step: Record<string, unknown>): boolean {
   for (const [key, value] of Object.entries(step)) {
-    if (key === "type" || key === "metadata") continue;
+    if (NON_CONTENT_STEP_FIELDS.has(key)) continue;
     if (containsNonEmptyString(value, 0)) return true;
   }
   return false;
 }
 
 function containsNonEmptyString(value: unknown, depth: number): boolean {
-  // Bounded: a trajectory step is a protobuf message, not an arbitrary graph,
-  // and an unbounded walk over one is a needless risk on every scan.
-  if (depth > 4) return false;
+  // Bounded, but generously: a trajectory step is a protobuf message rather
+  // than an arbitrary graph, and the observed ones nest six levels
+  // (completedInteractions -> request -> askQuestion -> questions -> options ->
+  // text). At four, real content went unseen and so unreported.
+  if (depth > 8) return false;
   if (typeof value === "string") return value.trim().length > 0;
   if (Array.isArray(value)) return value.some((item) => containsNonEmptyString(item, depth + 1));
   if (isRecord(value)) {

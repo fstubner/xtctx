@@ -138,19 +138,37 @@ function enqueueWrite(key: string, work: () => Promise<void>): Promise<void> {
 }
 
 /**
- * A lock is only stale once it is this old.
+ * Grace before a lock naming no live process is broken.
  *
- * Judged from the lock file's own age rather than from how long this process
- * has been waiting: a busy machine can make a perfectly healthy write take
- * longer than a short patience threshold, and breaking a live holder's lock is
- * exactly the interleaving the lock exists to prevent. A real write is
- * milliseconds, so this leaves three orders of magnitude of headroom while
- * still reclaiming a lock from a process that died holding one.
+ * Only covers the gap between `open` and the pid being written, so it needs to
+ * be short. A lock whose holder is gone is broken immediately, which is what
+ * keeps a killed server from stalling the next scan.
  */
-const STALE_LOCK_MS = 30_000;
-/** Hard ceiling on waiting, so a scan can never hang on a lock. */
-const MAX_LOCK_WAIT_MS = 30_000;
+const LOCK_PID_GRACE_MS = 250;
+/**
+ * Hard ceiling on waiting.
+ *
+ * `flush` is awaited in the scan's `finally`, so this sits on the critical path
+ * of an MCP tool call, and hosts give up on those in well under a minute. A
+ * lock left behind by a killed server — MCP servers are routinely SIGKILLed —
+ * used to stall the next scan for a full thirty seconds. A write takes single
+ * -digit milliseconds, so seconds are already enormous headroom.
+ */
+const MAX_LOCK_WAIT_MS = 3_000;
 const LOCK_RETRY_MS = 25;
+
+/**
+ * Errors that mean "someone else has it", not "this cannot work".
+ *
+ * `EEXIST` is the POSIX answer. Windows adds `EPERM` when the lock file is in
+ * the delete-pending state — the previous holder called `rm` and the deletion
+ * has not finalised — and `EBUSY`/`EACCES` for the same window under a
+ * scanner or indexer. Treating those as fatal was a data-loss bug: the error
+ * escaped the lock, the scan's findings were discarded, and an incremental
+ * scan never re-reads the records that produced them. It cost 2 surprises in
+ * 50 across ten concurrent writers.
+ */
+const LOCK_CONTENTION_CODES = new Set(["EEXIST", "EPERM", "EACCES", "EBUSY"]);
 
 /**
  * Serialise across processes as well, because one project is normally served
@@ -167,30 +185,75 @@ const LOCK_RETRY_MS = 25;
  */
 async function withFileLock<T>(lockPath: string, work: () => Promise<T>): Promise<T> {
   const giveUpAt = Date.now() + MAX_LOCK_WAIT_MS;
+  let brokeLock = false;
   for (;;) {
     try {
       const handle = await open(lockPath, "wx");
       try {
+        // Whoever waits next needs to know if this holder is still alive.
+        await handle.writeFile(String(process.pid), "utf-8");
         return await work();
       } finally {
         await handle.close();
         await rm(lockPath, { force: true });
       }
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      if (!LOCK_CONTENTION_CODES.has((err as NodeJS.ErrnoException).code ?? "")) throw err;
 
       const heldFor = await lockAge(lockPath);
       if (heldFor === null) {
-        // Released between the failed open and the stat: just try again.
+        // Released between the failed open and the stat: try again at once.
         continue;
       }
-      if (heldFor > STALE_LOCK_MS || Date.now() >= giveUpAt) {
-        // Whoever held this is not coming back. Break it and take it.
-        await rm(lockPath, { force: true });
+
+      // Whether to wait is decided by the holder, not by the clock. A pure
+      // time limit cannot win both ways: short enough to clear a dead holder's
+      // lock promptly is short enough to break a live one that a loaded
+      // machine has starved, which is the interleaving the lock exists to
+      // prevent — and that is exactly how this flaked in two directions.
+      const holder = await lockHolderPid(lockPath);
+      const holderAlive = holder !== null && processIsAlive(holder);
+      const withinGrace = holder === null && heldFor <= LOCK_PID_GRACE_MS;
+      if ((holderAlive || withinGrace) && Date.now() < giveUpAt) {
+        await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_MS));
         continue;
       }
-      await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_MS));
+
+      if (Date.now() >= giveUpAt) {
+        // Out of patience. One deliberate attempt to break it, then give the
+        // error to the caller rather than spinning: a contention code that
+        // never clears is a real failure (a read-only directory reports
+        // EACCES too), and a scan must not loop on it forever.
+        if (brokeLock) throw err;
+        brokeLock = true;
+      }
+
+      // Stale, or the holder never came back: break it and take it.
+      await rm(lockPath, { force: true }).catch(() => {});
     }
+  }
+}
+
+/** The pid recorded in a lock file, or null if it has none yet. */
+async function lockHolderPid(lockPath: string): Promise<number | null> {
+  try {
+    const pid = Number.parseInt((await readFile(lockPath, "utf-8")).trim(), 10);
+    return Number.isInteger(pid) && pid > 0 ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Signal 0 asks the OS whether a process exists without touching it. `EPERM`
+ * means it exists and belongs to someone else — still alive, so still waiting.
+ */
+function processIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "EPERM";
   }
 }
 
@@ -295,20 +358,57 @@ class DriftLog {
     }
 
     const stateDir = this.stateDir;
-    await enqueueWrite(`${stateDir}\u0000${this.tool}`, async () => {
+    const key = `${stateDir}\u0000${this.tool}`;
+    await enqueueWrite(key, async () => {
+      // Anything an earlier flush could not write goes out with this one. The
+      // scan that found those surprises is over and its `DriftLog` is gone, so
+      // without this hand-off a failed write loses them for good — and an
+      // incremental scan never re-reads the records that produced them.
+      const batch = takePending(key, found);
       try {
         // Before the lock, because the lock file lives in this directory.
         await mkdir(stateDir, { recursive: true });
         await withFileLock(`${driftLogPath(stateDir, this.tool)}.lock`, () =>
-          persist(stateDir, this.tool, found),
+          persist(stateDir, this.tool, batch),
         );
       } catch (err) {
+        keepPending(key, batch);
         // Losing the diagnostic must not fail the scan that produced it — but
         // say so, rather than dropping it twice over.
         console.warn(`[${this.tool}] could not persist drift log: ${(err as Error).message}`);
       }
     });
   }
+}
+
+type FoundSurprises = Map<string, { firstLocation: string; records: number }>;
+
+/**
+ * Surprises a failed write still owes the log, by state directory and tool.
+ *
+ * Bounded by the same ceiling as the file itself, so a directory that can never
+ * be written to cannot grow this without limit.
+ */
+const pendingWrites = new Map<string, FoundSurprises>();
+
+function takePending(key: string, found: FoundSurprises): FoundSurprises {
+  const waiting = pendingWrites.get(key);
+  if (!waiting) return found;
+  pendingWrites.delete(key);
+
+  for (const [surprise, entry] of found) {
+    const seen = waiting.get(surprise);
+    if (seen) {
+      seen.records += entry.records;
+      continue;
+    }
+    waiting.set(surprise, entry);
+  }
+  return waiting;
+}
+
+function keepPending(key: string, batch: FoundSurprises): void {
+  pendingWrites.set(key, new Map([...batch].slice(0, MAX_SURPRISES)));
 }
 
 /**

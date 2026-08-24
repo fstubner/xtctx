@@ -16,6 +16,22 @@ import { ClaudeCodeScraper } from "@xtctx/scrapers/claude-code";
 describe("drift log persistence", () => {
   let stateDir = "";
 
+  async function scanInto(
+    target: string,
+    tool: string,
+    surprises: Array<[string, string]>,
+  ): Promise<void> {
+    async function* source(): AsyncIterable<number> {
+      for (const [location, surprise] of surprises) {
+        recordDrift(tool, location, surprise);
+        yield 1;
+      }
+    }
+    for await (const value of withDriftReport(tool, source(), target)) {
+      void value;
+    }
+  }
+
   async function scan(tool: string, surprises: Array<[string, string]>): Promise<void> {
     async function* source(): AsyncIterable<number> {
       for (const [location, surprise] of surprises) {
@@ -204,6 +220,47 @@ describe("drift log persistence", () => {
     // The scan completed; only the diagnostic was lost.
     expect(yielded).toEqual([1]);
   });
+
+  /**
+   * A lock left behind by a killed process — MCP servers are routinely
+   * SIGKILLed — used to stall the next scan for a full thirty seconds. `flush`
+   * is awaited in the scan's `finally`, so that sat on the critical path of an
+   * MCP tool call, and hosts give up on those well inside a minute.
+   */
+  it("does not stall a scan behind an abandoned lock file", async () => {
+    await writeFile(join(stateDir, "codex-drift.json.lock"), "", "utf-8");
+
+    const startedAt = Date.now();
+    await scan("codex", [["/store/a.jsonl:4", "a surprise"]]);
+    const elapsed = Date.now() - startedAt;
+
+    // Comfortably under any host's patience, and far above a real write.
+    expect(elapsed).toBeLessThan(6_000);
+    expect((await readDriftLog(stateDir, "codex"))?.surprises).toHaveLength(1);
+  }, 30_000);
+
+  /**
+   * Surprises outlive a write that fails. The scan that found them is over by
+   * then and its `DriftLog` is gone, so without a hand-off they are lost for
+   * good — and an incremental scan never re-reads the records behind them.
+   */
+  it("writes findings a previous failed attempt still owed", async () => {
+    const blocked = join(stateDir, "blocked");
+    await writeFile(blocked, "a file where a directory should be", "utf-8");
+
+    // First scan cannot write: the state directory is a file.
+    await scanInto(blocked, "codex", [["/store/a.jsonl:1", "lost on the first attempt"]]);
+    expect(await readDriftLog(blocked, "codex")).toBeNull();
+
+    // The directory becomes usable, and the next scan carries the debt out.
+    await rm(blocked, { force: true });
+    await mkdir(blocked, { recursive: true });
+    await scanInto(blocked, "codex", [["/store/b.jsonl:2", "found by the second scan"]]);
+
+    const kept = (await readDriftLog(blocked, "codex"))?.surprises.map((e) => e.surprise) ?? [];
+    expect(kept).toContain("found by the second scan");
+    expect(kept).toContain("lost on the first attempt");
+  }, 30_000);
 
   it("reports no log for a tool that has never drifted", async () => {
     expect(await readDriftLog(stateDir, "codex")).toBeNull();

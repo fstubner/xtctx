@@ -784,7 +784,79 @@ describe("antigravity steps that record a decision", () => {
     );
 
     expect(message.content).toContain("Ship it?");
-    expect(message.content).toContain("[ ] Yes");
+    // No selection has been recorded yet, so the options are listed without a
+    // verdict. `[ ]` would assert the user declined this option, which is a
+    // claim nothing in the data supports.
+    expect(message.content).toContain("- Yes");
+    expect(message.content).not.toContain("[ ]");
+  });
+
+  /**
+   * The failure this guards is worse than dropping the step: if `option.id` or
+   * `selectedOptionIds` were renamed, every option rendered `[ ]` and a later
+   * agent read a confident, false record that the user chose nothing.
+   */
+  it("does not claim the user chose nothing when the selection cannot be read", () => {
+    const [message] = parseAntigravityRuntimeSteps(
+      "cascade-ask-renamed",
+      [
+        {
+          type: "CORTEX_STEP_TYPE_ASK_QUESTION",
+          metadata: {},
+          askQuestion: {
+            questions: [
+              {
+                question: "Delete the production database?",
+                // `id` renamed upstream; the selection can no longer be matched.
+                options: [
+                  { optionId: "y", text: "Yes, delete it" },
+                  { optionId: "n", text: "No, keep it" },
+                ],
+                selectedOptionIds: ["n"],
+              },
+            ],
+          },
+        },
+      ],
+      summary,
+    );
+
+    expect(message.content).toContain("Delete the production database?");
+    expect(message.content).toContain("- No, keep it");
+    expect(message.content).not.toContain("[ ]");
+    expect(message.content).not.toContain("[chosen]");
+  });
+
+  it("reports drift when a recorded selection matches no option", () => {
+    const warnings: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => warnings.push(args.map(String).join(" "));
+
+    try {
+      parseAntigravityRuntimeSteps(
+        "cascade-ask-mismatch",
+        [
+          {
+            type: "CORTEX_STEP_TYPE_ASK_QUESTION",
+            metadata: {},
+            askQuestion: {
+              questions: [
+                {
+                  question: "Which one?",
+                  options: [{ id: "a", text: "This" }],
+                  selectedOptionIds: ["z"],
+                },
+              ],
+            },
+          },
+        ],
+        summary,
+      );
+
+      expect(warnings.join("\n")).toContain("matches none of the option ids");
+    } finally {
+      console.warn = originalWarn;
+    }
   });
 
   it("drops an ask-question step that carries only its status", () => {
@@ -898,5 +970,105 @@ describe("antigravity steps that record a decision", () => {
         summary,
       ),
     ).toEqual([]);
+  });
+});
+
+/**
+ * Checking only the step *type* left the likelier upstream change invisible.
+ * Antigravity's steps are a proprietary protobuf; renaming a field inside an
+ * existing message is a far more ordinary release than adding a new step type,
+ * and every one of these parsers returns null when its field is missing.
+ */
+describe("antigravity field renames inside handled step types", () => {
+  let warnings: string[] = [];
+  let originalWarn: typeof console.warn;
+
+  beforeEach(() => {
+    warnings = [];
+    originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => warnings.push(args.map(String).join(" "));
+  });
+
+  afterEach(() => {
+    console.warn = originalWarn;
+  });
+
+  it.each([
+    ["planner response", { type: "CORTEX_STEP_TYPE_PLANNER_RESPONSE", metadata: {}, plannerResponse: { text: "renamed from response" } }],
+    ["planner container", { type: "CORTEX_STEP_TYPE_PLANNER_RESPONSE", metadata: {}, planner: { response: "renamed container" } }],
+    ["user input", { type: "CORTEX_STEP_TYPE_USER_INPUT", metadata: {}, userInput: { userText: "renamed from userResponse" } }],
+    ["mcp server name", { type: "CORTEX_STEP_TYPE_MCP_TOOL", metadata: {}, mcpTool: { server: "xtctx", call: { name: "a_tool" } } }],
+  ])("reports a renamed field in the %s step", (_label, step) => {
+    const messages = parseAntigravityRuntimeSteps("cascade-renamed", [step], {});
+
+    expect(messages).toEqual([]);
+    expect(warnings.join("\n")).toContain("produced no message");
+  });
+
+  it("stays quiet when a handled step genuinely holds nothing", () => {
+    const messages = parseAntigravityRuntimeSteps(
+      "cascade-empty",
+      [
+        // Every step carries a status enum; on its own it is not content.
+        { type: "CORTEX_STEP_TYPE_ASK_QUESTION", metadata: {}, status: "STEP_STATUS_RUNNING" },
+        { type: "CORTEX_STEP_TYPE_USER_INPUT", metadata: {}, status: "STEP_STATUS_DONE", userInput: {} },
+      ],
+      {},
+    );
+
+    expect(messages).toEqual([]);
+    expect(warnings).toEqual([]);
+  });
+
+  it("sees content nested deeper than a handful of levels", () => {
+    parseAntigravityRuntimeSteps(
+      "cascade-deep",
+      [
+        {
+          type: "CORTEX_STEP_TYPE_INVENTED_LATER",
+          metadata: {},
+          completedInteractions: [
+            { request: { askQuestion: { questions: [{ options: [{ text: "buried six levels down" }] }] } } },
+          ],
+        },
+      ],
+      {},
+    );
+
+    expect(warnings.join("\n")).toContain("CORTEX_STEP_TYPE_INVENTED_LATER");
+  });
+});
+
+describe("antigravity subagent index alignment", () => {
+  /**
+   * `subagents` and `results` are matched by index, so filtering either one
+   * shifts the other — printing one subagent's log under another's name.
+   */
+  it("keeps each subagent's log with the right subagent", () => {
+    const [message] = parseAntigravityRuntimeSteps(
+      "cascade-align",
+      [
+        {
+          type: "CORTEX_STEP_TYPE_INVOKE_SUBAGENT",
+          metadata: {},
+          invokeSubagent: {
+            subagents: [
+              { typeName: "security-auditor", initialPrompt: "audit auth" },
+              { typeName: "perf-reviewer", initialPrompt: "profile the scan" },
+            ],
+            // A malformed first entry: filtering it would move perf's log to
+            // index 0 and print it under security-auditor.
+            results: ["pending", { logAbsoluteUri: "file:///logs/perf.md" }],
+          },
+        },
+      ],
+      {},
+    );
+
+    const securityLine = message.content.indexOf("security-auditor");
+    const perfLine = message.content.indexOf("perf-reviewer");
+    const logLine = message.content.indexOf("file:///logs/perf.md");
+    expect(logLine).toBeGreaterThan(perfLine);
+    expect(perfLine).toBeGreaterThan(securityLine);
   });
 });

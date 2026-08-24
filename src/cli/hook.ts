@@ -103,6 +103,19 @@ function activeFrame(session: SessionSummary): string[] {
   return lines;
 }
 
+/**
+ * The banner is untrusted transcript text printed straight to the host's
+ * console. `\s` does not match ESC or BEL, so collapsing whitespace alone left
+ * escape sequences intact — enough for a poisoned transcript to clear the
+ * screen or forge output. Control characters become spaces, so text either
+ * side of one cannot be joined into a word nobody wrote.
+ */
 function inlineSafe(value: string): string {
-  return value.replace(/\s+/g, " ").trim();
+  let out = "";
+  for (const ch of value) {
+    const code = ch.codePointAt(0) ?? 0;
+    const isFormatting = code === 0x09 || code === 0x0a || code === 0x0d;
+    out += (code < 0x20 && !isFormatting) || code === 0x7f ? " " : ch;
+  }
+  return out.replace(/\s+/g, " ").trim();
 }

@@ -123,6 +123,21 @@ describe("session-start hook", () => {
     expect(Date.now() - startedAt).toBeLessThan(3_500);
   });
 
+  /**
+   * The banner is untrusted transcript text printed straight to a console.
+   * Collapsing whitespace does not touch ESC or BEL, so an escape sequence in
+   * a poisoned transcript reached the terminal intact.
+   */
+  it("strips terminal control characters out of the primed preview", async () => {
+    await seedIndex([chunk(5, "before\u001b[2J\u001b[Hforged after")]);
+
+    await runHook({ projectPath: projectRoot, tool: "claude-code", event: "session-start" });
+
+    const output = written.join("");
+    expect(output).not.toMatch(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/);
+    expect(output).toContain("before");
+  });
+
   it("stays silent rather than failing the host startup", async () => {
     await runHook({ projectPath: join(projectRoot, "does", "not", "exist") });
 
