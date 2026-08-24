@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.18.4](https://github.com/fstubner/xtctx/compare/xtctx-v0.18.3...xtctx-v0.18.4) (2026-08-24)
+
+
+### Bug Fixes
+
+* stop an unreadable globalStorage failing the whole cursor scrape ([#180](https://github.com/fstubner/xtctx/issues/180)) ([9f066db](https://github.com/fstubner/xtctx/commit/9f066db22d6e6a47d700fa44f2b09fd4c669641a))
+
 ## [0.18.3](https://github.com/fstubner/xtctx/compare/xtctx-v0.18.2...xtctx-v0.18.3) (2026-08-24)
 
 
