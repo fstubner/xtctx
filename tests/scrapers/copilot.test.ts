@@ -511,13 +511,32 @@ describe("CopilotScraper reading per-session chat files", () => {
   });
 
   /** The newest format wraps each record under `v`, one per line. */
-  it("reads a .jsonl session file and ignores its bookkeeping records", async () => {
+  /**
+   * A `.jsonl` chat session is a journal, not a list of sessions: record 0 is
+   * a snapshot whose `requests` array is empty, and the turns arrive as later
+   * mutations. Reading it as one-session-per-line found only the snapshot and
+   * reported an empty conversation — a whole chat lost in silence.
+   *
+   * These fixtures use the record shapes VS Code actually writes. The previous
+   * test invented a shape that matched the reader's assumption, which is the
+   * same way the array-container bug in this file survived.
+   */
+  it("replays a .jsonl journal into the conversation it records", async () => {
     const lines = [
-      JSON.stringify({ kind: 1, v: { version: 3, inputState: { attachments: [] } } }),
-      JSON.stringify({ kind: 1, v: session }),
+      // Snapshot: a session with no turns yet.
+      JSON.stringify({
+        kind: 0,
+        v: { sessionId: "journal-session", creationDate: session.creationDate, requests: [] },
+      }),
+      // Editor state, nothing to do with the conversation.
+      JSON.stringify({ kind: 1, k: ["inputState", "inputText"], v: "" }),
+      // The turn itself, appended to the requests array.
+      JSON.stringify({ kind: 2, k: ["requests"], v: [{ ...session.requests[0], timestamp: 2 }] }),
+      // A field set on that turn after the fact.
+      JSON.stringify({ kind: 1, k: ["requests", 0, "isCanceled"], v: false }),
       "",
     ].join("\n");
-    await writeFile(join(sessionsDir, "modern-session.jsonl"), lines, "utf-8");
+    await writeFile(join(sessionsDir, "journal-session.jsonl"), lines, "utf-8");
 
     const chunks = await collectAll();
 
@@ -525,8 +544,43 @@ describe("CopilotScraper reading per-session chat files", () => {
       "how does the index get rebuilt",
       "it is derived, so it is dropped and re-scraped",
     ]);
-    // A record with no requests array is editor state, not a missing chat.
+    expect(chunks[0].sessionId).toBe("journal-session");
     expect(warnings).toEqual([]);
+  });
+
+  /**
+   * A splice places turns where the editor wants to draw them, which is not
+   * the order they happened — in a real 35-record log it puts a later turn
+   * first. Conversation order has to come from the timestamps.
+   */
+  it("orders replayed turns by when they happened", async () => {
+    const turn = (text: string, timestamp: number) => ({
+      message: { parts: [{ text }] },
+      response: [],
+      isCanceled: false,
+      timestamp,
+    });
+    const lines = [
+      JSON.stringify({ kind: 0, v: { sessionId: "ordered", creationDate: 1, requests: [] } }),
+      JSON.stringify({ kind: 2, k: ["requests"], v: [turn("asked first", 1000)] }),
+      // Spliced ahead of the existing turn despite happening later.
+      JSON.stringify({ kind: 2, k: ["requests"], i: 0, v: [turn("asked second", 2000)] }),
+      "",
+    ].join("\n");
+    await writeFile(join(sessionsDir, "ordered.jsonl"), lines, "utf-8");
+
+    expect((await collectAll()).map((chunk) => chunk.content)).toEqual([
+      "asked first",
+      "asked second",
+    ]);
+  });
+
+  it("reports a journal with no snapshot to rebuild from", async () => {
+    const lines = [JSON.stringify({ kind: 1, k: ["inputState"], v: {} }), ""].join("\n");
+    await writeFile(join(sessionsDir, "headless.jsonl"), lines, "utf-8");
+
+    expect(await collectAll()).toEqual([]);
+    expect(warnings.join("\n")).toContain("no snapshot record");
   });
 
   it("reports a session file that cannot be parsed", async () => {
@@ -548,5 +602,58 @@ describe("CopilotScraper reading per-session chat files", () => {
 
     expect(await collectAll()).toEqual([]);
     expect(warnings).toEqual([]);
+  });
+});
+
+/**
+ * A session with no `sessionId` used to fall back to the constant "unknown",
+ * so every id-less conversation on a machine collapsed into one session with
+ * colliding message indexes — unrelated chats interleaved as a single
+ * transcript. The file name is the id VS Code gave it.
+ */
+describe("CopilotScraper identifying sessions with no sessionId", () => {
+  let workspaceStorageDir = "";
+  let stateDir = "";
+  let sessionsDir = "";
+
+  const turn = (text: string) => ({
+    message: { parts: [{ text }] },
+    response: [{ value: `answer to ${text}` }],
+    isCanceled: false,
+  });
+
+  beforeEach(async () => {
+    workspaceStorageDir = await mkdtemp(join(tmpdir(), "xtctx-copilot-ids-"));
+    stateDir = await mkdtemp(join(tmpdir(), "xtctx-copilot-ids-state-"));
+    await createWorkspaceDb(workspaceStorageDir, "idhash", []);
+    sessionsDir = join(workspaceStorageDir, "idhash", "chatSessions");
+    await mkdir(sessionsDir, { recursive: true });
+  });
+
+  afterEach(async () => {
+    await rm(workspaceStorageDir, { recursive: true, force: true });
+    await rm(stateDir, { recursive: true, force: true });
+  });
+
+  it("keeps two id-less conversations apart", async () => {
+    await writeFile(
+      join(sessionsDir, "aaaaaaaa-1111.json"),
+      JSON.stringify({ creationDate: 1, requests: [turn("first chat")] }),
+      "utf-8",
+    );
+    await writeFile(
+      join(sessionsDir, "bbbbbbbb-2222.json"),
+      JSON.stringify({ creationDate: 2, requests: [turn("second chat")] }),
+      "utf-8",
+    );
+
+    const scraper = new CopilotScraper(workspaceStorageDir, stateDir);
+    const chunks: CopilotChunk[] = [];
+    for await (const chunk of scraper.fullSync()) chunks.push(chunk);
+
+    const ids = new Set(chunks.map((chunk) => chunk.sessionId));
+    expect(ids.size).toBe(2);
+    expect(ids.has("unknown")).toBe(false);
+    expect([...ids].sort()).toEqual(["aaaaaaaa-1111", "bbbbbbbb-2222"]);
   });
 });

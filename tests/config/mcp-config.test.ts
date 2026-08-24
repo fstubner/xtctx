@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { syncToolMcpConfigs } from "@xtctx/config/mcp-config";
+import { removeMcpServerConfigs, syncToolMcpConfigs } from "@xtctx/config/mcp-config";
 
 describe("syncToolMcpConfigs", () => {
   let projectDir = "";
@@ -460,5 +460,43 @@ describe("syncToolMcpConfigs", () => {
     } finally {
       await rm(fakeHome, { recursive: true, force: true });
     }
+  });
+});
+
+/**
+ * A config carrying comments is the ordinary reason removal fails, and setup
+ * already explains it in words the reader can act on. Disconnect answered the
+ * same condition with a raw parser position, which says nothing about what to
+ * do next.
+ */
+describe("removeMcpServerConfigs on a config it cannot parse", () => {
+  let projectDir = "";
+  let homeDir = "";
+
+  beforeEach(async () => {
+    projectDir = await mkdtemp(join(tmpdir(), "xtctx-mcp-remove-"));
+    homeDir = await mkdtemp(join(tmpdir(), "xtctx-mcp-remove-home-"));
+  });
+
+  afterEach(async () => {
+    await rm(projectDir, { recursive: true, force: true });
+    await rm(homeDir, { recursive: true, force: true });
+  });
+
+  it("explains a commented config instead of quoting the parser", async () => {
+    await writeFile(
+      join(projectDir, ".mcp.json"),
+      ['{', '  // kept deliberately', '  "mcpServers": { "xtctx": { "command": "npx" } }', '}'].join("\n"),
+      "utf-8",
+    );
+
+    const summary = await removeMcpServerConfigs(projectDir, "xtctx", ["claude-code"], { homeDir });
+    const warning = summary.results.map((result) => result.warning ?? "").join("\n");
+
+    expect(warning).toContain("contains comments");
+    expect(warning).toContain("Remove the xtctx server entry manually");
+    // The parser detail is kept, but as supporting evidence rather than the
+    // whole message.
+    expect(warning).not.toMatch(/^Failed to remove MCP config/m);
   });
 });

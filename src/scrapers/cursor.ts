@@ -153,10 +153,8 @@ export class CursorScraper extends AbstractScraper<CursorChunk> {
 
     const workspacePaths = await this.resolveWorkspaceDatabasePaths();
     const seenComposerIds = new Set<string>();
-    let anyGlobalPath: string | null = null;
 
     for (const wsPath of workspacePaths) {
-      anyGlobalPath ??= deriveGlobalStoragePath(wsPath);
       const composerRefs = this.readWorkspaceComposers(DatabaseCtor, wsPath);
       for (const ref of composerRefs) {
         seenComposerIds.add(ref.composerId);
@@ -187,7 +185,15 @@ export class CursorScraper extends AbstractScraper<CursorChunk> {
       }
     }
 
-    yield* this.readUnreferencedComposers(DatabaseCtor, anyGlobalPath, seenComposerIds, since);
+    // From the store path, not from a workspace that happened to match. Basing
+    // it on a matched workspace meant a pruned workspaceStorage entry, or a
+    // multi-root workspace with no `folder`, left this doing nothing at all —
+    // while globalStorage sat exactly where it always sits.
+    yield* this.readUnreferencedComposers(
+      DatabaseCtor,
+      globalStoragePathForStore(this.cursorStorePath),
+      seenComposerIds,
+    );
   }
 
   /**
@@ -210,7 +216,6 @@ export class CursorScraper extends AbstractScraper<CursorChunk> {
     DatabaseCtor: typeof Database,
     globalPath: string | null,
     referenced: Set<string>,
-    since: Date,
   ): Iterable<CursorChunk> {
     // Without a project root there is nothing to attribute against, and an
     // orphan's only claim to belong anywhere is a path match. Reading them
@@ -281,7 +286,14 @@ export class CursorScraper extends AbstractScraper<CursorChunk> {
       }
 
       if (refs.length > 0) {
-        yield* this.readComposerMessages(globalDb, refs, since, globalPath);
+        // Deliberately not `since`. These conversations are ones no workspace
+        // lists, so they are older than the cursor by definition — filtering
+        // them by it meant the whole feature fired only on a never-indexed
+        // project and did nothing for anyone with an existing index. The
+        // copilot reader made the same call for the same reason. Re-emitting
+        // is safe: upserts collapse on a chunk id that includes the message
+        // index, so a conversation read twice is stored once.
+        yield* this.readComposerMessages(globalDb, refs, new Date(0), globalPath);
       }
     } finally {
       globalDb.close();
@@ -607,6 +619,20 @@ function decodeFileUri(value: string): string {
   } catch {
     return value.slice("file:///".length);
   }
+}
+
+/**
+ * globalStorage for a configured store path.
+ *
+ * The store is normally `<user>/workspaceStorage`, but it can also be pointed
+ * at a single workspace directory inside it, which is what the tests do and
+ * what a `storePath` override may do. Both resolve to the same sibling.
+ */
+export function globalStoragePathForStore(storePath: string): string | null {
+  const normalized = storePath.replace(/\\/g, "/").replace(/\/+$/, "");
+  const index = normalized.lastIndexOf("/workspaceStorage");
+  if (index === -1) return null;
+  return join(normalized.slice(0, index), "globalStorage", "state.vscdb");
 }
 
 function deriveGlobalStoragePath(workspaceDbPath: string): string | null {

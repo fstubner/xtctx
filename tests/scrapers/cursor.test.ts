@@ -388,3 +388,106 @@ describe("CursorScraper reading conversations no workspace lists", () => {
     expect((await collect()).map((chunk) => chunk.content)).toEqual(["listed once"]);
   });
 });
+
+/**
+ * The two ways this feature was inert in the wild. Both were invisible to the
+ * tests it shipped with, because those always started from a fresh index and a
+ * workspace that matched.
+ */
+describe("CursorScraper orphan discovery preconditions", () => {
+  let rootDir = "";
+  let stateDir = "";
+  let globalDbPath = "";
+  const projectRoot = join("H:", "projects", "private", "precondition-project");
+
+  function addOrphan(composerId: string, ageDays: number): void {
+    const db = new Database(globalDbPath);
+    const bubbleId = `${composerId}-bubble`;
+    const when = new Date(Date.now() - ageDays * 24 * 60 * 60 * 1000).toISOString();
+    db.prepare("INSERT OR REPLACE INTO cursorDiskKV (key, value) VALUES (?, ?)").run(
+      `composerData:${composerId}`,
+      JSON.stringify({
+        composerId,
+        fullConversationHeadersOnly: [{ bubbleId, type: 1 }],
+        context: { fileSelections: [{ fsPath: join(projectRoot, "src", "a.ts") }] },
+      }),
+    );
+    db.prepare("INSERT OR REPLACE INTO cursorDiskKV (key, value) VALUES (?, ?)").run(
+      `bubbleId:${composerId}:${bubbleId}`,
+      JSON.stringify({ type: 1, text: "older than any cursor", createdAt: when }),
+    );
+    db.close();
+  }
+
+  beforeEach(async () => {
+    rootDir = await mkdtemp(join(tmpdir(), "xtctx-cursor-pre-"));
+    stateDir = await mkdtemp(join(tmpdir(), "xtctx-cursor-pre-state-"));
+    await mkdir(join(rootDir, "globalStorage"), { recursive: true });
+    globalDbPath = join(rootDir, "globalStorage", "state.vscdb");
+    const db = new Database(globalDbPath);
+    db.exec("CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+    db.close();
+    addOrphan("orphan-old", 10);
+  });
+
+  afterEach(async () => {
+    await rm(rootDir, { recursive: true, force: true });
+    await rm(stateDir, { recursive: true, force: true });
+  });
+
+  async function collect(): Promise<CursorChunk[]> {
+    const scraper = new CursorScraper(join(rootDir, "workspaceStorage"), stateDir, projectRoot);
+    const chunks: CursorChunk[] = [];
+    for await (const chunk of scraper.scrape()) chunks.push(chunk);
+    return chunks;
+  }
+
+  /**
+   * These conversations are older than the cursor by definition — no workspace
+   * lists them any more. Filtering them by it meant the feature only ever
+   * worked on a project that had never been indexed.
+   */
+  it("finds them even when the scrape cursor has moved past them", async () => {
+    const wsDir = join(rootDir, "workspaceStorage", "wshash");
+    await mkdir(wsDir, { recursive: true });
+    createWorkspaceDb(join(wsDir, "state.vscdb"), []);
+    await writeFile(
+      join(wsDir, "workspace.json"),
+      JSON.stringify({ folder: `file:///${projectRoot.split(sep).join("/")}` }),
+      "utf-8",
+    );
+
+    // A cursor two days old: the orphan's only turn is ten days old.
+    await writeFile(
+      join(stateDir, "cursor-state.json"),
+      JSON.stringify({ lastTimestamp: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000) }),
+      "utf-8",
+    );
+
+    expect((await collect()).map((chunk) => chunk.content)).toEqual(["older than any cursor"]);
+  });
+
+  /**
+   * globalStorage sits at a fixed sibling of the store path. Locating it from
+   * a workspace that matched the project meant a pruned workspaceStorage entry
+   * — or a multi-root workspace, which records no `folder` — disabled this.
+   */
+  it("finds them when no workspace maps to the project at all", async () => {
+    const wsDir = join(rootDir, "workspaceStorage", "elsewhere");
+    await mkdir(wsDir, { recursive: true });
+    createWorkspaceDb(join(wsDir, "state.vscdb"), []);
+    await writeFile(
+      join(wsDir, "workspace.json"),
+      JSON.stringify({ folder: "file:///somewhere/else/entirely" }),
+      "utf-8",
+    );
+
+    expect((await collect()).map((chunk) => chunk.content)).toEqual(["older than any cursor"]);
+  });
+
+  it("finds them when workspaceStorage holds nothing at all", async () => {
+    await mkdir(join(rootDir, "workspaceStorage"), { recursive: true });
+
+    expect((await collect()).map((chunk) => chunk.content)).toEqual(["older than any cursor"]);
+  });
+});
