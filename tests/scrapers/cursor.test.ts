@@ -491,3 +491,55 @@ describe("CursorScraper orphan discovery preconditions", () => {
     expect((await collect()).map((chunk) => chunk.content)).toEqual(["older than any cursor"]);
   });
 });
+
+/**
+ * The orphan pass opens globalStorage a second time. When that read failed it
+ * escaped the scraper rather than being reported, and the index records an
+ * escaped error as a scrape failure for the whole tool — losing every
+ * workspace-referenced conversation as well, and leaving `last_error` set in
+ * `status`. The workspace loop has always treated the same condition as drift
+ * and carried on.
+ */
+describe("CursorScraper when globalStorage cannot be read for orphans", () => {
+  let rootDir = "";
+  let stateDir = "";
+  let warnings: string[] = [];
+  let originalWarn: typeof console.warn;
+  const projectRoot = join("H:", "projects", "private", "unreadable-project");
+
+  beforeEach(async () => {
+    rootDir = await mkdtemp(join(tmpdir(), "xtctx-cursor-unreadable-"));
+    stateDir = await mkdtemp(join(tmpdir(), "xtctx-cursor-unreadable-state-"));
+    await mkdir(join(rootDir, "workspaceStorage"), { recursive: true });
+    await mkdir(join(rootDir, "globalStorage"), { recursive: true });
+
+    // A database that opens but has no cursorDiskKV table.
+    const db = new Database(join(rootDir, "globalStorage", "state.vscdb"));
+    db.exec("CREATE TABLE something_else (k TEXT)");
+    db.close();
+
+    warnings = [];
+    originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => warnings.push(args.map(String).join(" "));
+  });
+
+  afterEach(async () => {
+    console.warn = originalWarn;
+    await rm(rootDir, { recursive: true, force: true });
+    await rm(stateDir, { recursive: true, force: true });
+  });
+
+  it("reports it as drift rather than failing the scrape", async () => {
+    const scraper = new CursorScraper(join(rootDir, "workspaceStorage"), stateDir, projectRoot);
+
+    const chunks: CursorChunk[] = [];
+    await expect(
+      (async () => {
+        for await (const chunk of scraper.fullSync()) chunks.push(chunk);
+      })(),
+    ).resolves.toBeUndefined();
+
+    expect(chunks).toEqual([]);
+    expect(warnings.join("\n")).toContain("globalStorage unreadable while looking for unlisted");
+  });
+});

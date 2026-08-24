@@ -295,6 +295,17 @@ export class CursorScraper extends AbstractScraper<CursorChunk> {
         // index, so a conversation read twice is stored once.
         yield* this.readComposerMessages(globalDb, refs, new Date(0), globalPath);
       }
+    } catch (err) {
+      // The same condition the workspace loop treats as drift and continues
+      // past. Without this it escaped the scraper instead, which the index
+      // records as a scrape error for the whole tool — so one unreadable
+      // globalStorage lost every workspace-referenced conversation too, and
+      // left `last_error` set in `status` until something cleared it.
+      warnDrift(
+        globalPath,
+        `globalStorage unreadable while looking for unlisted conversations: ${(err as Error).message}`,
+        0,
+      );
     } finally {
       globalDb.close();
     }

@@ -138,6 +138,14 @@ describe("cross-tool pickup", () => {
       .filter((tool) => tool.last_error !== null)
       .map((tool) => `${tool.tool}: ${tool.last_error}`);
 
+    // Printed, not just asserted. This has failed roughly twice in thirty
+    // runs — always the first run after other heavy work — and the reason was
+    // lost inside the diff each time, leaving nothing to act on. On the next
+    // failure the cause will be in the output whatever formatting is in play.
+    if (failing.length > 0) {
+      console.error(`[smoke] scrape errors: ${failing.join(" | ")}`);
+    }
+
     expect(failing).toEqual([]);
   });
 });
