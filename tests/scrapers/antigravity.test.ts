@@ -8,6 +8,7 @@ import {
   HANDLED_STEP_TYPES,
   KNOWN_UNHANDLED_STEP_TYPES,
   reportHandledStepRenames,
+  describeUnreachableServer,
   listConversationFileIds,
   mapWithConcurrency,
   parsePosixListeningPorts,
@@ -1228,5 +1229,21 @@ describe("antigravity degraded runtime scans", () => {
     });
 
     await expect(collect(scraper)).rejects.toThrow(/runtime listing failed: ECONNRESET/);
+  });
+});
+
+/**
+ * The one branch that decides whether a silent fallback is honest. It is
+ * silent by construction when wrong, and the first version of this fix got it
+ * wrong: it checked only the trajectory fetches, so discovery timing out
+ * against a running-but-loaded server still read as "Antigravity is closed".
+ */
+describe("unreachable antigravity language server", () => {
+  it("says nothing when there is no language server to reach", () => {
+    expect(describeUnreachableServer(0)).toBeUndefined();
+  });
+
+  it.each([1, 3])("reports a server that is running but did not answer (%i processes)", (count) => {
+    expect(describeUnreachableServer(count)).toContain("none answered discovery");
   });
 });

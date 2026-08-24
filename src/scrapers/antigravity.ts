@@ -388,12 +388,10 @@ class AntigravityLanguageServerClient implements AntigravityRuntimeClient {
   constructor(private readonly projectRoot?: string) {}
 
   async listConversations(conversationsDir: string): Promise<AntigravityRuntimeListing> {
-    const endpoints = await discoverLanguageServerEndpoints();
+    const { endpoints, processesFound } = await discoverLanguageServerEndpoints();
     if (endpoints.length === 0) {
-      // Antigravity is not running. There is nothing to be read and nothing
-      // has been lost, so the brain-artifact fallback is the right answer and
-      // saying anything here would warn on every scan with the app closed.
-      return { conversations: [] };
+      const degradation = describeUnreachableServer(processesFound);
+      return degradation ? { conversations: [], degradation } : { conversations: [] };
     }
 
     // Answering endpoints exist, so from here on an empty result means this
@@ -1085,7 +1083,42 @@ function runtimeMessage(
   };
 }
 
-async function discoverLanguageServerEndpoints(): Promise<AntigravityEndpoint[]> {
+/**
+ * Endpoints that answered, and how many language server processes were there
+ * to answer.
+ *
+ * The count is what separates "Antigravity is not running" from "Antigravity
+ * is running and did not reply in time". Discovery probes each port with a
+ * five-second call, and on a loaded machine that call times out — so an empty
+ * endpoint list alone was read as "closed", the reader fell back to brain
+ * artifacts, and the scan looked healthy while capturing almost nothing. That
+ * is the exact case this reporting was added for, and it slipped through the
+ * first version of the fix.
+ */
+interface AntigravityDiscovery {
+  endpoints: AntigravityEndpoint[];
+  processesFound: number;
+}
+
+/**
+ * Why no endpoint answered, when that is worth reporting.
+ *
+ * Undefined means it is not: no language server process exists, so Antigravity
+ * is closed, nothing has been lost, and warning would fire on every scan with
+ * the app shut. A process that is running and did not answer is the opposite —
+ * its transcripts are there and this scan cannot see them.
+ *
+ * Split out because this one branch is the whole distinction, and getting it
+ * wrong is silent by construction: the first version of this fix only checked
+ * the fetches and left discovery reading a slow server as a closed one.
+ */
+export function describeUnreachableServer(processesFound: number): string | undefined {
+  return processesFound === 0
+    ? undefined
+    : `${processesFound} language server process(es) running but none answered discovery`;
+}
+
+async function discoverLanguageServerEndpoints(): Promise<AntigravityDiscovery> {
   const processes = await discoverLanguageServerProcesses();
   const endpoints: AntigravityEndpoint[] = [];
   const seenPorts = new Set<number>();
@@ -1110,7 +1143,7 @@ async function discoverLanguageServerEndpoints(): Promise<AntigravityEndpoint[]>
     }
   }
 
-  return endpoints;
+  return { endpoints, processesFound: processes.length };
 }
 
 async function discoverLanguageServerProcesses(): Promise<AntigravityProcess[]> {
