@@ -35,7 +35,7 @@ const SESSION_UUID = "copilot-session-test-uuid";
 async function createWorkspaceDb(
   workspaceStorageDir: string,
   hashDir: string,
-  sessions: Record<string, unknown>,
+  sessions: unknown,
 ): Promise<string> {
   const subdir = join(workspaceStorageDir, hashDir);
   await mkdir(subdir, { recursive: true });
@@ -369,5 +369,81 @@ describe("CopilotScraper", () => {
     const agentChunk = chunks.find((c) => c.sessionId === "agent-session");
     expect(agentChunk).toBeDefined();
     expect(agentChunk?.metadata.completionType).toBe("agent");
+  });
+});
+
+/**
+ * VS Code writes `interactive.sessions` as an array. Every workspace checked on
+ * a real machine — 64 of them, 18 holding sessions — was an array, and never
+ * an object. Requiring an object meant this reader produced nothing at all
+ * from real VS Code data; it only ever worked against fixtures shaped to match
+ * its own assumption, which is why the suite never noticed.
+ */
+describe("CopilotScraper against VS Code's real container shape", () => {
+  let workspaceStorageDir = "";
+  let stateDir = "";
+  let warnings: string[] = [];
+  let originalWarn: typeof console.warn;
+
+  const arraySessions = [
+    {
+      sessionId: "vscode-array-session",
+      creationDate: new Date("2026-02-24T10:00:00Z").getTime(),
+      requests: [
+        {
+          message: { parts: [{ text: "a question typed into the panel" }] },
+          response: [{ value: "the answer that came back" }],
+          isCanceled: false,
+        },
+      ],
+    },
+  ];
+
+  beforeEach(async () => {
+    workspaceStorageDir = await mkdtemp(join(tmpdir(), "xtctx-copilot-array-"));
+    stateDir = await mkdtemp(join(tmpdir(), "xtctx-copilot-array-state-"));
+    warnings = [];
+    originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => warnings.push(args.map(String).join(" "));
+  });
+
+  afterEach(async () => {
+    console.warn = originalWarn;
+    await rm(workspaceStorageDir, { recursive: true, force: true });
+    await rm(stateDir, { recursive: true, force: true });
+  });
+
+  it("reads sessions stored as an array", async () => {
+    await createWorkspaceDb(workspaceStorageDir, "arrayhash", arraySessions);
+    const scraper = new CopilotScraper(workspaceStorageDir, stateDir);
+
+    const chunks: CopilotChunk[] = [];
+    for await (const chunk of scraper.fullSync()) chunks.push(chunk);
+
+    expect(chunks.map((chunk) => chunk.content)).toEqual([
+      "a question typed into the panel",
+      "the answer that came back",
+    ]);
+    expect(chunks[0].sessionId).toBe("vscode-array-session");
+  });
+
+  it("does not report the ordinary array container as drift", async () => {
+    await createWorkspaceDb(workspaceStorageDir, "arrayhash", arraySessions);
+    const scraper = new CopilotScraper(workspaceStorageDir, stateDir);
+
+    for await (const chunk of scraper.fullSync()) void chunk;
+
+    expect(warnings).toEqual([]);
+  });
+
+  it("still reports a container that is neither an object nor an array", async () => {
+    await createWorkspaceDb(workspaceStorageDir, "stringhash", "not a container at all");
+    const scraper = new CopilotScraper(workspaceStorageDir, stateDir);
+
+    const chunks: CopilotChunk[] = [];
+    for await (const chunk of scraper.fullSync()) chunks.push(chunk);
+
+    expect(chunks).toEqual([]);
+    expect(warnings.join("\n")).toContain("expected interactive.sessions to be an object or array");
   });
 });

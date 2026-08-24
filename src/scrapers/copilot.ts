@@ -181,10 +181,20 @@ export class CopilotScraper extends AbstractScraper<CopilotChunk> {
       return;
     }
 
-    if (!isRecord(sessionsMap)) {
+    // VS Code writes this key as an array, and always has on the machines
+    // checked: 64 workspaces, every one an array, 18 of them holding sessions.
+    // Requiring an object meant this reader produced nothing at all from real
+    // VS Code data — it only ever worked against its own fixtures. The entries
+    // themselves are the same shape either way, so only the container differs.
+    let sessionEntries: Array<[string, unknown]>;
+    if (Array.isArray(sessionsMap)) {
+      sessionEntries = sessionsMap.map((session, index) => [String(index), session]);
+    } else if (isRecord(sessionsMap)) {
+      sessionEntries = Object.entries(sessionsMap);
+    } else {
       warnDrift(
         dbPath,
-        `expected interactive.sessions to be an object, got ${describeType(sessionsMap)}`,
+        `expected interactive.sessions to be an object or array, got ${describeType(sessionsMap)}`,
         0,
       );
       return;
@@ -192,7 +202,7 @@ export class CopilotScraper extends AbstractScraper<CopilotChunk> {
 
     const sinceMs = since ? since.getTime() : 0;
 
-    for (const [sessionKey, rawSession] of Object.entries(sessionsMap)) {
+    for (const [sessionKey, rawSession] of sessionEntries) {
       if (!isRecord(rawSession)) {
         warnDrift(
           `${dbPath}#${sessionKey}`,
