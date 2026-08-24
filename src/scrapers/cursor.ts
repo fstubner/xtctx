@@ -1,5 +1,5 @@
 import { readFile, readdir, stat } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type Database from "better-sqlite3";
 import { glob } from "glob";
@@ -152,9 +152,15 @@ export class CursorScraper extends AbstractScraper<CursorChunk> {
     }
 
     const workspacePaths = await this.resolveWorkspaceDatabasePaths();
+    const seenComposerIds = new Set<string>();
+    let anyGlobalPath: string | null = null;
 
     for (const wsPath of workspacePaths) {
+      anyGlobalPath ??= deriveGlobalStoragePath(wsPath);
       const composerRefs = this.readWorkspaceComposers(DatabaseCtor, wsPath);
+      for (const ref of composerRefs) {
+        seenComposerIds.add(ref.composerId);
+      }
       if (composerRefs.length === 0) {
         continue;
       }
@@ -179,6 +185,106 @@ export class CursorScraper extends AbstractScraper<CursorChunk> {
       } finally {
         globalDb?.close();
       }
+    }
+
+    yield* this.readUnreferencedComposers(DatabaseCtor, anyGlobalPath, seenComposerIds, since);
+  }
+
+  /**
+   * Read conversations that globalStorage holds but no workspace lists.
+   *
+   * A workspace only keeps a composer in `composer.composerData` for as long as
+   * it cares to; globalStorage keeps the conversation. On one machine that was
+   * 165 referenced against 593 stored, so discovery through workspaces alone
+   * could not reach most of the history that exists.
+   *
+   * Attribution is the whole difficulty. A workspace-referenced composer
+   * belongs to that workspace's folder, and nothing else has to be decided. An
+   * orphan has no workspace, so it is attributed only by file paths recorded
+   * inside it. That is deliberately strict: matching on any mention of a
+   * project's name is what once handed one project another project's private
+   * transcripts, and a conversation that cannot be placed is skipped rather
+   * than guessed at.
+   */
+  private *readUnreferencedComposers(
+    DatabaseCtor: typeof Database,
+    globalPath: string | null,
+    referenced: Set<string>,
+    since: Date,
+  ): Iterable<CursorChunk> {
+    // Without a project root there is nothing to attribute against, and an
+    // orphan's only claim to belong anywhere is a path match. Reading them
+    // unscoped would mean every conversation on the machine, which is the
+    // opposite of what an unscoped reader should do with unattributable data.
+    if (!globalPath || !this.projectRoot) {
+      return;
+    }
+
+    let globalDb: Database.Database | null = null;
+    try {
+      globalDb = new DatabaseCtor(globalPath, { readonly: true, fileMustExist: true });
+    } catch {
+      // Already reported per-workspace above; not worth a second warning.
+      globalDb?.close();
+      return;
+    }
+
+    try {
+      // Narrowed in SQL before anything is parsed. Walking every stored
+      // composer took a scan from 1.3s to 6.2s on a real store — past the
+      // refresh budget, on the critical path of a tool call. The project's
+      // directory name survives every encoding these blobs use (Windows paths,
+      // `file:///` URIs), so it is a safe coarse filter; `composerMentionsProject`
+      // still decides, and a name like `core` merely lets more candidates
+      // through rather than admitting them.
+      const refs: WorkspaceComposerRef[] = [];
+      const rows = globalDb
+        .prepare("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%' AND value LIKE ?")
+        .all(`%${basename(this.projectRoot)}%`) as Array<{ key: string; value: string }>;
+
+      for (const row of rows) {
+        const composerId = row.key.slice("composerData:".length);
+        if (!composerId || referenced.has(composerId)) {
+          continue;
+        }
+
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(row.value) as unknown;
+        } catch {
+          // A malformed orphan is reported by readComposerMessages if it is
+          // ever selected; here it simply cannot be attributed.
+          continue;
+        }
+
+        // Some rows hold a literal `null`, which parses cleanly and then
+        // throws on the first property access — enough to take down the whole
+        // scan, including every workspace-referenced conversation.
+        if (!isRecord(parsed)) {
+          continue;
+        }
+        const composer = parsed as unknown as CursorComposerData;
+
+        // Most orphans are abandoned chats with no turns at all — 405 of 504
+        // on the machine this was measured on. Skipping them before the path
+        // walk keeps the common case cheap.
+        const headers = composer.fullConversationHeadersOnly;
+        if (!Array.isArray(headers) || headers.length === 0) {
+          continue;
+        }
+
+        if (!composerMentionsProject(composer, this.projectRoot)) {
+          continue;
+        }
+
+        refs.push({ composerId, unifiedMode: composer.unifiedMode });
+      }
+
+      if (refs.length > 0) {
+        yield* this.readComposerMessages(globalDb, refs, since, globalPath);
+      }
+    } finally {
+      globalDb.close();
     }
   }
 
@@ -450,6 +556,59 @@ async function workspaceMatchesProject(
  * Global storage:
  *   .../Cursor/User/globalStorage/state.vscdb
  */
+/**
+ * Fields Cursor records file locations under, inside a composer.
+ *
+ * Named explicitly rather than matching anything that looks like a path: the
+ * question being answered is "did this conversation touch this project", and
+ * only a recorded file location answers it. Prose that happens to contain a
+ * path-shaped string does not — a conversation quoting someone else's error
+ * message must not be filed under their project.
+ */
+const COMPOSER_PATH_FIELDS = new Set(["fsPath", "external", "toolDisplayPath", "repoPath", "path"]);
+
+/** How deep to walk a composer looking for recorded file locations. */
+const COMPOSER_PATH_DEPTH = 6;
+
+/**
+ * Whether a composer records a file inside the given project.
+ *
+ * Fails closed: a conversation with no recorded location is not attributed to
+ * anything, matching the project boundary the other readers hold to.
+ */
+export function composerMentionsProject(composer: unknown, projectRoot: string): boolean {
+  return walkForProjectPath(composer, projectRoot, 0);
+}
+
+function walkForProjectPath(value: unknown, projectRoot: string, depth: number): boolean {
+  if (depth > COMPOSER_PATH_DEPTH) return false;
+
+  if (Array.isArray(value)) {
+    return value.some((item) => walkForProjectPath(item, projectRoot, depth + 1));
+  }
+
+  if (!isRecord(value)) return false;
+
+  for (const [key, item] of Object.entries(value)) {
+    if (typeof item === "string" && COMPOSER_PATH_FIELDS.has(key)) {
+      if (pathMatchesProject(decodeFileUri(item), projectRoot)) return true;
+      continue;
+    }
+    if (walkForProjectPath(item, projectRoot, depth + 1)) return true;
+  }
+
+  return false;
+}
+
+function decodeFileUri(value: string): string {
+  if (!value.startsWith("file:///")) return value;
+  try {
+    return decodeURIComponent(value.slice("file:///".length));
+  } catch {
+    return value.slice("file:///".length);
+  }
+}
+
 function deriveGlobalStoragePath(workspaceDbPath: string): string | null {
   const normalized = workspaceDbPath.replace(/\\/g, "/");
   const wsIdx = normalized.indexOf("/workspaceStorage/");
