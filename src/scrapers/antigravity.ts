@@ -112,6 +112,7 @@ interface AntigravityEndpoint {
 interface AntigravityProcess {
   pid: number;
   csrf: string;
+  commandLine: string;
 }
 
 /**
@@ -388,6 +389,16 @@ class AntigravityLanguageServerClient implements AntigravityRuntimeClient {
   constructor(private readonly projectRoot?: string) {}
 
   async listConversations(conversationsDir: string): Promise<AntigravityRuntimeListing> {
+    if (process.env.XTCTX_DISABLE_ANTIGRAVITY_RUNTIME === "1") {
+      // The language server is a machine-global service: there is exactly one
+      // per install, and nothing in its arguments ties it to the transcript
+      // directory this reader was pointed at. So a test that sandboxes `HOME`
+      // and seeds a synthetic store still reached the real one, and
+      // `verify:release` failed on any machine with Antigravity open. This is
+      // the only way to isolate it, and it exists for that.
+      return { conversations: [] };
+    }
+
     const { endpoints, processesFound } = await discoverLanguageServerEndpoints();
     if (endpoints.length === 0) {
       const degradation = describeUnreachableServer(processesFound);
@@ -1118,8 +1129,27 @@ export function describeUnreachableServer(processesFound: number): string | unde
     : `${processesFound} language server process(es) running but none answered discovery`;
 }
 
+/**
+ * Whether a language server process is Antigravity's.
+ *
+ * `language_server*` matches Windsurf and Codeium too — the same binary family
+ * from the same vendor. Probing theirs wastes a scan and, worse, reports a
+ * degradation for an Antigravity that was never running.
+ *
+ * Antigravity's own process names itself in its arguments
+ * (`--override_ide_name antigravity`, `--app_data_dir antigravity`, and an
+ * install path ending in `Antigravity`), and the others do not. The store path
+ * is deliberately not used: the server's arguments name the install, never the
+ * transcript directory, so matching on that found nothing at all.
+ */
+function isAntigravityLanguageServer(commandLine: string): boolean {
+  return commandLine.toLowerCase().includes("antigravity");
+}
+
 async function discoverLanguageServerEndpoints(): Promise<AntigravityDiscovery> {
-  const processes = await discoverLanguageServerProcesses();
+  const processes = (await discoverLanguageServerProcesses()).filter((info) =>
+    isAntigravityLanguageServer(info.commandLine),
+  );
   const endpoints: AntigravityEndpoint[] = [];
   const seenPorts = new Set<number>();
 
@@ -1188,7 +1218,7 @@ async function discoverPosixLanguageServerProcesses(): Promise<AntigravityProces
       try {
         const cmdline = await readFile(`/proc/${pid}/cmdline`, "utf8");
         const commandLine = cmdline.replace(/\0/g, " ");
-        processes.push({ pid, csrf: extractCsrfToken(commandLine) });
+        processes.push({ pid, csrf: extractCsrfToken(commandLine), commandLine });
       } catch {
         // Ignore read failures for exited processes
       }
@@ -1214,7 +1244,7 @@ async function discoverMacLanguageServerProcesses(): Promise<AntigravityProcess[
         const { stdout: commandLine } = await execFileAsync("ps", ["-p", String(pid), "-o", "args="], {
           timeout: 5_000,
         });
-        processes.push({ pid, csrf: extractCsrfToken(String(commandLine)) });
+        processes.push({ pid, csrf: extractCsrfToken(String(commandLine)), commandLine: String(commandLine) });
       } catch {
         // Ignore processes that exit between pgrep and ps.
       }
@@ -1239,7 +1269,7 @@ function parseProcessJson(raw: string): AntigravityProcess[] {
         const pid = Number(row.ProcessId);
         const commandLine = toStringValue(row.CommandLine) ?? "";
         return Number.isFinite(pid)
-          ? { pid, csrf: extractCsrfToken(commandLine) }
+          ? { pid, csrf: extractCsrfToken(commandLine), commandLine }
           : null;
       })
       .filter((value): value is AntigravityProcess => value !== null);

@@ -892,9 +892,32 @@ async function removeMcpConfig(
       scope,
       removed: false,
       skipped: false,
-      warning: `Failed to remove MCP config: ${errorMessage(error)}`,
+      warning: describeRemovalFailure(configPath, error),
     };
   }
+}
+
+/**
+ * A parser error is not an explanation.
+ *
+ * A config carrying comments is the ordinary reason this fails, and `setup`
+ * already says so in words the reader can act on. Disconnect answered the same
+ * condition with `Expected property name or '}' in JSON at position 4`, which
+ * says nothing about what to do. The two now agree.
+ */
+function describeRemovalFailure(configPath: string, error: unknown): string {
+  const message = errorMessage(error);
+  const looksLikeJsonSyntax = /JSON at position|Unexpected token|Expected property name/i.test(
+    message,
+  );
+  if (looksLikeJsonSyntax) {
+    return (
+      `MCP config at ${configPath} could not be parsed, which usually means it contains ` +
+      `comments — xtctx will not rewrite those. Remove the xtctx server entry manually ` +
+      `(underlying error: ${message}).`
+    );
+  }
+  return `Failed to remove MCP config: ${message}`;
 }
 
 function resolveConfigTarget(

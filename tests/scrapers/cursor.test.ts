@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { CursorScraper } from "@xtctx/scrapers/cursor";
 import type { CursorChunk } from "@xtctx/types/scraper";
@@ -231,5 +231,263 @@ describe("CursorScraper", () => {
     await rm(emptyWsStateDir, { recursive: true, force: true });
 
     expect(chunks).toHaveLength(0);
+  });
+});
+
+/**
+ * Cursor's workspaces list only the conversations they still care about, while
+ * globalStorage keeps them all. On a real machine that was 165 referenced
+ * against 593 stored, so discovering sessions through workspaces alone could
+ * not reach most of the history that existed.
+ *
+ * These conversations have no workspace to inherit a project from, so they are
+ * placed by the file paths recorded inside them — and only by those. Guessing
+ * from a project's name appearing in prose is what once handed one project
+ * another project's private transcripts.
+ */
+describe("CursorScraper reading conversations no workspace lists", () => {
+  let rootDir = "";
+  let stateDir = "";
+  let globalDbPath = "";
+  const projectRoot = join("H:", "projects", "private", "orphan-project");
+
+  function addOrphan(
+    composerId: string,
+    pathValue: unknown,
+    text = "orphaned turn",
+    /**
+     * A non-path field carrying the project's name. Present so the fixture
+     * survives the coarse SQL filter and reaches the attribution check —
+     * without it a negative test passes because the row was never examined,
+     * which is a test that cannot fail.
+     */
+    title = "about orphan-project",
+  ): void {
+    const db = new Database(globalDbPath);
+    const bubbleId = `${composerId}-bubble`;
+    db.prepare("INSERT OR REPLACE INTO cursorDiskKV (key, value) VALUES (?, ?)").run(
+      `composerData:${composerId}`,
+      JSON.stringify({
+        composerId,
+        name: title,
+        fullConversationHeadersOnly: [{ bubbleId, type: 1 }],
+        createdAt: new Date("2026-02-24T10:00:00Z").getTime(),
+        // Where Cursor records the files a conversation touched.
+        context: { fileSelections: pathValue === undefined ? [] : [{ fsPath: pathValue }] },
+      }),
+    );
+    db.prepare("INSERT OR REPLACE INTO cursorDiskKV (key, value) VALUES (?, ?)").run(
+      `bubbleId:${composerId}:${bubbleId}`,
+      JSON.stringify({ type: 1, text, createdAt: "2026-02-24T10:00:00Z" }),
+    );
+    db.close();
+  }
+
+  async function collect(): Promise<CursorChunk[]> {
+    const scraper = new CursorScraper(join(rootDir, "workspaceStorage"), stateDir, projectRoot);
+    const chunks: CursorChunk[] = [];
+    for await (const chunk of scraper.fullSync()) chunks.push(chunk);
+    return chunks;
+  }
+
+  beforeEach(async () => {
+    rootDir = await mkdtemp(join(tmpdir(), "xtctx-cursor-orphan-"));
+    stateDir = await mkdtemp(join(tmpdir(), "xtctx-cursor-orphan-state-"));
+
+    // A workspace that belongs to the project, listing no composers of its own.
+    const wsDir = join(rootDir, "workspaceStorage", "wshash");
+    await mkdir(wsDir, { recursive: true });
+    createWorkspaceDb(join(wsDir, "state.vscdb"), []);
+    await writeFile(
+      join(wsDir, "workspace.json"),
+      JSON.stringify({ folder: `file:///${projectRoot.split(sep).join("/")}` }),
+      "utf-8",
+    );
+
+    await mkdir(join(rootDir, "globalStorage"), { recursive: true });
+    globalDbPath = join(rootDir, "globalStorage", "state.vscdb");
+    const db = new Database(globalDbPath);
+    db.exec("CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+    db.close();
+  });
+
+  afterEach(async () => {
+    await rm(rootDir, { recursive: true, force: true });
+    await rm(stateDir, { recursive: true, force: true });
+  });
+
+  it("reads one whose recorded file is inside the project", async () => {
+    addOrphan("orphan-mine", join(projectRoot, "src", "index.ts"), "a turn worth keeping");
+
+    expect((await collect()).map((chunk) => chunk.content)).toEqual(["a turn worth keeping"]);
+  });
+
+  /**
+   * The dangerous case, and the reason attribution is by recorded path rather
+   * than by text: a conversation in another project that merely *mentions*
+   * this one. Its turn text carries the project name so it survives the coarse
+   * SQL filter and only the path check can reject it — otherwise this test
+   * would pass without any attribution logic at all.
+   */
+  it("leaves another project's conversation alone even when it names this one", async () => {
+    addOrphan(
+      "orphan-theirs",
+      join("H:", "projects", "private", "someone-else", "src", "a.ts"),
+      "we should copy how orphan-project did this",
+    );
+
+    expect(await collect()).toEqual([]);
+  });
+
+  /** No recorded location means no basis to attribute it — fail closed. */
+  it("skips one that records no file at all", async () => {
+    addOrphan("orphan-nowhere", undefined, "all about orphan-project, but no files");
+
+    expect(await collect()).toEqual([]);
+  });
+
+  /**
+   * Real globalStorage holds rows whose value is a literal `null`. It parses
+   * cleanly and then throws on the first property access, which took down the
+   * entire scan — every workspace-referenced conversation included.
+   */
+  /**
+   * globalStorage holds rows whose value is not an object at all. A bare
+   * string or number reaches the parse (it carries the project name, so the
+   * coarse filter lets it through) and must not be mistaken for a
+   * conversation. A literal `null` is guarded against too, though the coarse
+   * filter means nothing on this machine can currently deliver one — that
+   * guard is defence, not something these tests reach.
+   */
+  it.each([
+    ["a bare string", JSON.stringify("orphan-project notes")],
+    ["a number", JSON.stringify(42)],
+  ])("survives a composer row holding %s", async (_label, value) => {
+    const db = new Database(globalDbPath);
+    db.prepare("INSERT INTO cursorDiskKV (key, value) VALUES (?, ?)").run(
+      "composerData:orphan-broken",
+      value,
+    );
+    db.close();
+    addOrphan("orphan-mine", join(projectRoot, "src", "index.ts"), "still read");
+
+    expect((await collect()).map((chunk) => chunk.content)).toEqual(["still read"]);
+  });
+
+  it("does not read them twice when a workspace already lists one", async () => {
+    addOrphan("orphan-mine", join(projectRoot, "src", "index.ts"), "listed once");
+
+    // The same conversation, now also referenced by the workspace.
+    const ws = new Database(join(rootDir, "workspaceStorage", "wshash", "state.vscdb"));
+    ws.prepare("INSERT OR REPLACE INTO ItemTable (key, value) VALUES (?, ?)").run(
+      "composer.composerData",
+      JSON.stringify({ allComposers: [{ composerId: "orphan-mine" }] }),
+    );
+    ws.close();
+
+    expect((await collect()).map((chunk) => chunk.content)).toEqual(["listed once"]);
+  });
+});
+
+/**
+ * The two ways this feature was inert in the wild. Both were invisible to the
+ * tests it shipped with, because those always started from a fresh index and a
+ * workspace that matched.
+ */
+describe("CursorScraper orphan discovery preconditions", () => {
+  let rootDir = "";
+  let stateDir = "";
+  let globalDbPath = "";
+  const projectRoot = join("H:", "projects", "private", "precondition-project");
+
+  function addOrphan(composerId: string, ageDays: number): void {
+    const db = new Database(globalDbPath);
+    const bubbleId = `${composerId}-bubble`;
+    const when = new Date(Date.now() - ageDays * 24 * 60 * 60 * 1000).toISOString();
+    db.prepare("INSERT OR REPLACE INTO cursorDiskKV (key, value) VALUES (?, ?)").run(
+      `composerData:${composerId}`,
+      JSON.stringify({
+        composerId,
+        fullConversationHeadersOnly: [{ bubbleId, type: 1 }],
+        context: { fileSelections: [{ fsPath: join(projectRoot, "src", "a.ts") }] },
+      }),
+    );
+    db.prepare("INSERT OR REPLACE INTO cursorDiskKV (key, value) VALUES (?, ?)").run(
+      `bubbleId:${composerId}:${bubbleId}`,
+      JSON.stringify({ type: 1, text: "older than any cursor", createdAt: when }),
+    );
+    db.close();
+  }
+
+  beforeEach(async () => {
+    rootDir = await mkdtemp(join(tmpdir(), "xtctx-cursor-pre-"));
+    stateDir = await mkdtemp(join(tmpdir(), "xtctx-cursor-pre-state-"));
+    await mkdir(join(rootDir, "globalStorage"), { recursive: true });
+    globalDbPath = join(rootDir, "globalStorage", "state.vscdb");
+    const db = new Database(globalDbPath);
+    db.exec("CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+    db.close();
+    addOrphan("orphan-old", 10);
+  });
+
+  afterEach(async () => {
+    await rm(rootDir, { recursive: true, force: true });
+    await rm(stateDir, { recursive: true, force: true });
+  });
+
+  async function collect(): Promise<CursorChunk[]> {
+    const scraper = new CursorScraper(join(rootDir, "workspaceStorage"), stateDir, projectRoot);
+    const chunks: CursorChunk[] = [];
+    for await (const chunk of scraper.scrape()) chunks.push(chunk);
+    return chunks;
+  }
+
+  /**
+   * These conversations are older than the cursor by definition — no workspace
+   * lists them any more. Filtering them by it meant the feature only ever
+   * worked on a project that had never been indexed.
+   */
+  it("finds them even when the scrape cursor has moved past them", async () => {
+    const wsDir = join(rootDir, "workspaceStorage", "wshash");
+    await mkdir(wsDir, { recursive: true });
+    createWorkspaceDb(join(wsDir, "state.vscdb"), []);
+    await writeFile(
+      join(wsDir, "workspace.json"),
+      JSON.stringify({ folder: `file:///${projectRoot.split(sep).join("/")}` }),
+      "utf-8",
+    );
+
+    // A cursor two days old: the orphan's only turn is ten days old.
+    await writeFile(
+      join(stateDir, "cursor-state.json"),
+      JSON.stringify({ lastTimestamp: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000) }),
+      "utf-8",
+    );
+
+    expect((await collect()).map((chunk) => chunk.content)).toEqual(["older than any cursor"]);
+  });
+
+  /**
+   * globalStorage sits at a fixed sibling of the store path. Locating it from
+   * a workspace that matched the project meant a pruned workspaceStorage entry
+   * — or a multi-root workspace, which records no `folder` — disabled this.
+   */
+  it("finds them when no workspace maps to the project at all", async () => {
+    const wsDir = join(rootDir, "workspaceStorage", "elsewhere");
+    await mkdir(wsDir, { recursive: true });
+    createWorkspaceDb(join(wsDir, "state.vscdb"), []);
+    await writeFile(
+      join(wsDir, "workspace.json"),
+      JSON.stringify({ folder: "file:///somewhere/else/entirely" }),
+      "utf-8",
+    );
+
+    expect((await collect()).map((chunk) => chunk.content)).toEqual(["older than any cursor"]);
+  });
+
+  it("finds them when workspaceStorage holds nothing at all", async () => {
+    await mkdir(join(rootDir, "workspaceStorage"), { recursive: true });
+
+    expect((await collect()).map((chunk) => chunk.content)).toEqual(["older than any cursor"]);
   });
 });

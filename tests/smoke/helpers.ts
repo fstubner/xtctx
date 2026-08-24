@@ -38,6 +38,10 @@ export function sandboxEnv(homeDir: string): NodeJS.ProcessEnv {
     XDG_CONFIG_HOME: join(homeDir, ".config"),
     // Keep the CLI from auto-starting an MCP server on a piped stdio pair.
     XTCTX_NO_AUTO_MCP: "1",
+    // The Antigravity language server is machine-global: sandboxing HOME does
+    // not hide it, so without this the suite probed the developer's real
+    // editor and `verify:release` failed on any machine with it open.
+    XTCTX_DISABLE_ANTIGRAVITY_RUNTIME: "1",
   };
 }
 
