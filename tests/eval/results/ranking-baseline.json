@@ -1,9 +1,9 @@
 {
   "hybrid": {
     "queries": 60,
-    "mrr": 0.535,
-    "recallAt5": 0.683,
-    "top1": 0.4,
+    "mrr": 0.559,
+    "recallAt5": 0.767,
+    "top1": 0.417,
     "falsePositiveRate": 0.417,
     "gibberishFalsePositiveRate": 0
   },

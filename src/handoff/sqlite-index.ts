@@ -1516,7 +1516,28 @@ function blendScores(
     return 0.75 * keywordScore + 0.15 * recencyScore + 0.1 * continuityScore;
   }
 
-  return 0.8 * semanticScore + 0.2 * keywordScore + tieBreak;
+  // 0.6/0.4, chosen by sweeping the blend against the eval rather than by
+  // taste. At the previous 0.8/0.2 the semantic term dominated a signal that
+  // is not strong enough to carry it, and hybrid ranked *worse* than plain
+  // keyword on recall@5 — 0.683 against 0.817 — which is an odd thing for the
+  // mode that exists to combine them.
+  //
+  //   semantic  keyword   mrr     recall@5  top1
+  //   0.8       0.2       0.535   0.683     0.400   <- was
+  //   0.6       0.4       0.559   0.767     0.417   <- is
+  //   0.4       0.6       0.540   0.833     0.333
+  //   0.2       0.8       0.540   0.867     0.333
+  //
+  // Leaning further on keyword keeps buying recall and keeps costing top-1.
+  // 0.6 takes the best MRR and the best top-1 while recovering five queries
+  // of recall; past it, MRR moves by less than one query and is not worth
+  // reading as a difference at sixty queries.
+  //
+  // None of this touches false positives — the rate sat at 0.417 at every
+  // weight tried, because what comes back for an unanswerable query is
+  // decided by the candidate filter above, not by how the survivors are
+  // ordered. That needs its own change.
+  return 0.6 * semanticScore + 0.4 * keywordScore + tieBreak;
 }
 
 function scoreContinuity(messageEndIndex: number, messageCount: number): number {
