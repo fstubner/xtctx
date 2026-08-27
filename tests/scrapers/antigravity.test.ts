@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   AntigravityScraper,
@@ -123,10 +123,11 @@ describe("AntigravityScraper", () => {
       "Use file:///h:/projects/private/needs-work/xtctx/src/cli/index.ts",
       "2026-05-10T12:00:00.000Z",
     );
+    // This reader's own playground copy of the project: still the project.
     await writeArtifact(
       playgroundSessionDir,
       "task.md",
-      "Use file:///c:/Users/Felix/.gemini/antigravity/playground/xtctx/src/cli/index.ts",
+      `Use file:///${rootDir.split(sep).join("/")}/playground/xtctx/src/cli/index.ts`,
       "2026-05-10T12:01:00.000Z",
     );
     await writeArtifact(
@@ -142,6 +143,30 @@ describe("AntigravityScraper", () => {
       "session-matched",
       "session-playground",
     ]);
+  });
+
+  /**
+   * `/playground/<name>/` used to match anywhere on disk, which is a name
+   * match wearing a path's clothes. A conversation in a different user
+   * account's Antigravity, about a different project that merely shares a
+   * directory name, was filed under this one — the boundary PRODUCT.md
+   * promises, broken for every common name: `api`, `core`, `docs`, `web`.
+   */
+  it("does not claim another install's playground project of the same name", async () => {
+    const foreignSessionDir = join(rootDir, "brain", "session-foreign");
+    await mkdir(foreignSessionDir, { recursive: true });
+    await writeArtifact(
+      foreignSessionDir,
+      "task.md",
+      "Use file:///c:/Users/Someone/.gemini/antigravity/playground/xtctx/src/index.ts",
+      "2026-05-10T12:03:00.000Z",
+    );
+
+    const chunks = await collect(
+      new AntigravityScraper(rootDir, stateDir, projectRoot, emptyRuntimeClient()),
+    );
+
+    expect(chunks.map((chunk) => chunk.sessionId)).not.toContain("session-foreign");
   });
 
   it("supports incremental cutoff by artifact timestamp", async () => {

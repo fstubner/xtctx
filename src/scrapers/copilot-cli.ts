@@ -49,6 +49,17 @@ const EVENT_TYPE_ROLE_MAP: Record<string, CopilotCliChunk["role"]> = {
   "system.message": "system",
 };
 
+/**
+ * Event types that carry a `data.content` payload but are not conversation.
+ *
+ * `data.content` is otherwise a reliable sign that a record holds a turn — of
+ * the sixteen types a real store emits, only the three routed above and this
+ * one carry it. Listing it is what lets an unrecognised type carrying that
+ * payload be reported as drift without warning on every scan for something
+ * deliberately skipped.
+ */
+const KNOWN_NON_CONVERSATION_TYPES = new Set(["system.notification"]);
+
 function warnDrift(sourcePath: string, surprise: string, _recordsAffected: number): void {
   recordDrift(SCRAPER_NAME, sourcePath, surprise);
 }
@@ -197,7 +208,17 @@ export class CopilotCliScraper extends AbstractScraper<CopilotCliChunk> {
         // route), warn — likely a rename. Routine non-conversation events
         // (status, tool_call, etc.) carry no content and are silent.
         if (content) {
+          // `data.content` is where a turn's text lives, so a record carrying
+          // it that could not be routed has lost its type — which is what a
+          // renamed `type` field looks like, and it took every turn in the
+          // session with it. The three legacy markers below could not see
+          // that: none of them appear in the format Copilot CLI now writes.
+          const carriesTurnText =
+            isRecord(event.data) &&
+            typeof event.data.content === "string" &&
+            !KNOWN_NON_CONVERSATION_TYPES.has(String(event.type));
           const looksLikeMessage =
+            carriesTurnText ||
             event.type === "message" ||
             "role" in event ||
             (isRecord(event.message) && "role" in event.message);
@@ -223,6 +244,39 @@ export class CopilotCliScraper extends AbstractScraper<CopilotCliChunk> {
           warnDrift(
             `${filePath}:${lineNo}`,
             `event has role but 'content' is unexpected type ${describeType(event.content)}`,
+            1,
+          );
+        } else if (
+          // The same check for where the text actually lives in the current
+          // format. Only the legacy top-level key was examined, so a
+          // `data.content` that turned null dropped the turn in silence — and
+          // `data.content` is the field every real turn uses.
+          isRecord(event.data) &&
+          "content" in event.data &&
+          typeof event.data.content !== "string" &&
+          !Array.isArray(event.data.content)
+        ) {
+          warnDrift(
+            `${filePath}:${lineNo}`,
+            `event has role but 'data.content' is unexpected type ${describeType(event.data.content)}`,
+            1,
+          );
+        } else if (
+          typeof event.type === "string" &&
+          event.type in EVENT_TYPE_ROLE_MAP &&
+          !isRecord(event.data)
+        ) {
+          // A turn-typed event with no payload object at all. Nothing narrower
+          // catches a payload that moved wholesale — with `data` gone there is
+          // no field left to find surprising, and the turn vanished silently.
+          //
+          // The `data` check is what keeps this honest: 77 assistant.message
+          // records in one real session carry a `data` holding a tool call and
+          // no text, which is ordinary. Warning on "no readable content" alone
+          // reported all of them as drift on the first live scan.
+          warnDrift(
+            `${filePath}:${lineNo}`,
+            `${event.type} has no 'data' payload — the field may have been renamed`,
             1,
           );
         }

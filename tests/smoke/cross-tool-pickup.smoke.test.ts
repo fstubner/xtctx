@@ -52,6 +52,13 @@ describe("cross-tool pickup", () => {
       LOCALAPPDATA: join(home, "AppData", "Local"),
       XDG_DATA_HOME: join(home, ".local", "share"),
       XDG_CONFIG_HOME: join(home, ".config"),
+      // Redirecting HOME does not hide the Antigravity language server: it is
+      // a machine-global service, and nothing in its arguments ties it to a
+      // transcript store. Without this the suite probed the developer's real
+      // editor, and `verify:release` failed on any machine with it open. This
+      // file builds its own environment rather than using `sandboxEnv()`,
+      // which is how it kept the behaviour after that was supposedly fixed.
+      XTCTX_DISABLE_ANTIGRAVITY_RUNTIME: "1",
     });
 
     try {
