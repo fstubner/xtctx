@@ -277,6 +277,12 @@ async function persist(
     (existing?.surprises ?? []).map((entry) => [entry.surprise, entry]),
   );
 
+  // Which surprises this write is seeing for the first time. Tracked
+  // explicitly rather than inferred from `firstSeen`, because two scans can
+  // land inside the same millisecond — on a fast machine they routinely do —
+  // and then every timestamp is equal and "newest first" decides nothing.
+  const firstTimeSeen = new Set<string>();
+
   for (const [rawSurprise, { firstLocation: rawLocation, records }] of found) {
     const surprise = stripControlCharacters(rawSurprise.slice(0, MAX_SURPRISE_LENGTH));
     const firstLocation = stripControlCharacters(rawLocation);
@@ -286,6 +292,7 @@ async function persist(
       seen.lastSeen = now;
       continue;
     }
+    firstTimeSeen.add(surprise);
     merged.set(surprise, { surprise, firstLocation, firstSeen: now, lastSeen: now, records });
   }
 
@@ -297,7 +304,16 @@ async function persist(
   // tool sitting at the ceiling on recurring surprises could then never record
   // a genuine new format break — the one event this file exists to capture.
   const ordered = [...merged.values()].sort(
-    (a, b) => b.lastSeen.localeCompare(a.lastSeen) || b.firstSeen.localeCompare(a.firstSeen),
+    (a, b) =>
+      b.lastSeen.localeCompare(a.lastSeen) ||
+      // Seen for the first time in this write wins outright. Comparing
+      // `firstSeen` instead made the guarantee depend on the clock: two scans
+      // inside one millisecond gave every entry the same timestamp, the sort
+      // fell back to insertion order, and the newcomer — appended last —
+      // was the one the ceiling dropped. It held on a slow machine and failed
+      // on a fast one.
+      Number(firstTimeSeen.has(b.surprise)) - Number(firstTimeSeen.has(a.surprise)) ||
+      b.firstSeen.localeCompare(a.firstSeen),
   );
   const kept = ordered.slice(0, MAX_SURPRISES);
 

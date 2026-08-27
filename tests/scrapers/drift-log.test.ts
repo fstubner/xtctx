@@ -139,6 +139,32 @@ describe("drift log persistence", () => {
     );
   });
 
+  /**
+   * The same guarantee with the clock removed. Two scans inside one
+   * millisecond give every entry an identical timestamp, so an ordering that
+   * leans on `firstSeen` has nothing to sort by and keeps the incumbents.
+   * This held on a slow machine and failed on a fast one — the macOS runner
+   * caught it where Windows never did.
+   */
+  it("keeps a new surprise even when both scans share a timestamp", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const recurring: Array<[string, string]> = Array.from({ length: 50 }, (_unused, i) => [
+        `/store/a.jsonl:${i}`,
+        `recurring surprise ${i}`,
+      ]);
+
+      // No timer advance between the two: every timestamp is identical.
+      await scan("codex", recurring);
+      await scan("codex", [...recurring, ["/store/a.jsonl:99", "a genuinely new break"]]);
+
+      const log = await readDriftLog(stateDir, "codex");
+      expect(log?.surprises.map((entry) => entry.surprise)).toContain("a genuinely new break");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("drops the surprise that stopped happening, not the one that still does", async () => {
     await scan("codex", [["/store/old.jsonl:1", "stale surprise"]]);
     const filler: Array<[string, string]> = Array.from({ length: 50 }, (_unused, i) => [
