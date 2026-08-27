@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.18.6](https://github.com/fstubner/xtctx/compare/xtctx-v0.18.5...xtctx-v0.18.6) (2026-08-27)
+
+
+### Bug Fixes
+
+* rebalance the hybrid blend, which ranked worse than keyword alone ([#191](https://github.com/fstubner/xtctx/issues/191)) ([efddbc3](https://github.com/fstubner/xtctx/commit/efddbc30cc510ebe6b2424da71aa1e387eaaa097))
+
+
+### Tests
+
+* **eval:** triple the ranking corpus and measure false positives ([#189](https://github.com/fstubner/xtctx/issues/189)) ([ba0b0fb](https://github.com/fstubner/xtctx/commit/ba0b0fbda1686ba932cd1aedb5b736353e8913dc))
+
 ## [0.18.5](https://github.com/fstubner/xtctx/compare/xtctx-v0.18.4...xtctx-v0.18.5) (2026-08-27)
 
 
