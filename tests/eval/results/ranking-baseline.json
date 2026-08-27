@@ -1,20 +1,26 @@
 {
   "hybrid": {
-    "queries": 20,
-    "mrr": 0.613,
-    "recallAt5": 0.85,
-    "top1": 0.5
+    "queries": 60,
+    "mrr": 0.535,
+    "recallAt5": 0.683,
+    "top1": 0.4,
+    "falsePositiveRate": 0.417,
+    "gibberishFalsePositiveRate": 0
   },
   "vector": {
-    "queries": 20,
-    "mrr": 0.552,
-    "recallAt5": 0.7,
-    "top1": 0.45
+    "queries": 60,
+    "mrr": 0.388,
+    "recallAt5": 0.5,
+    "top1": 0.283,
+    "falsePositiveRate": 0.167,
+    "gibberishFalsePositiveRate": 0
   },
   "keyword": {
-    "queries": 20,
-    "mrr": 0.435,
-    "recallAt5": 0.85,
-    "top1": 0.2
+    "queries": 60,
+    "mrr": 0.52,
+    "recallAt5": 0.817,
+    "top1": 0.333,
+    "falsePositiveRate": 0.417,
+    "gibberishFalsePositiveRate": 0
   }
 }

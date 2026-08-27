@@ -26,7 +26,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { SqliteHandoffIndex } from "@xtctx/handoff/sqlite-index";
 import type { SessionSearchMode } from "@xtctx/handoff/types";
 import type { ConversationChunk, ConversationScraper, ScraperState } from "@xtctx/types/scraper";
-import { generateCorpus, type Anchor } from "./corpus.js";
+import { generateCorpus, type Anchor, type NegativeQuery } from "./corpus.js";
 
 const BASELINE_PATH = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -41,6 +41,17 @@ interface Metrics {
   mrr: number;
   recallAt5: number;
   top1: number;
+  /**
+   * Share of queries with no right answer that returned something anyway.
+   *
+   * The other three metrics only reward finding things, so a change that
+   * returns more for every query improves all of them while making search
+   * worse. This is the counterweight, and it is what makes the confidence
+   * threshold measurable rather than anecdotal.
+   */
+  falsePositiveRate: number;
+  /** Same, for queries that are not even well-formed English. */
+  gibberishFalsePositiveRate: number;
 }
 
 type Report = Record<string, Metrics>;
@@ -79,14 +90,21 @@ class CorpusScraper implements ConversationScraper {
   }
 }
 
-function score(ranks: Array<number | null>): Metrics {
+function score(
+  ranks: Array<number | null>,
+  falsePositives: { absent: number[]; gibberish: number[] },
+): Metrics {
   const found = ranks.filter((rank): rank is number => rank !== null);
   const sum = (values: number[]) => values.reduce((total, value) => total + value, 0);
+  const rate = (hits: number[]) =>
+    hits.length === 0 ? 0 : round(hits.filter((count) => count > 0).length / hits.length);
   return {
     queries: ranks.length,
     mrr: round(sum(found.map((rank) => 1 / rank)) / ranks.length),
     recallAt5: round(found.filter((rank) => rank <= 5).length / ranks.length),
     top1: round(found.filter((rank) => rank === 1).length / ranks.length),
+    falsePositiveRate: rate([...falsePositives.absent, ...falsePositives.gibberish]),
+    gibberishFalsePositiveRate: rate(falsePositives.gibberish),
   };
 }
 
@@ -98,11 +116,13 @@ describe("retrieval ranking", () => {
   let tempDir = "";
   let index: SqliteHandoffIndex;
   let anchors: Anchor[] = [];
+  let negatives: NegativeQuery[] = [];
 
   beforeAll(async () => {
     tempDir = await mkdtemp(join(tmpdir(), "xtctx-eval-"));
     const corpus = generateCorpus();
     anchors = corpus.anchors;
+    negatives = corpus.negatives;
 
     const byTool = new Map<string, ConversationChunk[]>();
     for (const chunk of corpus.chunks) {
@@ -147,7 +167,18 @@ describe("retrieval ranking", () => {
         const position = results.findIndex((session) => session.session_ref === anchor.sessionRef);
         ranks.push(position === -1 ? null : position + 1);
       }
-      report[mode] = score(ranks);
+
+      // Queries with no right answer. Counted separately by kind, because a
+      // well-formed question about an absent topic and a string of nonsense
+      // fail for different reasons and may need different fixes.
+      const falsePositives = { absent: [] as number[], gibberish: [] as number[] };
+      for (const negative of negatives) {
+        const results = await index.searchSessions(negative.query, 10, undefined, mode);
+        const bucket = negative.kind === "gibberish" ? "gibberish" : "absent";
+        falsePositives[bucket].push(results.length);
+      }
+
+      report[mode] = score(ranks, falsePositives);
     }
 
     console.log("ranking metrics:", JSON.stringify(report, null, 2));
@@ -165,6 +196,22 @@ describe("retrieval ranking", () => {
 
     const baseline = JSON.parse(await readFile(BASELINE_PATH, "utf-8")) as Report;
     const regressions: string[] = [];
+
+    // The false-positive metrics run the other way: returning *more* for a
+    // query with no answer is the regression. Checked separately rather than
+    // folded into the loop below, because a single "did it go down" rule
+    // would have rated a search that answers everything as an improvement on
+    // every metric at once.
+    for (const mode of MODES) {
+      for (const metric of ["falsePositiveRate", "gibberishFalsePositiveRate"] as const) {
+        const before = baseline[mode]?.[metric];
+        const after = report[mode][metric];
+        if (typeof before === "number" && after > before + TOLERANCE) {
+          regressions.push(`${mode}.${metric}: ${before} -> ${after} (higher is worse)`);
+        }
+      }
+    }
+
     for (const mode of MODES) {
       for (const metric of ["mrr", "recallAt5", "top1"] as const) {
         const before = baseline[mode]?.[metric];
