@@ -1478,10 +1478,33 @@ function formatMatch(item: {
   };
 }
 
+/**
+ * Turn the FTS ordering into a score that decays linearly rather than by
+ * reciprocal rank.
+ *
+ * Reciprocal rank halves at second place and is down to a third by the fourth,
+ * which reads a near-tie in bm25 as a rout. bm25 also favours short documents,
+ * so a one-line "touched billing while I was in there" outranks a paragraph
+ * that actually decided something about billing — and under reciprocal rank
+ * that accident of ordering cost the real answer half its keyword score.
+ *
+ * Measured on the eval, in both modes that use it:
+ *
+ *            hybrid mrr/recall@5/top1    keyword mrr/recall@5/top1
+ *   1/(i+1)  0.559 / 0.767 / 0.417       0.520 / 0.817 / 0.333
+ *   linear   0.581 / 0.800 / 0.433       0.532 / 0.850 / 0.333
+ *   flat     0.555 / 0.817 / 0.367       0.425 / 0.700 / 0.217
+ *
+ * Flat scoring is there to show position does carry signal: throwing it away
+ * costs keyword mode a tenth of its MRR. The gain here is mostly recall — two
+ * queries in each mode — and top-1 moves by one query, which is not a result
+ * on its own.
+ */
 function rankKeywordRows(rows: RetrievalUnitRow[]): Map<string, number> {
   const scores = new Map<string, number>();
+  const total = rows.length || 1;
   rows.forEach((row, index) => {
-    scores.set(row.unit_id, 1 / (index + 1));
+    scores.set(row.unit_id, (total - index) / total);
   });
   return scores;
 }

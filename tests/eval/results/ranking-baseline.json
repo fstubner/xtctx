@@ -1,9 +1,9 @@
 {
   "hybrid": {
     "queries": 60,
-    "mrr": 0.559,
-    "recallAt5": 0.767,
-    "top1": 0.417,
+    "mrr": 0.581,
+    "recallAt5": 0.8,
+    "top1": 0.433,
     "falsePositiveRate": 0,
     "gibberishFalsePositiveRate": 0,
     "relatedTopicHitRate": 1
@@ -19,8 +19,8 @@
   },
   "keyword": {
     "queries": 60,
-    "mrr": 0.52,
-    "recallAt5": 0.817,
+    "mrr": 0.532,
+    "recallAt5": 0.85,
     "top1": 0.333,
     "falsePositiveRate": 0,
     "gibberishFalsePositiveRate": 0,
