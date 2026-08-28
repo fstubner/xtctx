@@ -40,6 +40,26 @@ jobs:
       - name: Install root dependencies
         run: npm ci
 
+      # Every job here loads the real embedding model, so each one pulls
+      # ~110MB from HuggingFace: four jobs a run, and HuggingFace starts
+      # answering 429. That blocked a merge on 2026-08-28 with nothing wrong
+      # in the code, and got worse when the default model moved from an 86MB
+      # MiniLM to mpnet.
+      #
+      # transformers.js caches inside its own package directory and honours no
+      # override for it, so this has to run *after* `npm ci` — which deletes
+      # node_modules, and the cache with it.
+      #
+      # Keyed on embeddings.ts because that is where the model and its weight
+      # precision are named: change either and the key changes, so a stale
+      # model can never be served to a new configuration. Editing that file
+      # for anything else costs one download.
+      - name: Cache the embedding model
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: node_modules/@huggingface/transformers/.cache
+          key: hf-model-${{ runner.os }}-${{ hashFiles('src/handoff/embeddings.ts') }}
+
       - name: Unit and integration tests
         run: |
           npm test
@@ -86,6 +106,26 @@ jobs:
 
       - name: Install landing dependencies
         run: npm --prefix landing ci
+
+      # Every job here loads the real embedding model, so each one pulls
+      # ~110MB from HuggingFace: four jobs a run, and HuggingFace starts
+      # answering 429. That blocked a merge on 2026-08-28 with nothing wrong
+      # in the code, and got worse when the default model moved from an 86MB
+      # MiniLM to mpnet.
+      #
+      # transformers.js caches inside its own package directory and honours no
+      # override for it, so this has to run *after* `npm ci` — which deletes
+      # node_modules, and the cache with it.
+      #
+      # Keyed on embeddings.ts because that is where the model and its weight
+      # precision are named: change either and the key changes, so a stale
+      # model can never be served to a new configuration. Editing that file
+      # for anything else costs one download.
+      - name: Cache the embedding model
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: node_modules/@huggingface/transformers/.cache
+          key: hf-model-${{ runner.os }}-${{ hashFiles('src/handoff/embeddings.ts') }}
 
       - name: Lint
         run: npm run lint
