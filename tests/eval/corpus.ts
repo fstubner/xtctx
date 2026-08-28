@@ -55,8 +55,14 @@ export interface GeneratedCorpus {
 }
 
 export interface NegativeQuery {
-  /** `absent-topic` reads like a real question; `gibberish` does not read at all. */
-  kind: "absent-topic" | "gibberish";
+  /**
+   * `unanswerable` shares no vocabulary with the corpus and `gibberish` is not
+   * language at all — anything returned for either is invented. `related`
+   * names something absent using words the corpus does use, where a hit is
+   * arguable rather than wrong, so it is reported but not counted against the
+   * false-positive rate.
+   */
+  kind: "unanswerable" | "gibberish" | "related";
   query: string;
 }
 
@@ -96,10 +102,36 @@ const SUBSYSTEMS = [
  * exactly like the real queries so the only difference is that the corpus has
  * nothing to say.
  */
-const ABSENT_SUBSYSTEMS = [
+/**
+ * Absent topics that share no word with anything in the corpus.
+ *
+ * These are the only ones a wrong answer can be claimed for. Returning
+ * something here means search invented it.
+ */
+const ABSENT_SUBSYSTEMS_DISJOINT = [
+  "orbital debris tracking", "sommelier rating intake", "lunar transfer windows",
+  // Not "equine dentistry scheduling": `scheduling` is in the corpus twice
+  // over, which would have put a related topic in the disjoint set and made
+  // the false-positive rate mean the thing it is here to stop meaning. The
+  // test below keeps this list honest.
+  "equine dentistry rosters", "bellringing rota planning", "philately valuation",
+];
+
+/**
+ * Absent topics that share a word with real content — `cache`, `logging`,
+ * `ledger`, `seat`, `renewal`.
+ *
+ * Measured separately because a hit here is not obviously wrong. Asked about
+ * "tidal cache eviction" the corpus has nothing, but it does have cache
+ * warming, and offering it is a defensible answer rather than an invention.
+ * Folding these in with the disjoint ones produced a "false positive rate" of
+ * 41.7% that was really just this: every one of the queries that returned
+ * anything was one of these, and every disjoint query already returned
+ * nothing.
+ */
+const ABSENT_SUBSYSTEMS_RELATED = [
   "quantum ledger reconciliation", "holographic seat mapping", "tidal cache eviction",
-  "orbital debris tracking", "sommelier rating intake", "kiln temperature logging",
-  "lunar transfer windows", "falconry permit renewal",
+  "kiln temperature logging", "falconry permit renewal",
 ];
 
 const TECHNOLOGIES = [
@@ -229,10 +261,15 @@ export function generateCorpus(options: CorpusOptions = {}): GeneratedCorpus {
  * case already known to clear the confidence bar at 0.331.
  */
 function buildNegatives(): NegativeQuery[] {
-  const negatives: NegativeQuery[] = ABSENT_SUBSYSTEMS.flatMap((subsystem) => [
-    { kind: "absent-topic" as const, query: `which datastore did we end up picking for ${subsystem}` },
-    { kind: "absent-topic" as const, query: `what should I watch out for when touching ${subsystem}` },
-  ]);
+  const ask = (kind: NegativeQuery["kind"], subsystem: string): NegativeQuery[] => [
+    { kind, query: `which datastore did we end up picking for ${subsystem}` },
+    { kind, query: `what should I watch out for when touching ${subsystem}` },
+  ];
+
+  const negatives: NegativeQuery[] = [
+    ...ABSENT_SUBSYSTEMS_DISJOINT.flatMap((subsystem) => ask("unanswerable", subsystem)),
+    ...ABSENT_SUBSYSTEMS_RELATED.flatMap((subsystem) => ask("related", subsystem)),
+  ];
 
   for (const query of [
     "zorble frantic widgetting",

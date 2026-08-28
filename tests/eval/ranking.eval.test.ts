@@ -42,16 +42,27 @@ interface Metrics {
   recallAt5: number;
   top1: number;
   /**
-   * Share of queries with no right answer that returned something anyway.
+   * Share of queries the corpus genuinely cannot answer — no shared
+   * vocabulary, or not language at all — that returned something anyway.
    *
    * The other three metrics only reward finding things, so a change that
    * returns more for every query improves all of them while making search
-   * worse. This is the counterweight, and it is what makes the confidence
-   * threshold measurable rather than anecdotal.
+   * worse. This is the counterweight.
    */
   falsePositiveRate: number;
   /** Same, for queries that are not even well-formed English. */
   gibberishFalsePositiveRate: number;
+  /**
+   * Queries naming something absent in words the corpus does use.
+   *
+   * Reported, not policed. Asked about "tidal cache eviction" this corpus has
+   * nothing, but it does have cache warming, and offering that is arguable
+   * rather than wrong. Counting these as false positives put the rate at 41.7%
+   * and sent two rounds of work at a defect that was not there — every query
+   * that returned anything was one of these, and every genuinely unanswerable
+   * one already returned nothing.
+   */
+  relatedTopicHitRate: number;
 }
 
 type Report = Record<string, Metrics>;
@@ -92,7 +103,7 @@ class CorpusScraper implements ConversationScraper {
 
 function score(
   ranks: Array<number | null>,
-  falsePositives: { absent: number[]; gibberish: number[] },
+  falsePositives: { unanswerable: number[]; gibberish: number[]; related: number[] },
 ): Metrics {
   const found = ranks.filter((rank): rank is number => rank !== null);
   const sum = (values: number[]) => values.reduce((total, value) => total + value, 0);
@@ -103,8 +114,9 @@ function score(
     mrr: round(sum(found.map((rank) => 1 / rank)) / ranks.length),
     recallAt5: round(found.filter((rank) => rank <= 5).length / ranks.length),
     top1: round(found.filter((rank) => rank === 1).length / ranks.length),
-    falsePositiveRate: rate([...falsePositives.absent, ...falsePositives.gibberish]),
+    falsePositiveRate: rate([...falsePositives.unanswerable, ...falsePositives.gibberish]),
     gibberishFalsePositiveRate: rate(falsePositives.gibberish),
+    relatedTopicHitRate: rate(falsePositives.related),
   };
 }
 
@@ -171,11 +183,14 @@ describe("retrieval ranking", () => {
       // Queries with no right answer. Counted separately by kind, because a
       // well-formed question about an absent topic and a string of nonsense
       // fail for different reasons and may need different fixes.
-      const falsePositives = { absent: [] as number[], gibberish: [] as number[] };
+      const falsePositives = {
+        unanswerable: [] as number[],
+        gibberish: [] as number[],
+        related: [] as number[],
+      };
       for (const negative of negatives) {
         const results = await index.searchSessions(negative.query, 10, undefined, mode);
-        const bucket = negative.kind === "gibberish" ? "gibberish" : "absent";
-        falsePositives[bucket].push(results.length);
+        falsePositives[negative.kind].push(results.length);
       }
 
       report[mode] = score(ranks, falsePositives);
@@ -224,4 +239,32 @@ describe("retrieval ranking", () => {
 
     expect(regressions).toEqual([]);
   }, 900_000);
+});
+
+/**
+ * The false-positive rate only means anything while the queries it counts are
+ * genuinely unanswerable. A single shared word turns one into a question the
+ * corpus has a defensible answer for, and the metric quietly starts measuring
+ * something else — which is exactly what sent two rounds of work at a defect
+ * that was not there.
+ */
+describe("negative query hygiene", () => {
+  it("keeps unanswerable queries free of any corpus vocabulary", () => {
+    const corpus = generateCorpus();
+    const vocabulary = new Set(
+      corpus.chunks
+        .map((chunk) => chunk.content.toLowerCase())
+        .join(" ")
+        .match(/[a-z0-9_./:-]{2,}/g) ?? [],
+    );
+
+    const leaks: string[] = [];
+    for (const negative of corpus.negatives.filter((entry) => entry.kind === "unanswerable")) {
+      const topic = negative.query.replace(/^.*(for|touching) /, "");
+      const shared = topic.split(" ").filter((word) => vocabulary.has(word));
+      if (shared.length > 0) leaks.push(topic + " shares " + shared.join(","));
+    }
+
+    expect(leaks).toEqual([]);
+  });
 });
