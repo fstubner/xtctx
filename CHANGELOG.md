@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.19.1](https://github.com/fstubner/xtctx/compare/xtctx-v0.19.0...xtctx-v0.19.1) (2026-08-28)
+
+
+### Bug Fixes
+
+* require a human to publish a release ([#201](https://github.com/fstubner/xtctx/issues/201)) ([bedf543](https://github.com/fstubner/xtctx/commit/bedf543eb810ca3e0b17efc10c8600562a8856e4))
+
 ## [0.19.0](https://github.com/fstubner/xtctx/compare/xtctx-v0.18.9...xtctx-v0.19.0) (2026-08-28)
 
 
