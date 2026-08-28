@@ -1,7 +1,6 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "xtctx",
-  "displayName": "xtctx",
   "version": "0.32.0",
   "description": "Local cross-tool handoff for AI coding agents. Read this project's transcripts from the other assistants you use.",
   "homepage": "https://xtctx.com",
@@ -12,5 +11,9 @@
     "context",
     "transcripts",
     "mcp"
-  ]
+  ],
+  "author": {
+    "name": "Felix Stubner",
+    "url": "https://github.com/fstubner"
+  }
 }

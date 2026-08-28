@@ -11,5 +11,9 @@
     "context",
     "transcripts",
     "mcp"
-  ]
+  ],
+  "author": {
+    "name": "Felix Stubner",
+    "url": "https://github.com/fstubner"
+  }
 }

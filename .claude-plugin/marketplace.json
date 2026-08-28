@@ -1,0 +1,21 @@
+{
+  "name": "xtctx",
+  "owner": {
+    "name": "Felix Stubner",
+    "url": "https://github.com/fstubner"
+  },
+  "metadata": {
+    "description": "Local cross-tool handoff for AI coding agents."
+  },
+  "plugins": [
+    {
+      "name": "xtctx",
+      "source": "./plugin",
+      "description": "Read this project's transcripts from the other AI coding assistants you use.",
+      "version": "0.32.0",
+      "homepage": "https://xtctx.com",
+      "license": "MIT",
+      "keywords": ["handoff", "context", "transcripts", "mcp"]
+    }
+  ]
+}

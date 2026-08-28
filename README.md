@@ -17,6 +17,49 @@ a daemon, host an API, generate summaries, or maintain durable project memory.
 The intended user is a solo developer who switches between local coding agents
 and wants the next agent to recover recent context without a pasted recap.
 
+## Install
+
+Two routes. `setup` is the supported one and covers every tool; the plugin is
+newer and covers the six that have a plugin format.
+
+```bash
+npx -y xtctx setup
+```
+
+As a plugin, from the marketplace this repository publishes:
+
+```bash
+claude plugin marketplace add fstubner/xtctx && claude plugin install xtctx@xtctx
+```
+
+```bash
+codex plugin marketplace add fstubner/xtctx && codex plugin add xtctx@xtctx
+```
+
+```bash
+copilot plugin marketplace add fstubner/xtctx && copilot plugin install xtctx@xtctx
+```
+
+```bash
+agy plugin install https://github.com/fstubner/xtctx
+```
+
+Cursor registers the marketplace from its agent CLI, then installs from
+`/plugins` in an interactive session:
+
+```bash
+cursor-agent plugin marketplace add https://github.com/fstubner/xtctx
+```
+
+VS Code reads the same package but has no CLI route: its plugin management
+lives in the Chat view, behind the `chat.plugins.enabled` setting. opencode
+has no plugin format yet, so `setup` is the only route there.
+
+Either route registers the same MCP server (`npx -y xtctx`) and the same
+handoff skill. The plugin does not write project config, so `xtctx status`
+still reports the project as unconfigured — run `setup` as well if you want
+managed instruction blocks and hooks.
+
 ## Workflow
 
 ```bash
