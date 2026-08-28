@@ -5,6 +5,7 @@
       "release-type": "node",
       "package-name": "xtctx",
       "include-v-in-tag": true,
+      "draft": true,
       "changelog-path": "CHANGELOG.md",
       "extra-files": [
         {
