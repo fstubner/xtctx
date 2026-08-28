@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.18.7](https://github.com/fstubner/xtctx/compare/xtctx-v0.18.6...xtctx-v0.18.7) (2026-08-28)
+
+
+### Tests
+
+* **eval:** separate unanswerable queries from merely absent ones ([#192](https://github.com/fstubner/xtctx/issues/192)) ([d5cfd75](https://github.com/fstubner/xtctx/commit/d5cfd75b6574df229a831bca3870c8995cac320d))
+
 ## [0.18.6](https://github.com/fstubner/xtctx/compare/xtctx-v0.18.5...xtctx-v0.18.6) (2026-08-27)
 
 
