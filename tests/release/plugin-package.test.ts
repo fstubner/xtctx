@@ -36,8 +36,14 @@ describe("plugin package", () => {
       "utf-8",
     );
 
+    // Line endings are git's business, not this test's: a Windows checkout
+    // converts the committed file to CRLF while the generator emits LF, so a
+    // byte comparison fails for a difference no reader can see. Drift in the
+    // text is what matters.
+    const normalize = (text: string) => text.replace(/\r\n/g, "\n");
+
     // Run `node scripts/sync-plugin-skill.mjs` when this fails.
-    expect(shipped).toBe(builtInHandoffSkill());
+    expect(normalize(shipped)).toBe(normalize(builtInHandoffSkill()));
   });
 
   it("stamps the package version into every manifest", async () => {
