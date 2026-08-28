@@ -59,6 +59,15 @@ describe("plugin package", () => {
       expect(manifest.name, path).toBe("xtctx");
       expect(manifest.version, path).toBe(pkg.version);
     }
+
+    // Claude Code's `plugin tag` refuses to cut a release when a plugin and
+    // its enclosing marketplace entry disagree, so the marketplace has to
+    // track the package too. Codex and Copilot both read this same file.
+    const marketplace = JSON.parse(
+      await readFile(join(process.cwd(), ".claude-plugin", "marketplace.json"), "utf-8"),
+    ) as { plugins: Array<{ name: string; version: string }> };
+    expect(marketplace.plugins[0].name).toBe("xtctx");
+    expect(marketplace.plugins[0].version).toBe(pkg.version);
   });
 
   it("declares the same MCP server in every shape clients discover", async () => {
