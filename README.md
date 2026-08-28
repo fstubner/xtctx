@@ -44,9 +44,16 @@ copilot plugin marketplace add fstubner/xtctx && copilot plugin install xtctx@xt
 agy plugin install https://github.com/fstubner/xtctx
 ```
 
-Cursor and VS Code read the same package, installed from their own interfaces
-rather than a command. opencode has no plugin format yet, so `setup` is the
-only route there.
+Cursor registers the marketplace from its agent CLI, then installs from
+`/plugins` in an interactive session:
+
+```bash
+cursor-agent plugin marketplace add https://github.com/fstubner/xtctx
+```
+
+VS Code reads the same package but has no CLI route: its plugin management
+lives in the Chat view, behind the `chat.plugins.enabled` setting. opencode
+has no plugin format yet, so `setup` is the only route there.
 
 Either route registers the same MCP server (`npx -y xtctx`) and the same
 handoff skill. The plugin does not write project config, so `xtctx status`
