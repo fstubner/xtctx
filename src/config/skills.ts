@@ -471,7 +471,14 @@ async function listCanonicalSkillIds(sourceDir: string): Promise<string[]> {
   return entries.map((entry) => entry.id);
 }
 
-function builtInHandoffSkill(): string {
+/**
+ * The handoff skill `setup` writes into `.xtctx/skills`.
+ *
+ * Exported because the plugin package under `plugin/` ships the same skill as
+ * a committed file, and a plugin whose skill has drifted from the one setup
+ * writes would tell two agents different things about the same tool.
+ */
+export function builtInHandoffSkill(): string {
   return [
     "---",
     "name: xtctx-handoff",
