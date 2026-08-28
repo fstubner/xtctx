@@ -319,5 +319,5 @@ export const site: SiteData = {
 
   analytics: {},
 
-  version: '0.18.8', // x-release-please-version
+  version: '0.18.9', // x-release-please-version
 };
