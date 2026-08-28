@@ -71,8 +71,12 @@ class FailingScraper implements ConversationScraper {
 }
 
 class FixtureEmbeddingProvider implements EmbeddingProvider {
-  readonly model = "fixture-embedding";
+  readonly model: string;
   embeddedTexts = 0;
+
+  constructor(model = "fixture-embedding") {
+    this.model = model;
+  }
 
   async embed(text: string): Promise<Float32Array> {
     const [vector] = await this.embedBatch([text]);
@@ -117,6 +121,45 @@ describe("SqliteHandoffIndex", () => {
     ]);
 
     await index.close();
+  });
+
+  it("discards vectors from a previously configured embedding model", async () => {
+    // Changing the default model orphans every vector the old one built.
+    // Reads filter on `model` so the stale rows are inert, but nothing
+    // deleted them, and they would sit in the index for good — a second
+    // whole copy of the corpus, growing by one more on every model change.
+    const dbPath = join(tempDir, "xtctx.db");
+    const chunks = [
+      chunk("switch-session", 0, "user", "investigate token refresh regression"),
+      chunk("switch-session", 1, "assistant", "patched the auth callback"),
+    ];
+
+    const before = new SqliteHandoffIndex(
+      dbPath,
+      tempDir,
+      [{ tool: "codex", scraper: new FixtureScraper(chunks) }],
+      { embeddingProvider: new FixtureEmbeddingProvider("old-model") },
+    );
+    await before.searchSessions("token", 5, undefined, "hybrid");
+    const vectorsBefore = (await before.getStatus()).vectorized_units;
+    await before.close();
+    expect(vectorsBefore).toBeGreaterThan(0);
+
+    const after = new SqliteHandoffIndex(
+      dbPath,
+      tempDir,
+      [{ tool: "codex", scraper: new FixtureScraper(chunks) }],
+      { embeddingProvider: new FixtureEmbeddingProvider("new-model") },
+    );
+    // Counted before re-embedding, so this is the leftovers and nothing else.
+    const stale = (await after.getStatus()).vectorized_units;
+    // Rebuilding under the new model has to still work afterwards.
+    await after.searchSessions("token", 5, undefined, "hybrid");
+    const rebuilt = (await after.getStatus()).vectorized_units;
+    await after.close();
+
+    expect(stale).toBe(0);
+    expect(rebuilt).toBe(vectorsBefore);
   });
 
   it("searches indexed transcript content through SQLite FTS", async () => {

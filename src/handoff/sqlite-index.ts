@@ -179,33 +179,44 @@ const MIN_SEMANTIC_COSINE = 0.15;
  * sessions", which is the honest answer. When something does clear it, the
  * weaker windows around it are kept.
  *
- * Swept against the eval for the model below, which is the only way this
- * number means anything: it is a cut through one model's cosine distribution,
- * and a different model needs its own sweep. Measured on the sixty-query
- * corpus, hybrid, with false positives at zero throughout except where noted:
+ * Swept against the eval for DEFAULT_EMBEDDING_MODEL, which is the only way
+ * this number means anything: it is a cut through one model's cosine
+ * distribution, so it is not portable and every model change needs its own
+ * sweep. Measured on the sixty-query corpus, hybrid:
  *
- *   0.28   mrr 0.571  recall@5 0.783  top1 0.433   (false positives 0.05)
- *   0.32   mrr 0.581  recall@5 0.800  top1 0.433
- *   0.36   mrr 0.598  recall@5 0.850  top1 0.450   <- here
- *   0.40   mrr 0.592  recall@5 0.850  top1 0.433
+ *   0.32   mrr 0.656  recall@5 0.883  top1 0.483   (false positives 0.10)
+ *   0.40   mrr 0.654  recall@5 0.933  top1 0.483   <- here
+ *   0.45   mrr 0.639  recall@5 0.933  top1 0.450   (false positives 0)
  *
- * The earlier value of 0.32 was chosen partly to protect pure `vector` mode,
- * which has no keyword hits to fall back on and does lose recall as this
- * rises — 0.50 at 0.32 against 0.383 at 0.36. Hybrid is the default and the
- * mode agents actually use, and it gains what vector loses, because raising
- * the bar drops weak semantic matches and lets the keyword signal carry those
- * queries instead. Optimising the mode nobody calls was the wrong trade.
+ * Held at 0.36 — where MiniLM wanted it — this model looked like it regressed
+ * false positives, which is the trap this comment exists to stop the next
+ * person falling into. The model was fine; the threshold belonged to the
+ * model it was swept for.
  *
- * What has not changed: this is still an absolute threshold, and an absolute
- * threshold cannot tell a real query from a well-formed one about a topic the
- * corpus has never discussed — their scores overlap outright, a genuine query
- * scoring 0.231 while an absent one scores 0.397. What it does handle, at any
- * value here, is a query sharing no vocabulary with the corpus: those return
- * nothing, as does gibberish.
+ * Raising it also costs pure `vector` mode recall, since that mode has no
+ * keyword hits to fall back on. Hybrid is the default and the mode agents
+ * actually use, and it gains what vector loses, because raising the bar drops
+ * weak semantic matches and lets the keyword signal carry those queries
+ * instead. Optimising the mode nobody calls would be the wrong trade.
+ *
+ * What no value here can do is tell a real query from a well-formed one about
+ * a topic the corpus has never discussed. Best-window cosine over the eval
+ * corpus, by kind of query:
+ *
+ *   genuine                          0.277 - 0.582
+ *   absent, shares vocabulary        0.310 - 0.457
+ *   absent, shares no vocabulary     0.246 - 0.396
+ *   gibberish                        0.117 - 0.314
+ *
+ * The first two ranges overlap almost entirely, so no cut separates them, and
+ * a query about something never discussed in words the corpus does use will
+ * always be answerable-looking. The last two sit under the threshold outright,
+ * which is the part this does buy: a query sharing no vocabulary with the
+ * corpus returns nothing, as does gibberish.
  *
  * If it needs to move, move it against the eval rather than against one query.
  */
-const MIN_CONFIDENT_COSINE = 0.36;
+const MIN_CONFIDENT_COSINE = 0.4;
 /**
  * Weight of the recency/continuity tie-break in the relevance modes. Small
  * enough that it only ever separates candidates that are otherwise equal.
@@ -1166,6 +1177,24 @@ export class SqliteHandoffIndex implements SessionService {
     if (sessionCount === 0) {
       await this.clearScraperCursors();
     }
+
+    this.dropVectorsFromOtherModels();
+  }
+
+  /**
+   * Discard vectors built by any model other than the one now in use.
+   *
+   * Every read filters on `model`, so stale rows are already inert — but
+   * nothing deletes them, and changing the default model would otherwise
+   * leave a whole second copy of the corpus in the index permanently. The
+   * vectors are derived data that the next searches rebuild, so dropping
+   * them costs re-embedding, which is budgeted and incremental, and no
+   * transcript content is lost either way.
+   */
+  private dropVectorsFromOtherModels(): void {
+    this.getDb()
+      .prepare("DELETE FROM retrieval_unit_vectors WHERE model != ?")
+      .run(this.embeddingProvider.model);
   }
 
   private async deleteDatabaseFiles(): Promise<void> {
