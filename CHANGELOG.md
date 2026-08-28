@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.19.0](https://github.com/fstubner/xtctx/compare/xtctx-v0.18.9...xtctx-v0.19.0) (2026-08-28)
+
+
+### Features
+
+* switch the embedding model to quantized mpnet ([#199](https://github.com/fstubner/xtctx/issues/199)) ([6214542](https://github.com/fstubner/xtctx/commit/62145425c675f8baed98af9d56ccb91759dfb5f9))
+
 ## [0.18.9](https://github.com/fstubner/xtctx/compare/xtctx-v0.18.8...xtctx-v0.18.9) (2026-08-28)
 
 
