@@ -1,4 +1,21 @@
-export const DEFAULT_EMBEDDING_MODEL = "Xenova/all-MiniLM-L6-v2";
+export const DEFAULT_EMBEDDING_MODEL = "Xenova/all-mpnet-base-v2";
+/**
+ * Weight precision to load the model at.
+ *
+ * `q8` quantizes the weights to 8-bit integers, which for this model is a
+ * 110MB download against 416MB for `fp32`. Both were swept against the
+ * ranking eval at their own best confidence threshold, since a comparison at
+ * a fixed threshold measures the mismatch rather than the model:
+ *
+ *   q8     mrr 0.654  recall@5 0.933  top1 0.483   at 0.40
+ *   fp32   mrr 0.702  recall@5 0.933  top1 0.533   at 0.45
+ *
+ * fp32 does rank better. It costs four times the download for it, on a tool
+ * whose first run already makes an agent wait, and the recall the agent
+ * actually reads back is identical — the difference is ordering within a
+ * result set that the agent sees all of. Not worth 306MB.
+ */
+export const DEFAULT_EMBEDDING_DTYPE = "q8";
 const MAX_SEQ_TOKENS = 256;
 /** ~4 characters per token, the budget splitTextForEmbedding segments to. */
 const MAX_SEQ_CHARS = MAX_SEQ_TOKENS * 4;
@@ -40,7 +57,10 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
   private extractor: FeatureExtractionPipeline | null = null;
   private loading: Promise<FeatureExtractionPipeline> | null = null;
 
-  constructor(model = DEFAULT_EMBEDDING_MODEL) {
+  constructor(
+    model = DEFAULT_EMBEDDING_MODEL,
+    private readonly dtype = DEFAULT_EMBEDDING_DTYPE,
+  ) {
     this.model = model;
   }
 
@@ -96,7 +116,7 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
       pipeline: PipelineFactory;
     };
     const extractor = await transformers.pipeline("feature-extraction", this.model, {
-      dtype: "fp32",
+      dtype: this.dtype,
     });
 
     // `model_max_length` is a getter with no setter in @huggingface/transformers,
