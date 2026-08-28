@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.18.9](https://github.com/fstubner/xtctx/compare/xtctx-v0.18.8...xtctx-v0.18.9) (2026-08-28)
+
+
+### Bug Fixes
+
+* retune the semantic confidence threshold against the eval ([#197](https://github.com/fstubner/xtctx/issues/197)) ([a75b7d9](https://github.com/fstubner/xtctx/commit/a75b7d931db7e0616780f465aba49460fd922450))
+
 ## [0.18.8](https://github.com/fstubner/xtctx/compare/xtctx-v0.18.7...xtctx-v0.18.8) (2026-08-28)
 
 
