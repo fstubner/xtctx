@@ -15,6 +15,13 @@ landing/dist/
 .antigravityignore
 .vscode/mcp.json
 .mcp.json
+# ...except the one the plugin package ships. These entries exist because
+# xtctx writes MCP config into whatever project it is set up in, including
+# this one; `plugin/.mcp.json` is the opposite, a source file that Claude Code
+# and Copilot CLI read out of the installed plugin. Without this it was
+# silently left untracked and the published plugin registered no server on
+# two of six clients.
+!plugin/.mcp.json
 .github/instructions/
 # Anchored: this is opencode's own config at the repo root. Unanchored it also
 # matched tests/drift/fingerprints/opencode.json, which silently stayed untracked.

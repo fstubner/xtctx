@@ -11,6 +11,21 @@
         {
           "type": "generic",
           "path": "landing/src/data/site.ts"
+        },
+        {
+          "type": "json",
+          "path": "plugin/plugin.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": "plugin/.claude-plugin/plugin.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": "plugin/.codex-plugin/plugin.json",
+          "jsonpath": "$.version"
         }
       ],
       "changelog-sections": [
