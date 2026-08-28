@@ -179,21 +179,33 @@ const MIN_SEMANTIC_COSINE = 0.15;
  * sessions", which is the honest answer. When something does clear it, the
  * weaker windows around it are kept.
  *
- * The value is bounded from both sides, and as the corpus has grown those
- * bounds have crossed. Genuine queries reach 0.44-0.59, but gibberish now
- * reaches 0.331 — and every value above 0.32 costs the eval real vector
- * recall, measured: 0.34 takes recall@5 from 0.70 to 0.60, 0.36 to 0.55, 0.40
- * to 0.40. So 0.32 is not a comfortable gap any more, it is the best available
- * compromise, and a nonsense query can clear it.
+ * Swept against the eval for the model below, which is the only way this
+ * number means anything: it is a cut through one model's cosine distribution,
+ * and a different model needs its own sweep. Measured on the sixty-query
+ * corpus, hybrid, with false positives at zero throughout except where noted:
  *
- * Separating those cases needs something a single global cosine cannot give —
- * a per-query sense of whether the best match stands out from the rest of the
- * corpus, rather than an absolute number. Worth doing when it matters enough;
- * raising this constant is not that, and costs recall people rely on.
+ *   0.28   mrr 0.571  recall@5 0.783  top1 0.433   (false positives 0.05)
+ *   0.32   mrr 0.581  recall@5 0.800  top1 0.433
+ *   0.36   mrr 0.598  recall@5 0.850  top1 0.450   <- here
+ *   0.40   mrr 0.592  recall@5 0.850  top1 0.433
+ *
+ * The earlier value of 0.32 was chosen partly to protect pure `vector` mode,
+ * which has no keyword hits to fall back on and does lose recall as this
+ * rises — 0.50 at 0.32 against 0.383 at 0.36. Hybrid is the default and the
+ * mode agents actually use, and it gains what vector loses, because raising
+ * the bar drops weak semantic matches and lets the keyword signal carry those
+ * queries instead. Optimising the mode nobody calls was the wrong trade.
+ *
+ * What has not changed: this is still an absolute threshold, and an absolute
+ * threshold cannot tell a real query from a well-formed one about a topic the
+ * corpus has never discussed — their scores overlap outright, a genuine query
+ * scoring 0.231 while an absent one scores 0.397. What it does handle, at any
+ * value here, is a query sharing no vocabulary with the corpus: those return
+ * nothing, as does gibberish.
  *
  * If it needs to move, move it against the eval rather than against one query.
  */
-const MIN_CONFIDENT_COSINE = 0.32;
+const MIN_CONFIDENT_COSINE = 0.36;
 /**
  * Weight of the recency/continuity tie-break in the relevance modes. Small
  * enough that it only ever separates candidates that are otherwise equal.

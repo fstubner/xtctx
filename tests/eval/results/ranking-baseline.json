@@ -1,21 +1,21 @@
 {
   "hybrid": {
     "queries": 60,
-    "mrr": 0.581,
-    "recallAt5": 0.8,
-    "top1": 0.433,
+    "mrr": 0.598,
+    "recallAt5": 0.85,
+    "top1": 0.45,
     "falsePositiveRate": 0,
     "gibberishFalsePositiveRate": 0,
     "relatedTopicHitRate": 1
   },
   "vector": {
     "queries": 60,
-    "mrr": 0.388,
-    "recallAt5": 0.5,
-    "top1": 0.283,
+    "mrr": 0.297,
+    "recallAt5": 0.383,
+    "top1": 0.217,
     "falsePositiveRate": 0,
     "gibberishFalsePositiveRate": 0,
-    "relatedTopicHitRate": 0.4
+    "relatedTopicHitRate": 0.3
   },
   "keyword": {
     "queries": 60,
