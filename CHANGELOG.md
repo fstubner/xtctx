@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.18.8](https://github.com/fstubner/xtctx/compare/xtctx-v0.18.7...xtctx-v0.18.8) (2026-08-28)
+
+
+### Bug Fixes
+
+* decay keyword rank linearly instead of reciprocally ([#195](https://github.com/fstubner/xtctx/issues/195)) ([e84727b](https://github.com/fstubner/xtctx/commit/e84727b5037c6713dbb6e4a86981503254c884f1))
+
 ## [0.18.7](https://github.com/fstubner/xtctx/compare/xtctx-v0.18.6...xtctx-v0.18.7) (2026-08-28)
 
 
