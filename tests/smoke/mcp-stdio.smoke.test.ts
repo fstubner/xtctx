@@ -182,18 +182,35 @@ describe("MCP server over stdio", () => {
       name: "xtctx_search_sessions",
       arguments: { query: "STDIO-SMOKE-MARKER", mode: "vector", limit: 5 },
     })) as { result?: { isError?: boolean } };
-
-    // The assertion is survival, not relevance: an empty result set is a fine
-    // answer for a one-session corpus, a dead process is not.
     expect(response.result).toBeDefined();
-    expect(proc.exitCode).toBeNull();
 
-    // And it still serves afterwards, which is what "connection closed" broke.
-    const after = (await request(7, "tools/call", {
-      name: "xtctx_continuity_status",
-      arguments: {},
-    })) as { result?: { isError?: boolean } };
-    expect(after.result?.isError).not.toBe(true);
+    // Returning is not the same as having loaded the model. Vectorizing is
+    // budgeted, so the call answers on time whether or not the load finished,
+    // and the first version of this test passed in 337ms on CI — far too fast
+    // to have loaded anything, which would have made it green regardless of
+    // whether the crash still happened.
+    //
+    // A vectorized window is proof the model loaded and ran in this process:
+    // the count cannot rise without it.
+    let vectorized = 0;
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      const status = (await request(100 + attempt, "tools/call", {
+        name: "xtctx_continuity_status",
+        arguments: {},
+      })) as { result?: { content?: Array<{ text?: string }> } };
+      const text = status.result?.content?.[0]?.text ?? "";
+      vectorized = Number(/Vectorized windows:\s*(\d+)/.exec(text)?.[1] ?? 0);
+      if (vectorized > 0) break;
+      // Nudge the backlog along; vectorizing happens inside a search.
+      await request(200 + attempt, "tools/call", {
+        name: "xtctx_search_sessions",
+        arguments: { query: "STDIO-SMOKE-MARKER", mode: "vector", limit: 5 },
+      });
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 2_000));
+    }
+
+    expect(vectorized, "windows vectorized in the spawned server").toBeGreaterThan(0);
+    expect(proc.exitCode).toBeNull();
   }, 600_000);
 
   it("reports a bad argument as a caller error rather than crashing", async () => {
