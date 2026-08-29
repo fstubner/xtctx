@@ -203,7 +203,7 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
         continue;
       }
 
-      if (NON_MESSAGE_TYPES.has(String(obj.type))) {
+      if (NON_MESSAGE_TYPES.has(String(obj.type)) && !carriesPlan(obj)) {
         continue;
       }
 
@@ -218,7 +218,13 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
           `${filePath}:${lineNo}`,
           "record is missing required 'type' field — likely renamed",
         );
-      } else if (typeof obj.type !== "string" || !(obj.type in ROLE_MAP)) {
+      } else if (
+        // A plan arrives as `type: "attachment"`, which is not in ROLE_MAP and
+        // never will be — it is admitted deliberately by carriesPlan above, so
+        // reporting it as an unknown type is noise about a known shape.
+        !carriesPlan(obj) &&
+        (typeof obj.type !== "string" || !(obj.type in ROLE_MAP))
+      ) {
         recordDrift(
           SCRAPER_NAME,
           `${filePath}:${lineNo}`,
@@ -336,17 +342,48 @@ function extractRole(
   return ROLE_MAP[role] ?? ROLE_MAP[type] ?? "system";
 }
 
+/**
+ * Whether an otherwise-skipped record is a plan.
+ *
+ * `attachment` is in NON_MESSAGE_TYPES for good reason — most attachments are
+ * pasted file contents, and indexing those would bury the conversation in
+ * source code. But Claude Code also writes plans as attachments, with the plan
+ * markdown in `attachment.planContent` and no `message` key at all, so the
+ * blanket exclusion dropped every one: 11 records and 170,627 characters
+ * across the transcripts on this machine, none of it retrievable.
+ *
+ * A plan is the decisions rather than the keystrokes, which makes it the most
+ * worth retrieving thing in a session. Narrow on purpose: this admits records
+ * carrying plan text and nothing else, so the file-dump attachments stay out.
+ */
+function carriesPlan(obj: Record<string, unknown>): boolean {
+  const attachment = isRecord(obj.attachment) ? obj.attachment : undefined;
+  return typeof attachment?.planContent === "string" && attachment.planContent.trim() !== "";
+}
+
 function extractContent(obj: Record<string, unknown>): string {
   if (typeof obj.content === "string") {
     return obj.content;
   }
 
   const message = isRecord(obj.message) ? obj.message : undefined;
-  if (!message) {
-    return "";
+  const fromMessage = message ? stringifyContent(message.content) : "";
+  if (fromMessage.trim()) {
+    return fromMessage;
   }
 
-  return stringifyContent(message.content);
+  // A plan record carries its text in `attachment.planContent` and nothing in
+  // `message.content`, so reading only the latter produced an empty chunk that
+  // the caller then dropped. Found by the format fingerprint, then measured
+  // against real transcripts: 11 records, every one of them dropped, 170,627
+  // characters — and a plan is the single most retrievable thing in a
+  // session, being the decisions rather than the keystrokes.
+  const attachment = isRecord(obj.attachment) ? obj.attachment : undefined;
+  if (attachment && typeof attachment.planContent === "string") {
+    return attachment.planContent;
+  }
+
+  return fromMessage;
 }
 
 function stringifyContent(value: unknown): string {
