@@ -168,6 +168,51 @@ describe("MCP server over stdio", () => {
     expect(text).toContain("claude-code:");
   }, 120_000);
 
+  it("survives a semantic search, which loads the embedding model in-process", async () => {
+    // Issue #101: loading the model inside the *spawned* server aborted with a
+    // native assertion on Linux and Windows runners, and the caller saw
+    // `-32000: Connection closed` — the process gone mid-request rather than
+    // an error returned. Every other test here uses `mode: "keyword"`, which
+    // never loads the model, so CI was green while the path was untested.
+    //
+    // `vector` rather than `hybrid` on purpose: hybrid answers from keyword
+    // while the model is still loading, so it can pass without ever finishing
+    // the load that crashes.
+    const response = (await request(6, "tools/call", {
+      name: "xtctx_search_sessions",
+      arguments: { query: "STDIO-SMOKE-MARKER", mode: "vector", limit: 5 },
+    })) as { result?: { isError?: boolean } };
+    expect(response.result).toBeDefined();
+
+    // Returning is not the same as having loaded the model. Vectorizing is
+    // budgeted, so the call answers on time whether or not the load finished,
+    // and the first version of this test passed in 337ms on CI — far too fast
+    // to have loaded anything, which would have made it green regardless of
+    // whether the crash still happened.
+    //
+    // A vectorized window is proof the model loaded and ran in this process:
+    // the count cannot rise without it.
+    let vectorized = 0;
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      const status = (await request(100 + attempt, "tools/call", {
+        name: "xtctx_continuity_status",
+        arguments: {},
+      })) as { result?: { content?: Array<{ text?: string }> } };
+      const text = status.result?.content?.[0]?.text ?? "";
+      vectorized = Number(/Vectorized windows:\s*(\d+)/.exec(text)?.[1] ?? 0);
+      if (vectorized > 0) break;
+      // Nudge the backlog along; vectorizing happens inside a search.
+      await request(200 + attempt, "tools/call", {
+        name: "xtctx_search_sessions",
+        arguments: { query: "STDIO-SMOKE-MARKER", mode: "vector", limit: 5 },
+      });
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 2_000));
+    }
+
+    expect(vectorized, "windows vectorized in the spawned server").toBeGreaterThan(0);
+    expect(proc.exitCode).toBeNull();
+  }, 600_000);
+
   it("reports a bad argument as a caller error rather than crashing", async () => {
     const response = (await request(4, "tools/call", {
       name: "xtctx_search_sessions",
