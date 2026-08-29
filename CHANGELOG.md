@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.21.1](https://github.com/fstubner/xtctx/compare/xtctx-v0.21.0...xtctx-v0.21.1) (2026-08-29)
+
+
+### Performance
+
+* cap how many segments one window contributes to its vector ([#276](https://github.com/fstubner/xtctx/issues/276)) ([7e2693b](https://github.com/fstubner/xtctx/commit/7e2693b0af761523d52e4a7ee2c88e61beb215e5))
+
 ## [0.21.0](https://github.com/fstubner/xtctx/compare/xtctx-v0.20.5...xtctx-v0.21.0) (2026-08-29)
 
 
