@@ -17,6 +17,7 @@ import {
   type AntigravityRuntimeClient,
   type AntigravityRuntimeConversation,
 } from "@xtctx/scrapers/antigravity";
+import { readDriftLog } from "@xtctx/scrapers/drift-log";
 import type { AntigravityChunk } from "@xtctx/types/scraper";
 
 async function collect(scraper: AntigravityScraper): Promise<AntigravityChunk[]> {
@@ -61,6 +62,49 @@ describe("AntigravityScraper", () => {
 
     await expect(scraper.detect()).resolves.toBe(true);
     expect(scraper.getStorePaths()).toEqual([rootDir]);
+  });
+
+  it("reports serving brain artifacts instead of the language server", async () => {
+    // Measured against a real store where the server was unreachable: 45
+    // sessions became 99 chunks, 27 of them a single chunk, every one labelled
+    // assistant because artifacts carry no role. Not one user turn survived,
+    // which for a handoff tool loses the instructions and keeps the replies.
+    //
+    // Nothing reported it. `degradation` is only set when the listing throws
+    // or finds no server, so a listing that simply returns nothing fell
+    // through to the fallback claiming success.
+    const sessionDir = join(rootDir, "brain", "session-fallback");
+    await mkdir(sessionDir, { recursive: true });
+    await writeArtifact(
+      sessionDir,
+      "implementation_plan.md",
+      "Plan body referencing file:///h:/projects/private/needs-work/xtctx/src/index.ts",
+      "2026-05-10T12:00:00.000Z",
+    );
+
+    const chunks = await collect(
+      new AntigravityScraper(rootDir, stateDir, projectRoot, emptyRuntimeClient()),
+    );
+    expect(chunks.length).toBeGreaterThan(0);
+
+    const log = await readDriftLog(stateDir, "antigravity");
+    const reported = (log?.surprises ?? []).map((entry) => entry.surprise).join(" | ");
+    expect(reported).toContain("language server returned nothing");
+    expect(reported).toContain("user turns");
+  });
+
+  it("stays quiet when there is no Antigravity history to serve", async () => {
+    // A machine that has never used Antigravity has nothing degraded about
+    // it, and warning there would be the noise this project has already had
+    // to clean up once.
+    await mkdir(join(rootDir, "brain"), { recursive: true });
+
+    const chunks = await collect(
+      new AntigravityScraper(rootDir, stateDir, projectRoot, emptyRuntimeClient()),
+    );
+
+    expect(chunks).toEqual([]);
+    await expect(readDriftLog(stateDir, "antigravity")).resolves.toBeNull();
   });
 
   it("reads readable brain artifacts as handoff chunks", async () => {
@@ -1202,16 +1246,31 @@ describe("antigravity degraded runtime scans", () => {
 
   const projectRoot = join("H:", "projects", "private", "needs-work", "xtctx");
 
-  it("stays silent and falls back when Antigravity is simply not running", async () => {
+  /**
+   * This test used to assert silence here, on the reading that a bare array is
+   * Antigravity's "this is everything" answer and so nothing is wrong.
+   *
+   * Measuring the fallback against a real store overturned that. With the
+   * server unreachable, 45 sessions produced 99 chunks, 27 of them a single
+   * chunk, and every one was labelled assistant because brain artifacts carry
+   * no role: not one user turn survived. Serving that in place of a
+   * conversation is not a successful read, and saying nothing about it left a
+   * whole tool contributing agent monologue with no sign anything was missing.
+   *
+   * The report is not per-record chatter — it is one line per scan, and only
+   * when the fallback actually served something. `recordDrift` routes it to
+   * the drift log during a real scan rather than to the console.
+   */
+  it("reports falling back to brain artifacts when the server returns nothing", async () => {
     const scraper = new AntigravityScraper(rootDir, stateDir, projectRoot, {
-      // A bare array is the "this is everything" answer.
+      // A bare array: the listing succeeded and had nothing to give.
       listConversations: async () => [],
     });
 
     const chunks = await collect(scraper);
 
     expect(chunks).toHaveLength(1);
-    expect(warnings).toEqual([]);
+    expect(warnings.join(" | ")).toContain("language server returned nothing");
   });
 
   it("reports a scan that could not read the transcripts that are there", async () => {
