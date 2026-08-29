@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.20.1](https://github.com/fstubner/xtctx/compare/xtctx-v0.20.0...xtctx-v0.20.1) (2026-08-29)
+
+
+### Dependencies
+
+* bump peter-evans/create-issue-from-file from 5.0.1 to 6.0.0 ([#185](https://github.com/fstubner/xtctx/issues/185)) ([9cd6d67](https://github.com/fstubner/xtctx/commit/9cd6d67c5c4410379b9516b8447998934d6b2116))
+
 ## [0.20.0](https://github.com/fstubner/xtctx/compare/xtctx-v0.19.0...xtctx-v0.20.0) (2026-08-29)
 
 
