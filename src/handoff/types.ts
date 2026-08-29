@@ -29,10 +29,26 @@ export interface HandoffStatus {
   project_root: string;
   db_path: string;
   last_scan_at: string | null;
+  /**
+   * How long the last scan took, in milliseconds.
+   *
+   * `last_scan_at` says when the index was last refreshed but not what that
+   * cost, so there was no way to tell a scan that finished in a second from
+   * one that ran out its budget and left work behind.
+   */
+  last_scan_ms: number | null;
   sessions: number;
   messages: number;
   retrieval_units: number;
   vectorized_units: number;
+  /**
+   * Milliseconds per window in the last vectorizing pass.
+   *
+   * With `retrieval_units` and `vectorized_units` this turns a backlog into a
+   * duration: the remaining windows times this is roughly the embedding left
+   * to do. Null until a pass has run.
+   */
+  vector_ms_per_unit: number | null;
   vector_model: string;
   /** Last semantic-search failure, or null. Non-null means hybrid search is
    *  silently answering from keyword only. */
