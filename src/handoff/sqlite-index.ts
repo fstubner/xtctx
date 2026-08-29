@@ -443,6 +443,14 @@ export class SqliteHandoffIndex implements SessionService {
     const retrievalUnitCount = count(db, "retrieval_units");
     const vectorizedUnitCount = count(db, "retrieval_unit_vectors");
     const lastScan = getSetting(db, "last_scan_at");
+    // Settings are text; a value written by an older version, or by hand, must
+    // not turn a status report into NaN.
+    const numericSetting = (key: string): number | null => {
+      const raw = getSetting(db, key);
+      if (raw === null) return null;
+      const value = Number(raw);
+      return Number.isFinite(value) ? value : null;
+    };
     const indexedByTool = new Map(
       (
         db
@@ -479,10 +487,12 @@ export class SqliteHandoffIndex implements SessionService {
       project_root: this.projectRoot,
       db_path: this.dbPath,
       last_scan_at: lastScan,
+      last_scan_ms: numericSetting("last_scan_ms"),
       sessions: sessionCount,
       messages: messageCount,
       retrieval_units: retrievalUnitCount,
       vectorized_units: vectorizedUnitCount,
+      vector_ms_per_unit: numericSetting("vector_ms_per_unit"),
       vector_model: this.embeddingProvider.model,
       embedding_error: getSetting(db, "last_error:embeddings"),
       tools,
@@ -663,6 +673,7 @@ export class SqliteHandoffIndex implements SessionService {
     }
 
     setSetting(db, "last_scan_at", startedAt);
+    setSetting(db, "last_scan_ms", String(Date.now() - Date.parse(startedAt)));
 
     // Warm vectors here too, not only inside a search.
     //
@@ -1165,12 +1176,15 @@ export class SqliteHandoffIndex implements SessionService {
     // for the whole corpus. Every batch below commits before the next starts,
     // so an unfinished pass is progress, not wasted work.
     const deadline = this.vectorBudgetMs > 0 ? Date.now() + this.vectorBudgetMs : Infinity;
+    const passStartedAt = Date.now();
+    let embedded = 0;
     for (let start = 0; start < rows.length; start += unitBatchSize) {
       if (Date.now() >= deadline) {
         this.vectorBacklog = rows.length - start;
         break;
       }
       const batch = rows.slice(start, start + unitBatchSize);
+      embedded += batch.length;
       // Long windows are segmented to the model's sequence budget and
       // mean-pooled, so content beyond the window's opening still shapes
       // the unit's vector.
@@ -1199,6 +1213,14 @@ export class SqliteHandoffIndex implements SessionService {
         });
       });
       transaction();
+    }
+
+    // Per window rather than per pass, so a pass that embedded eight and one
+    // that embedded eight hundred report a comparable figure — and so the
+    // backlog can be read as a duration rather than a count.
+    if (embedded > 0) {
+      const perUnit = Math.round(((Date.now() - passStartedAt) / embedded) * 10) / 10;
+      setSetting(db, "vector_ms_per_unit", String(perUnit));
     }
   }
 
