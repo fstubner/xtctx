@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.20.5](https://github.com/fstubner/xtctx/compare/xtctx-v0.20.4...xtctx-v0.20.5) (2026-08-29)
+
+
+### Bug Fixes
+
+* stop hybrid search hiding everything not yet vectorized ([#272](https://github.com/fstubner/xtctx/issues/272)) ([c7bebed](https://github.com/fstubner/xtctx/commit/c7bebed4648b1efc3e8900718662e231314521a6))
+
 ## [0.20.4](https://github.com/fstubner/xtctx/compare/xtctx-v0.20.3...xtctx-v0.20.4) (2026-08-29)
 
 
