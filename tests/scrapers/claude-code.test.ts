@@ -435,6 +435,75 @@ describe("ClaudeCodeScraper", () => {
     expect(chunks.map((chunk) => chunk.sessionId)).toEqual(["session-xtctx"]);
     expect(chunks[0].content).toBe("xtctx handoff");
   });
+
+  it("captures a plan record, which carries its text outside message.content", async () => {
+    // Real shape, from a transcript on disk: `type: "attachment"` with
+    // `attachment.type: "plan_file_reference"`, the plan markdown in
+    // `attachment.planContent`, and NO `message` key at all. The extractor
+    // read only `message.content`, so every plan produced an empty chunk and
+    // was dropped — measured across 334 real transcripts as 11 records and
+    // 170,627 characters, none of it retrievable.
+    const projectDir = join(tempDir, "plan-record");
+    await mkdir(projectDir, { recursive: true });
+    await writeFile(
+      join(projectDir, "session-plan.jsonl"),
+      [
+        JSON.stringify({
+          type: "attachment",
+          attachment: {
+            type: "plan_file_reference",
+            planFilePath: "C:\\plans\\ship-the-thing.md",
+            planContent: "# Ship the thing\n\nRoll back by reverting the tag.",
+          },
+          timestamp: "2026-02-24T10:01:00Z",
+          sessionId: "plan-session",
+          cwd: projectDir,
+        }),
+      ].join("\n") + "\n",
+    );
+
+    const chunks: ClaudeCodeChunk[] = [];
+    for await (const chunk of scraper.fullSync()) chunks.push(chunk);
+
+    const plan = chunks.find((chunk) => chunk.content.includes("Ship the thing"));
+    expect(plan, "the plan record should produce a chunk").toBeDefined();
+    expect(plan?.content).toContain("Roll back by reverting the tag.");
+  });
+
+  it("still skips attachments that are only pasted file contents", async () => {
+    // The reason `attachment` was excluded wholesale, and the thing the plan
+    // exception must not undo: most attachments are a file's contents, and
+    // indexing those buries the conversation under source code. Real records
+    // of this shape sit beside the plan ones in the same transcripts.
+    //
+    // Two mechanisms keep them out — the narrow `carriesPlan` check and the
+    // empty-content drop — so breaking either one alone leaves this green.
+    // It fails when both go, which is the shape of the likely mistake:
+    // widening the exception to attachments in general and teaching the
+    // extractor to read their file contents.
+    const projectDir = join(tempDir, "file-attachment");
+    await mkdir(projectDir, { recursive: true });
+    await writeFile(
+      join(projectDir, "session-file.jsonl"),
+      JSON.stringify({
+        type: "attachment",
+        attachment: {
+          type: "file",
+          filename: "bench.sh",
+          content: { type: "text", file: { content: "UNIQUE-FILE-DUMP-MARKER\necho hi" } },
+        },
+        timestamp: "2026-02-24T10:02:00Z",
+        sessionId: "file-session",
+        cwd: projectDir,
+      }) + "\n",
+    );
+
+    const chunks: ClaudeCodeChunk[] = [];
+    for await (const chunk of scraper.fullSync()) chunks.push(chunk);
+
+    expect(chunks.some((chunk) => chunk.content.includes("UNIQUE-FILE-DUMP-MARKER"))).toBe(false);
+  });
+
 });
 
 async function writeClaudeSession(
