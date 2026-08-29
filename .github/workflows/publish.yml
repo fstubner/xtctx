@@ -1,9 +1,16 @@
 name: publish
 
+# Manual only. This used to also trigger on `release: published`, with
+# release-please marking releases as drafts so nothing published itself. That
+# broke the release process: GitHub's `releases/latest` endpoint hides drafts,
+# release-please reads it to find the last release, so it saw the last
+# pre-draft version forever, proposed a release covering the entire history,
+# auto-merge landed it, and the resulting draft was invisible again. It cut 54
+# versions in an hour before anyone noticed.
+#
+# Releases are published normally again so release-please can see them. The
+# gate moved here instead: reaching npm takes someone running this workflow.
 on:
-  release:
-    types:
-      - published
   workflow_dispatch:
     inputs:
       confirm:
@@ -22,13 +29,19 @@ concurrency:
 
 jobs:
   publish-npm:
-    if: >
-      (github.event_name == 'release' && github.event.release.prerelease == false) ||
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.confirm == 'publish')
+    if: github.event.inputs.confirm == 'publish'
     runs-on: ubuntu-latest
+    outputs:
+      # The smoke job has no checkout, so the version it verifies has to come
+      # from here. It used to come from the release tag, which no longer
+      # exists as a trigger input.
+      version: ${{ steps.identity.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The tag check below needs tags; the default shallow clone has none.
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -47,17 +60,23 @@ jobs:
         run: npm --prefix landing ci
 
       - name: Print package identity
-        run: node -e 'const fs=require("fs");const p=JSON.parse(fs.readFileSync("package.json","utf8"));console.log("Publishing "+p.name+"@"+p.version);'
-
-      - name: Verify tag matches package.json version
-        if: github.event_name == 'release'
-        env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        id: identity
         run: |
           version=$(node -p 'require("./package.json").version')
-          expected="xtctx-v${version}"
-          if [ "$RELEASE_TAG" != "$expected" ] && [ "$RELEASE_TAG" != "v${version}" ]; then
-            echo "Release tag '$RELEASE_TAG' does not match package.json version '${version}'." >&2
+          name=$(node -p 'require("./package.json").name')
+          echo "Publishing ${name}@${version} from ${GITHUB_REF}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      # What gets published is package.json at whatever ref was dispatched, so
+      # the version has to correspond to a real release rather than to a
+      # branch tip someone happened to pick.
+      - name: Verify this commit is tagged for the version being published
+        run: |
+          version=$(node -p 'require("./package.json").version')
+          git fetch --tags --quiet
+          if ! git tag --points-at HEAD | grep -qx "xtctx-v${version}\|v${version}"; then
+            echo "No tag xtctx-v${version} at this commit. Dispatch this workflow against a release tag." >&2
+            git tag --points-at HEAD | sed 's/^/  found: /' >&2
             exit 1
           fi
 
@@ -92,14 +111,13 @@ jobs:
       - name: Smoke the published package from the registry
         working-directory: ${{ runner.temp }}
         env:
-          # The tag is the source of truth for what was just released; reading
-          # a version out of the repo would mean checking the repo out again.
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          # Passed from the publish job rather than read from the repo, so this
+          # job can keep its deliberate lack of a checkout.
+          PUBLISHED_VERSION: ${{ needs.publish-npm.outputs.version }}
         run: |
-          version="${RELEASE_TAG#xtctx-v}"
-          version="${version#v}"
+          version="$PUBLISHED_VERSION"
           if [ -z "$version" ]; then
-            echo "Could not derive a version from tag '$RELEASE_TAG'." >&2
+            echo "Publish job did not report a version." >&2
             exit 1
           fi
 
