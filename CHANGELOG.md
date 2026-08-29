@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.20.2](https://github.com/fstubner/xtctx/compare/xtctx-v0.20.1...xtctx-v0.20.2) (2026-08-29)
+
+
+### Dependencies
+
+* bump actions/upload-pages-artifact from 3.0.1 to 5.0.0 ([#187](https://github.com/fstubner/xtctx/issues/187)) ([f5b6fb4](https://github.com/fstubner/xtctx/commit/f5b6fb4dd7a1026c1a24912df33df4931d5395e7))
+
 ## [0.20.1](https://github.com/fstubner/xtctx/compare/xtctx-v0.20.0...xtctx-v0.20.1) (2026-08-29)
 
 
