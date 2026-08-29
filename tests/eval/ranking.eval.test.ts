@@ -26,6 +26,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { SqliteHandoffIndex } from "@xtctx/handoff/sqlite-index";
 import type { SessionSearchMode } from "@xtctx/handoff/types";
 import type { ConversationChunk, ConversationScraper, ScraperState } from "@xtctx/types/scraper";
+import Database from "better-sqlite3";
+import { TransformersEmbeddingProvider } from "@xtctx/handoff/embeddings";
 import { generateCorpus, type Anchor, type NegativeQuery } from "./corpus.js";
 
 const BASELINE_PATH = resolve(
@@ -35,6 +37,16 @@ const BASELINE_PATH = resolve(
 );
 const TOLERANCE = 0.05;
 const MODES: SessionSearchMode[] = ["hybrid", "vector", "keyword"];
+
+/**
+ * One embedding provider for every test in this file.
+ *
+ * Each instance loads its own ~110MB ONNX session. Two of them in one process
+ * failed intermittently with "bad allocation"; two of them in separate worker
+ * forks killed a worker outright, which is the shape of issue #101. One load,
+ * shared, avoids both.
+ */
+const sharedProvider = new TransformersEmbeddingProvider();
 
 interface Metrics {
   queries: number;
@@ -153,7 +165,11 @@ describe("retrieval ranking", () => {
       // measuring ranking quality, not that tradeoff, so it removes the
       // bounds: a truncated index would score the corpus it happened to
       // finish rather than the corpus under test.
-      { refreshBudgetMs: 600_000, vectorBudgetMs: 600_000 },
+      {
+        embeddingProvider: sharedProvider,
+        refreshBudgetMs: 600_000,
+        vectorBudgetMs: 600_000,
+      },
     );
 
     // Warm the index, then the embedding model and the vectors. `vector` mode
@@ -267,4 +283,120 @@ describe("negative query hygiene", () => {
 
     expect(leaks).toEqual([]);
   });
+});
+
+/**
+ * Hybrid must never be worse than keyword, at any level of vector coverage.
+ *
+ * It was, badly. The vector query inner-joins `retrieval_unit_vectors`, so
+ * hybrid could only ever return units that had already been embedded and a
+ * keyword hit on anything else was invisible. Vectorizing is budgeted and runs
+ * eight windows at a time on semantic searches only, so a partly-embedded
+ * index is the ordinary state — this project sat at 8 vectorized windows out
+ * of 1,770 — and hybrid is the default mode agents call.
+ *
+ * Measured before the fix, hybrid recall tracked coverage almost exactly while
+ * keyword held 0.850 throughout:
+ *
+ *   coverage   hybrid recall@5   keyword recall@5
+ *      100%         0.933             0.850
+ *       50%         0.500             0.850
+ *       25%         0.250             0.850
+ *        0%         0.000             0.850
+ *
+ * The gate is one-sided on purpose. Hybrid beating keyword is the point and
+ * needs no ceiling; hybrid falling below it means the default path is a subset
+ * of the cheaper one, which is the failure this pins.
+ */
+/** Shares TOLERANCE above: one query changing its mind, not a collapse. */
+const COVERAGE = [0.5, 0.25, 0];
+
+async function recallAt5(
+  index: SqliteHandoffIndex,
+  anchors: Anchor[],
+  mode: "hybrid" | "keyword",
+): Promise<number> {
+  let found = 0;
+  for (const anchor of anchors) {
+    const results = await index.searchSessions(anchor.query, 10, undefined, mode);
+    const at = results.findIndex((session) => session.session_ref === anchor.sessionRef);
+    if (at >= 0 && at < 5) found += 1;
+  }
+  return Math.round((found / anchors.length) * 1000) / 1000;
+}
+
+describe("retrieval under partial vector coverage", () => {
+  it("keeps hybrid at least as good as keyword while the backlog drains", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "xtctx-coverage-"));
+    const dbPath = join(dir, "coverage.db");
+    const corpus = generateCorpus();
+    const byTool = new Map<string, ConversationChunk[]>();
+    for (const chunk of corpus.chunks) {
+      byTool.set(chunk.tool, [...(byTool.get(chunk.tool) ?? []), chunk]);
+    }
+    const tools = [...byTool.entries()].map(([tool, chunks]) => ({
+      tool,
+      scraper: new CorpusScraper(tool, chunks),
+    }));
+
+    // Loaded once and shared: hybrid answers from keyword while the model is
+    // still loading, so a cold index scores keyword-only whatever its vectors
+    // say — which is how an earlier attempt at this measured six identical rows.
+    const provider = sharedProvider;
+    await provider.embed("load the model before anything is measured");
+
+    const build = new SqliteHandoffIndex(dbPath, dir, tools, {
+      embeddingProvider: provider,
+      refreshBudgetMs: 600_000,
+      vectorBudgetMs: 600_000,
+    });
+    await build.listRecentSessions(1);
+    await build.searchSessions("warm", 1, undefined, "vector");
+    await build.close();
+
+    const probe = new Database(dbPath);
+    const all = probe
+      .prepare(
+        "SELECT unit_id, model, dimensions, content_hash, vector, created_at FROM retrieval_unit_vectors ORDER BY unit_id",
+      )
+      .all() as Array<Record<string, unknown>>;
+    probe.close();
+    expect(all.length, "corpus should be fully vectorized before slicing").toBeGreaterThan(0);
+
+    const shortfalls: string[] = [];
+    for (const fraction of COVERAGE) {
+      const keep = Math.round(all.length * fraction);
+      const db = new Database(dbPath);
+      db.prepare("DELETE FROM retrieval_unit_vectors").run();
+      const insert = db.prepare(
+        `INSERT INTO retrieval_unit_vectors (unit_id, model, dimensions, content_hash, vector, created_at)
+         VALUES (@unit_id, @model, @dimensions, @content_hash, @vector, @created_at)`,
+      );
+      // A deterministic slice by unit_id: an arbitrary point in the backlog,
+      // not a selection that happens to favour the answers.
+      for (const row of all.slice(0, keep)) insert.run(row);
+      db.close();
+
+      const index = new SqliteHandoffIndex(dbPath, dir, tools, {
+        embeddingProvider: provider,
+        refreshBudgetMs: 600_000,
+        // Without this a search re-embeds what was just deleted: the budget is
+        // checked between batches, so one full batch always runs and the
+        // coverage under test refills before it can be scored.
+        freezeVectors: true,
+      });
+      const hybrid = await recallAt5(index, corpus.anchors, "hybrid");
+      const keyword = await recallAt5(index, corpus.anchors, "keyword");
+      await index.close();
+
+      if (hybrid < keyword - TOLERANCE) {
+        shortfalls.push(
+          `${Math.round(fraction * 100)}% coverage: hybrid ${hybrid} < keyword ${keyword}`,
+        );
+      }
+    }
+
+    expect(shortfalls).toEqual([]);
+    await rm(dir, { recursive: true, force: true });
+  }, 900_000);
 });
