@@ -8,30 +8,39 @@
 3. `auto-merge-release-pr` enables auto-merge on that PR; it merges once the
    required checks pass. Branch protection on `main` must list the `ci`
    workflow as a required check — auto-merge is only as safe as that setting.
-4. Merging tags the version and creates a GitHub Release **as a draft**.
-   Nothing reaches npm yet: `publish` triggers on `release: published`, and a
-   draft is not published.
-5. Publishing that draft — by hand, when a release is actually wanted —
-   triggers `publish`: `verify:release` → `npm publish --provenance` (OIDC
-   trusted publishing, no long-lived token) → a `post-publish-smoke` job
-   installs the published version from the registry and runs
-   `--help`/`--version` against it.
+4. Merging tags the version and creates a GitHub Release. The release is
+   published, not drafted, so release-please can find it next time.
+5. Nothing has reached npm at this point. Run the `publish` workflow by hand,
+   against the release tag, typing `publish` to confirm: it verifies the
+   commit is tagged for the version in `package.json`, runs `verify:release`,
+   then `npm publish --provenance` (OIDC trusted publishing, no long-lived
+   token). A `post-publish-smoke` job then installs the published version
+   from the registry and runs `--help`/`--version` against it.
 
 A release is **not done** until `post-publish-smoke` is green.
 
-### Why step 5 is manual
+### Why step 5 is manual, and why it is not a draft
 
-Steps 1-4 are fully automatic, so every merge to `main` used to reach npm on
-its own. Four versions shipped on 2026-08-28 and two on 2026-08-27, none of
-them because anyone decided to release — the pipeline simply had no point at
-which a person chose. Drafting the release puts that choice back without
-giving up any of the automation before it.
+Steps 1-4 are fully automatic, so every merge to `main` once reached npm on
+its own: four versions on 2026-08-28, two on 2026-08-27, none of them because
+anyone decided to release.
 
-The consequence is that versions accumulate as drafts, one per merge, and
-publishing the newest skips the ones beneath it. That is expected: npm version
-numbers may have gaps, and the older drafts can be deleted unpublished. If
-that bookkeeping ever outweighs the benefit, the alternative is to stop
-auto-merging the release PR instead, so the versions never get cut at all.
+The first fix for that drafted the release and left `publish` triggering on
+`release: published`, so a draft published nothing. It worked, and it broke
+the release process. GitHub's `releases/latest` endpoint hides drafts, and
+release-please reads it to find the last release, so it saw the last
+pre-draft version forever. It proposed a release covering the entire history,
+auto-merge landed it, and the resulting draft was invisible again. That loop
+cut 54 versions in an hour, each with a full-history changelog, before it was
+noticed.
+
+So the release stays published and the brake sits on the npm step instead.
+`publish` has no event trigger at all now — only `workflow_dispatch` with a
+typed confirmation — which is why it cannot fire on its own.
+
+Do not add an event trigger back to `.github/workflows/publish.yml`, and do
+not set `draft` in `.release-please-config.json`. `tests/release/release-gate.test.ts`
+fails on either.
 
 ## Rollback
 
