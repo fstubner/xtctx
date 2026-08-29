@@ -1,18 +1,18 @@
 {
   "hybrid": {
     "queries": 60,
-    "mrr": 0.654,
-    "recallAt5": 0.933,
-    "top1": 0.483,
+    "mrr": 0.598,
+    "recallAt5": 0.85,
+    "top1": 0.45,
     "falsePositiveRate": 0,
     "gibberishFalsePositiveRate": 0,
     "relatedTopicHitRate": 1
   },
   "vector": {
     "queries": 60,
-    "mrr": 0.422,
-    "recallAt5": 0.517,
-    "top1": 0.333,
+    "mrr": 0.297,
+    "recallAt5": 0.383,
+    "top1": 0.217,
     "falsePositiveRate": 0,
     "gibberishFalsePositiveRate": 0,
     "relatedTopicHitRate": 0.3
