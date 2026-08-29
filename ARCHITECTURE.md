@@ -76,6 +76,18 @@ one, semantic results are dropped wholesale and only keyword hits remain —
 whether a query found anything is a property of the query, not of each window,
 and no answer beats a confident wrong one.
 
+**Hybrid is never worse than keyword**, at any level of vector coverage, and
+the eval gates that. It has to be stated because it was silently false: the
+vector query inner-joined the embeddings table, so a keyword hit on a window
+not yet embedded was absent rather than ranked lower, and hybrid's recall
+tracked the vectorized fraction — half embedded, half the recall; none
+embedded, nothing at all. A partly-embedded index is the ordinary state of a
+fresh one, so the default mode was reaching a fraction of what the cheaper
+mode reached. Windows without a vector are now candidates scored on the
+evidence they have, and one with no vector is treated as unknown similarity
+rather than none, because scoring it zero penalises it for its position in a
+queue.
+
 **Bounded, so a tool call always returns.** Scanning gets four seconds,
 vectorizing six, and an indexed view is treated as current for thirty. Work
 left over resumes on the next call. The embedding model loads lazily and only
