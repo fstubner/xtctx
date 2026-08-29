@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.21.0](https://github.com/fstubner/xtctx/compare/xtctx-v0.20.5...xtctx-v0.21.0) (2026-08-29)
+
+
+### Features
+
+* report how long indexing takes and how much is left ([#275](https://github.com/fstubner/xtctx/issues/275)) ([ff26c53](https://github.com/fstubner/xtctx/commit/ff26c53fb434436dd32745a4840d6b3dfad8e0a5))
+
+
+### Documentation
+
+* describe how a handoff flows through the parts ([#271](https://github.com/fstubner/xtctx/issues/271)) ([9c1e3c1](https://github.com/fstubner/xtctx/commit/9c1e3c12d5de4165477ffad456e26dcd3283198d))
+
 ## [0.20.5](https://github.com/fstubner/xtctx/compare/xtctx-v0.20.4...xtctx-v0.20.5) (2026-08-29)
 
 
