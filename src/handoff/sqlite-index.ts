@@ -60,6 +60,19 @@ interface SqliteHandoffIndexOptions {
    * never been set up.
    */
   createIfMissing?: boolean;
+  /**
+   * Stop searches from vectorizing anything they find unvectorized.
+   *
+   * For measuring how retrieval behaves at a given fraction of the corpus
+   * embedded, which is the ordinary state of a fresh index and cannot be held
+   * still otherwise: `vectorBudgetMs` bounds a pass but the deadline is
+   * checked between batches, so one full batch always runs and the fraction
+   * under test refills before it can be scored.
+   *
+   * Not a product setting. Nothing in `src/` passes it — an index that never
+   * embeds is a search that degrades to keyword forever.
+   */
+  freezeVectors?: boolean;
 }
 
 /**
@@ -243,6 +256,7 @@ export class SqliteHandoffIndex implements SessionService {
   private readonly vectorBudgetMs: number;
   private scanStartedMs = 0;
   private readonly createIfMissing: boolean;
+  private readonly freezeVectors: boolean;
   /** Windows still waiting to be vectorized after the last search gave up its budget. */
   private vectorBacklog = 0;
   private readonly embeddingProvider: EmbeddingProvider;
@@ -262,6 +276,7 @@ export class SqliteHandoffIndex implements SessionService {
     this.refreshBudgetMs = Math.max(0, options.refreshBudgetMs ?? DEFAULT_REFRESH_BUDGET_MS);
     this.vectorBudgetMs = Math.max(0, options.vectorBudgetMs ?? DEFAULT_VECTOR_BUDGET_MS);
     this.createIfMissing = options.createIfMissing ?? true;
+    this.freezeVectors = options.freezeVectors ?? false;
     this.initialized = this.initialize();
     // Attach a no-op handler so a failed open cannot become an unhandled
     // rejection (which would kill the process) before the first caller
@@ -950,29 +965,56 @@ export class SqliteHandoffIndex implements SessionService {
       )
       .all(this.embeddingProvider.model, ...filters, ...branches) as VectorUnitRow[];
 
-    if (rows.length === 0) {
+    const keywordRows =
+      mode === "hybrid" ? this.queryKeywordUnits(query, limit, toolFilter, branchFilter) : [];
+
+    /**
+     * Windows that matched on words but have no vector yet.
+     *
+     * These used to be unreachable. The query above inner-joins the vector
+     * table, so hybrid could only ever return units that were already
+     * embedded, and a keyword hit on anything else was invisible. Vectorizing
+     * is budgeted and runs eight windows at a time on semantic searches only,
+     * so a partly-embedded index is the ordinary state rather than an edge
+     * case — this project sat at 8 vectorized windows out of 1,770.
+     *
+     * Measured on the eval by freezing the vectorized fraction, hybrid recall
+     * tracked coverage almost exactly — 0.500 at half embedded, 0.250 at a
+     * quarter, nothing at all at zero — while keyword held 0.850 throughout.
+     * Hybrid is the default mode, so the default was a strict subset of the
+     * cheaper one it is supposed to improve on.
+     */
+    const vectorized = new Set(rows.map((row) => row.unit_id));
+    const keywordOnly = keywordRows.filter((row) => !vectorized.has(row.unit_id));
+
+    if (rows.length === 0 && keywordOnly.length === 0) {
       return [];
     }
 
-    const keywordRows =
-      mode === "hybrid" ? this.queryKeywordUnits(query, limit, toolFilter, branchFilter) : [];
     const keywordScores = rankKeywordRows(keywordRows);
-    const queryVector = await this.embeddingProvider.embed(query);
-    const timeRange = getTimeRange(rows.map((row) => row.ended_at));
-    const candidates = rows
-      .map((row) => {
-        const rawCosine = cosineSimilarity(
-          queryVector,
-          deserializeVector(row.vector, row.dimensions),
-        );
-        return {
-          row,
-          rawCosine,
-          keywordScore: keywordScores.get(row.unit_id) ?? 0,
-          recencyScore: scoreRecency(row.ended_at, timeRange),
-          continuityScore: scoreContinuity(row.message_end_index, row.session_message_count),
-        };
-      })
+    // Only needed to score vectors; skip the model entirely when there are none.
+    const queryVector = rows.length > 0 ? await this.embeddingProvider.embed(query) : null;
+    const timeRange = getTimeRange([...rows, ...keywordOnly].map((row) => row.ended_at));
+    const candidates = [
+      ...rows.map((row) => ({
+        row: row as RetrievalUnitRow,
+        rawCosine: queryVector
+          ? cosineSimilarity(queryVector, deserializeVector(row.vector, row.dimensions))
+          : 0,
+        keywordScore: keywordScores.get(row.unit_id) ?? 0,
+        recencyScore: scoreRecency(row.ended_at, timeRange),
+        continuityScore: scoreContinuity(row.message_end_index, row.session_message_count),
+      })),
+      // No semantic evidence yet — carried on the keyword match alone, which
+      // the filter below still requires.
+      ...keywordOnly.map((row) => ({
+        row,
+        rawCosine: 0,
+        keywordScore: keywordScores.get(row.unit_id) ?? 0,
+        recencyScore: scoreRecency(row.ended_at, timeRange),
+        continuityScore: scoreContinuity(row.message_end_index, row.session_message_count),
+      })),
+    ]
       // Require actual evidence. Raw cosine sits near zero for unrelated
       // content, so without this the entire corpus came back for a query
       // matching nothing, formatted exactly like a real hit. A unit qualifies
@@ -1014,12 +1056,20 @@ export class SqliteHandoffIndex implements SessionService {
       .map((item) => {
         // A lone survivor is the best match by definition, not the worst.
         const semanticScore = spread > 0 ? (item.rawCosine - lowest) / spread : 1;
+        // A window with no vector has *unknown* similarity, not zero. Blending
+        // it as zero docks it 60% of the available score for not having been
+        // embedded yet, so a mediocre vectorized match outranked a strong
+        // keyword one purely by being earlier in the queue: at half coverage
+        // that held recall to 0.600 against keyword's 0.850. Scoring those on
+        // the evidence they do have — the keyword blend — removes the penalty
+        // without inventing a similarity for them.
+        const unvectorized = !vectorized.has(item.row.unit_id);
         return {
           ...item,
           semanticScore,
-          relevance: Math.max(0, Math.min(1, item.rawCosine)),
+          relevance: unvectorized ? undefined : Math.max(0, Math.min(1, item.rawCosine)),
           score: blendScores(
-            mode,
+            unvectorized ? "keyword" : mode,
             semanticScore,
             item.keywordScore,
             item.recencyScore,
@@ -1066,6 +1116,9 @@ export class SqliteHandoffIndex implements SessionService {
   }
 
   private async ensureVectors(toolFilter?: string[]): Promise<void> {
+    if (this.freezeVectors) {
+      return;
+    }
     const db = this.getDb();
     const filters = normalizeToolFilter(toolFilter);
     const toolWhere = filters.length > 0 ? `AND u.tool IN (${placeholders(filters.length)})` : "";
