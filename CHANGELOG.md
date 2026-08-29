@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.20.3](https://github.com/fstubner/xtctx/compare/xtctx-v0.20.2...xtctx-v0.20.3) (2026-08-29)
+
+
+### Dependencies
+
+* bump actions/github-script from 7.1.0 to 9.0.0 ([#183](https://github.com/fstubner/xtctx/issues/183)) ([d39cc50](https://github.com/fstubner/xtctx/commit/d39cc50f709783c6e48089f746c3663cd6ea14a4))
+
 ## [0.20.2](https://github.com/fstubner/xtctx/compare/xtctx-v0.20.1...xtctx-v0.20.2) (2026-08-29)
 
 
