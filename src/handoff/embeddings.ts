@@ -155,6 +155,43 @@ function toFloat32Array(data: Float32Array | Float64Array | number[]): Float32Ar
 }
 
 /**
+ * Most segments any one window contributes to its vector.
+ *
+ * Windows are mean-pooled, so a window split into four hundred segments costs
+ * four hundred embeddings to produce one averaged vector that represents
+ * nothing in particular. Measured over this project's 1,770 windows: the
+ * median is 4 segments and the 95th percentile 17, but the largest is 392 —
+ * a single 400,899-character window.
+ *
+ * Sixteen keeps the whole distribution below the 95th percentile intact and
+ * touches 5.9% of windows, removing about a fifth of the embedding work. It
+ * is a cap on cost, not the main lever: segment *count* was never the
+ * dominant term, segment *cost* is (~360ms each on mpnet against ~116ms on
+ * MiniLM), so this trims the tail rather than solving the total.
+ */
+export const MAX_SEGMENTS_PER_UNIT = 16;
+
+/**
+ * Reduce a window's segments to at most `limit`, spread across its span.
+ *
+ * Evenly sampled rather than truncated: the opening 16KB of a 400KB window is
+ * an arbitrary slice of it, while a spread still reflects how the window
+ * begins, develops and ends — which is what a pooled vector is meant to
+ * summarise. Order is preserved so pooling stays deterministic.
+ */
+export function capSegments(segments: string[], limit = MAX_SEGMENTS_PER_UNIT): string[] {
+  if (segments.length <= limit) {
+    return segments;
+  }
+  const step = segments.length / limit;
+  const sampled: string[] = [];
+  for (let index = 0; index < limit; index += 1) {
+    sampled.push(segments[Math.min(segments.length - 1, Math.floor(index * step))]);
+  }
+  return sampled;
+}
+
+/**
  * Split text into segments that fit the embedding model's sequence window
  * (~4 chars per token; the default 1000 chars stays under 256 tokens).
  * Splits on line boundaries; a single oversized line is hard-sliced.

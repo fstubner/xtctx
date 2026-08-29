@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { SqliteHandoffIndex } from "@xtctx/handoff/sqlite-index";
+import { MAX_SEGMENTS_PER_UNIT } from "@xtctx/handoff/embeddings";
 import type { EmbeddingProvider } from "@xtctx/handoff/embeddings";
 import type { ConversationChunk, ConversationScraper, ScraperState } from "@xtctx/types/scraper";
 
@@ -160,6 +161,49 @@ describe("SqliteHandoffIndex", () => {
 
     expect(stale).toBe(0);
     expect(rebuilt).toBe(vectorsBefore);
+  });
+
+  it("caps how many segments one window contributes to its vector", async () => {
+    // The cap lives in embeddings.ts and is applied here; a unit test of the
+    // function alone stayed green with the call site unwired, which is the
+    // half that matters. A window is mean-pooled, so an enormous one cost
+    // hundreds of embeddings to produce one averaged vector — the largest in
+    // this project's real index split into 392 segments.
+    class RecordingProvider implements EmbeddingProvider {
+      readonly model = "recording";
+      largestBatch = 0;
+
+      async embed(text: string): Promise<Float32Array> {
+        const [vector] = await this.embedBatch([text]);
+        return vector;
+      }
+
+      async embedBatch(texts: string[]): Promise<Float32Array[]> {
+        this.largestBatch = Math.max(this.largestBatch, texts.length);
+        return texts.map((text) => fixtureVector(text));
+      }
+    }
+
+    // One window, far past the cap: 60 segments' worth of distinct lines.
+    const huge = Array.from(
+      { length: 60 },
+      (_, index) => `${"x".repeat(1000)} line${index}`,
+    ).join("\n");
+    const provider = new RecordingProvider();
+    const index = new SqliteHandoffIndex(
+      join(tempDir, "xtctx.db"),
+      tempDir,
+      [{ tool: "codex", scraper: new FixtureScraper([chunk("huge-session", 0, "user", huge)]) }],
+      { embeddingProvider: provider, windowSize: 2, windowStride: 1 },
+    );
+
+    await index.searchSessions("line0", 5, undefined, "hybrid");
+    await index.close();
+
+    // One window is embedded per batch here, so the largest batch seen is that
+    // window's segment count.
+    expect(provider.largestBatch).toBeGreaterThan(0);
+    expect(provider.largestBatch).toBeLessThanOrEqual(MAX_SEGMENTS_PER_UNIT);
   });
 
   it("searches indexed transcript content through SQLite FTS", async () => {
