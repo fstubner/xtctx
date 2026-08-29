@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.20.4](https://github.com/fstubner/xtctx/compare/xtctx-v0.20.3...xtctx-v0.20.4) (2026-08-29)
+
+
+### Bug Fixes
+
+* report when Antigravity serves brain artifacts instead of transcripts ([#269](https://github.com/fstubner/xtctx/issues/269)) ([8d9cf60](https://github.com/fstubner/xtctx/commit/8d9cf6030eb8f037dc5bc2bc9f87a44837fbd281))
+
 ## [0.20.3](https://github.com/fstubner/xtctx/compare/xtctx-v0.20.2...xtctx-v0.20.3) (2026-08-29)
 
 
