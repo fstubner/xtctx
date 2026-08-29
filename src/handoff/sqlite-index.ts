@@ -11,6 +11,7 @@ import {
   poolVectors,
   splitTextForEmbedding,
   type EmbeddingProvider,
+  capSegments,
 } from "./embeddings.js";
 import type {
   HandoffStatus,
@@ -1188,7 +1189,7 @@ export class SqliteHandoffIndex implements SessionService {
       // Long windows are segmented to the model's sequence budget and
       // mean-pooled, so content beyond the window's opening still shapes
       // the unit's vector.
-      const segmented = batch.map((row) => splitTextForEmbedding(row.content));
+      const segmented = batch.map((row) => capSegments(splitTextForEmbedding(row.content)));
       const segmentVectors = await this.embeddingProvider.embedBatch(segmented.flat());
 
       let cursor = 0;
