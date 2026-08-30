@@ -196,41 +196,44 @@ const MIN_SEMANTIC_COSINE = 0.15;
  * Swept against the eval for DEFAULT_EMBEDDING_MODEL, which is the only way
  * this number means anything: it is a cut through one model's cosine
  * distribution, so it is not portable and every model change needs its own
- * sweep. Measured on the sixty-query corpus, hybrid:
+ * sweep. Measured on the sixty-query corpus, hybrid, false positives zero
+ * except where noted:
  *
- *   0.32   mrr 0.656  recall@5 0.883  top1 0.483   (false positives 0.10)
- *   0.40   mrr 0.654  recall@5 0.933  top1 0.483   <- here
- *   0.45   mrr 0.639  recall@5 0.933  top1 0.450   (false positives 0)
+ *   0.28   mrr 0.571  recall@5 0.783  top1 0.433   (false positives 0.05)
+ *   0.32   mrr 0.581  recall@5 0.800  top1 0.433
+ *   0.36   mrr 0.598  recall@5 0.850  top1 0.450   <- here
+ *   0.40   mrr 0.592  recall@5 0.850  top1 0.433
  *
- * Held at 0.36 — where MiniLM wanted it — this model looked like it regressed
- * false positives, which is the trap this comment exists to stop the next
- * person falling into. The model was fine; the threshold belonged to the
- * model it was swept for.
+ * The trap worth naming: held at 0.36 while the default was mpnet, that model
+ * looked like it regressed false positives to 0.10. It had not — the
+ * threshold simply belonged to the distribution it was cut from. A model
+ * comparison at a fixed threshold measures the mismatch, not the model.
  *
  * Raising it also costs pure `vector` mode recall, since that mode has no
- * keyword hits to fall back on. Hybrid is the default and the mode agents
- * actually use, and it gains what vector loses, because raising the bar drops
- * weak semantic matches and lets the keyword signal carry those queries
- * instead. Optimising the mode nobody calls would be the wrong trade.
+ * keyword hits to fall back on — 0.50 at 0.32 against 0.383 at 0.36. Hybrid
+ * is the default and the mode agents actually use, and it gains what vector
+ * loses, because raising the bar drops weak semantic matches and lets the
+ * keyword signal carry those queries instead. Optimising the mode nobody
+ * calls would be the wrong trade.
  *
  * What no value here can do is tell a real query from a well-formed one about
  * a topic the corpus has never discussed. Best-window cosine over the eval
- * corpus, by kind of query:
+ * corpus under this model, by kind of query:
  *
- *   genuine                          0.277 - 0.582
- *   absent, shares vocabulary        0.310 - 0.457
- *   absent, shares no vocabulary     0.246 - 0.396
- *   gibberish                        0.117 - 0.314
+ *   genuine                          0.211 - 0.656
+ *   absent, shares vocabulary        0.147 - 0.405
+ *   absent, shares no vocabulary     0.140 - 0.302
+ *   gibberish                        0.115 - 0.225
  *
- * The first two ranges overlap almost entirely, so no cut separates them, and
- * a query about something never discussed in words the corpus does use will
- * always be answerable-looking. The last two sit under the threshold outright,
- * which is the part this does buy: a query sharing no vocabulary with the
- * corpus returns nothing, as does gibberish.
+ * The first two ranges overlap, so no cut separates them, and a query about
+ * something never discussed in words the corpus does use will always be
+ * answerable-looking. The last two sit under the threshold, which is the part
+ * this does buy: a query sharing no vocabulary with the corpus returns
+ * nothing, as does gibberish.
  *
  * If it needs to move, move it against the eval rather than against one query.
  */
-const MIN_CONFIDENT_COSINE = 0.4;
+const MIN_CONFIDENT_COSINE = 0.36;
 /**
  * Weight of the recency/continuity tie-break in the relevance modes. Small
  * enough that it only ever separates candidates that are otherwise equal.

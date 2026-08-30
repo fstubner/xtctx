@@ -45,7 +45,7 @@ Single-user, single-machine. There is no team, sync, or server component.
 - Scrapers for the seven supported tools, project-scoped, incremental, and
   tolerant of upstream schema drift (warn, never silently drop).
 - One per-project SQLite index (`.xtctx/state/xtctx.db`) with keyword (FTS5)
-  and semantic (local mpnet embeddings) search over chronological windows.
+  and semantic (local MiniLM embeddings) search over chronological windows.
 - Five read-only MCP tools: recent sessions, session detail, search,
   continuity status, handoff manifest.
 - CLI: `setup` (wire MCP config, managed instruction blocks, skills, and the
