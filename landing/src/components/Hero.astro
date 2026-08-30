@@ -1,6 +1,10 @@
 ---
 import { site } from '../data/site';
 import TerminalMock from './TerminalMock.astro';
+// Pull the published version straight from the root package.json at build
+// time so the hero eyebrow can't drift out of date the way a hardcoded
+// string did (it was stuck at v0.10.0 well past the actual release).
+import { version } from '../../../package.json';
 const { hero } = site;
 ---
 <div class="hero">
@@ -10,7 +14,7 @@ const { hero } = site;
       <span class="bullet">|</span>
       <span class="item">MIT</span>
       <span class="bullet">|</span>
-      <span class="item">v0.10.0</span>
+      <span class="item">v{version}</span>
     </div>
     <h1>{hero.heading}</h1>
     <p class="sub">{hero.subhead}</p>
