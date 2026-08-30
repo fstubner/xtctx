@@ -882,15 +882,26 @@ const blueprintNodes = [
         <div class="setup-grid">
           <div>
             <p class="section-label">Setup</p>
-            <h2>Run setup, then status</h2>
+            <h2>Install, then check</h2>
             <p class="lead">
-              Setup writes generated files. Status reports configured tools,
-              transcript freshness, selected skills, and unsupported targets.
+              The plugin gets you the MCP tools without touching the repo. Setup
+              writes the generated files this page describes. Status reports
+              configured tools, transcript freshness, selected skills, and
+              unsupported targets.
             </p>
           </div>
           <div class="commands">
             <article class="command-item">
-              <strong>Set up this repo</strong>
+              <strong>Install the plugin</strong>
+              <code>claude plugin install xtctx@xtctx</code>
+              <p>
+                Registers the MCP server and handoff skill, writes nothing into the
+                repo. Retrieval works without any of the files below. Add the
+                marketplace first; see the README for other tools.
+              </p>
+            </article>
+            <article class="command-item">
+              <strong>Add project wiring</strong>
               <code>npx -y xtctx setup</code>
               <p>Detect tools, choose skills, write MCP config, and repair managed blocks.</p>
             </article>

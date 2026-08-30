@@ -12,26 +12,23 @@
   </div>
   <div class="terminal-body">
     <div class="line">
-      <span class="prompt">$</span> npx -y xtctx setup
+      <span class="prompt">$</span> claude plugin install xtctx@xtctx
     </div>
     <div class="output">
-      <div class="log header">xtctx setup for ~/projects/my-app</div>
-      <div class="log">  config                 .xtctx/config.yaml</div>
-      <div class="log">  skill                  .xtctx/skills/xtctx-handoff/SKILL.md</div>
-      <div class="log">  memory:codex           AGENTS.md</div>
-      <div class="log">  mcp:codex              .codex/config.toml</div>
-      <div class="log success">[ok] managed instructions written</div>
       <div class="log success">[ok] mcp server registered</div>
+      <div class="log success">[ok] handoff skill installed</div>
+      <div class="log muted">No project files written.</div>
     </div>
 
     <div class="line second">
-      <span class="prompt">$</span> npx -y xtctx status
+      <span class="prompt">$</span> cd ~/projects/my-app &amp;&amp; claude
     </div>
     <div class="output">
-      <div class="log header">xtctx status</div>
-      <div class="log">MCP command:   npx -y xtctx</div>
-      <div class="log">Local cache:   indexes on MCP retrieval</div>
-      <div class="log">Next agent:    recent, detail, search, status</div>
+      <div class="log header">&gt; what was I working on?</div>
+      <div class="log">  calling                xtctx_recent_sessions()</div>
+      <div class="log">  cursor:sess_714        42m ago &middot; 18 turns</div>
+      <div class="log">  calling                xtctx_session_detail()</div>
+      <div class="log success">Picking up the auth refactor you left in Cursor.</div>
       <div class="log muted">Raw transcripts stay the source of truth.</div>
     </div>
   </div>
