@@ -34,6 +34,8 @@ interface PreparedStatements {
   insertMessage: Statement;
   upsertChunkTxn: Transaction<(sessionArgs: unknown[], messageArgs: unknown[]) => void>;
   sessionRollup: Statement;
+  /** Repairs roll-ups a previous scan died before reaching. See its prepare. */
+  reconcileSessionRollups: Statement;
   selectSessionMessages: Statement;
   selectSessionTool: Statement;
   selectUnitIds: Statement;
@@ -633,6 +635,12 @@ export class SqliteHandoffIndex implements SessionService {
     const startedAt = new Date().toISOString();
     const touchedSessions = new Set<string>();
 
+    // First, not last: this repairs roll-ups a previous scan died before
+    // reaching, and doing it up front means the repair survives even if this
+    // scan is interrupted in the same way. Rows that already agree are not
+    // written, so on a healthy index this costs one indexed count per session.
+    this.prepared().reconcileSessionRollups.run();
+
     for (const { scraper } of this.tools) {
       if (!(await safeDetect(scraper))) {
         continue;
@@ -914,6 +922,41 @@ export class SqliteHandoffIndex implements SessionService {
                preview
              )
          WHERE session_ref = ?`,
+      ),
+      /**
+       * Repair sessions whose stored roll-up disagrees with their messages.
+       *
+       * The per-session roll-up above runs once per scan, after every scraper
+       * has finished — but each scraper advances its own cursor as soon as it
+       * finishes. Between those two points the messages are committed and the
+       * store will not be re-read, so a process that dies in the gap leaves the
+       * session reporting zero messages permanently, with its content still
+       * fully retrievable. Re-ingesting cannot fix that; only reconciling
+       * against what is already stored can.
+       *
+       * The WHERE clause is what keeps this cheap: rows that agree are not
+       * written, so a healthy index pays a single indexed COUNT per session and
+       * dirties nothing. `idx_messages_session_order` leads with `session_ref`,
+       * so each count is index-served rather than a table scan.
+       */
+      reconcileSessionRollups: db.prepare(
+        `UPDATE sessions
+         SET message_count = (
+               SELECT COUNT(*) FROM messages WHERE messages.session_ref = sessions.session_ref
+             ),
+             preview = COALESCE(
+               (
+                 SELECT substr(content, 1, 240)
+                 FROM messages
+                 WHERE messages.session_ref = sessions.session_ref
+                 ORDER BY timestamp ASC, message_index ASC, id ASC
+                 LIMIT 1
+               ),
+               preview
+             )
+         WHERE message_count <> (
+           SELECT COUNT(*) FROM messages WHERE messages.session_ref = sessions.session_ref
+         )`,
       ),
       selectSessionMessages: db.prepare(
         `SELECT id, timestamp, role, content, message_index, source_pointer
