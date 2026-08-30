@@ -23,7 +23,7 @@ Do not rely on this block for a generated summary; raw local transcripts are aut
 - xtctx-handoff: `.xtctx/skills/xtctx-handoff/SKILL.md`
 
 ## MCP
-- Command: `npx -y xtctx`
+- Command: `node ./dist/src/cli/index.js`
 - Transport: stdio
 
 ## Notes

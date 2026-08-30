@@ -6,6 +6,7 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { removeMcpServerConfigs } from "./mcp-config.js";
 import { BUILT_IN_SKILL_ID, removeSyncedSkillsForTools } from "./skills.js";
 import { SUPPORTED_TOOLS, getToolDefinition, type ToolId } from "../tools/sources.js";
+import { CLAUDE_HOOK_MARKER } from "./setup.js";
 
 const TOOL_ALIASES: Record<string, ToolId> = {
   claude: "claude-code",
@@ -513,7 +514,7 @@ async function removeClaudeHookFromSettings(
         (hook) =>
           !isRecord(hook) ||
           typeof hook.command !== "string" ||
-          !hook.command.includes("xtctx --hook session-start"),
+          !hook.command.includes(CLAUDE_HOOK_MARKER),
       );
       return hooks.length === group.hooks.length ? group : { ...group, hooks };
     })
@@ -565,7 +566,7 @@ async function removeClaudeHook(hooksPath: string, projectRoot: string): Promise
   const nextSessionStart = sessionStart.filter(
     (entry) => !isRecord(entry) ||
       typeof entry.command !== "string" ||
-      !entry.command.includes("xtctx --hook session-start"),
+      !entry.command.includes(CLAUDE_HOOK_MARKER),
   );
 
   if (nextSessionStart.length === sessionStart.length) {
