@@ -134,28 +134,28 @@ export const site: SiteData = {
     badge: 'Local transcript retrieval for AI coding tools',
     heading: 'Keep project context portable across coding tools.',
     subhead:
-      'Move between supported coding agents without starting over. xtctx writes local MCP configs and managed instructions so the next agent can retrieve recent context through MCP.',
-    proof: ['Setup writes local config', 'Raw transcripts stay local', 'Five MCP tools'],
-    quickInstall: 'npx -y xtctx setup',
+      'Move between supported coding agents without starting over. xtctx indexes the transcript files your tools already write and serves them over MCP, so the next agent can pick up recent context. Install the plugin and retrieval works — no project setup required.',
+    proof: ['No project setup required', 'Raw transcripts stay local', 'Five MCP tools'],
+    quickInstall: 'claude plugin marketplace add fstubner/xtctx && claude plugin install xtctx@xtctx',
     installLinkLabel: 'Get started',
     sourceUrl: REPO_URL,
   },
 
   copy: {
     workflow: {
-      heading: 'What happens after setup',
+      heading: 'How a handoff travels',
       leadHtml:
-        'xtctx is not a dashboard or memory layer. It is project-local wiring plus MCP retrieval against transcript files your tools already write.',
+        'xtctx is not a dashboard or memory layer. It is MCP retrieval against transcript files your tools already write, with optional project wiring that delivers the handoff without the agent asking.',
     },
     surfaces: {
-      heading: 'What xtctx writes',
+      heading: 'What setup writes',
       leadHtml:
-        'Setup writes config, managed instructions, selected skill targets, and a rebuildable SQLite cache. Raw transcript files remain the source of truth.',
+        'The plugin writes nothing into your project. Running setup adds config, managed instructions, selected skill targets, and a rebuildable SQLite cache. Raw transcript files remain the source of truth.',
     },
     install: {
-      heading: 'Run setup, then status',
+      heading: 'Install, then check',
       leadHtml:
-        'Start with setup in the repo. Use status to check configured tools, transcript freshness, selected skills, and drift.',
+        'The plugin gets you the MCP tools in every project. Add setup where you want the handoff delivered automatically, and use status to check what is wired.',
     },
     faq: {
       heading: 'Questions before using it in a repo',
@@ -166,15 +166,15 @@ export const site: SiteData = {
   workflow: [
     {
       label: '01',
-      title: 'Run setup',
+      title: 'Install xtctx',
       body:
-        'xtctx writes project-level MCP config and managed instruction blocks. Antigravity MCP is always configured. Copilot CLI still requires --global-mcp.',
+        'The plugin registers the MCP server and the handoff skill and writes nothing into your project. Run setup instead, or as well, to add managed instruction blocks and per-tool MCP config. Copilot CLI still requires --global-mcp.',
     },
     {
       label: '02',
       title: 'Open another tool',
       body:
-        'The tool reads the managed instructions and can start xtctx over stdio as an MCP server.',
+        'The tool starts xtctx over stdio as an MCP server. With setup run, it also reads the managed instructions and receives the handoff without asking for it.',
     },
     {
       label: '03',
@@ -241,10 +241,16 @@ export const site: SiteData = {
   install: {
     entries: [
       {
-        label: 'Set up this repo',
+        label: 'Install the plugin',
+        command: 'claude plugin marketplace add fstubner/xtctx && claude plugin install xtctx@xtctx',
+        hint:
+          'Registers the MCP server and the handoff skill, and writes nothing into your project. Retrieval works straight away — the tools resolve the project from the working directory. Codex, Copilot, Cursor and Antigravity install from the same marketplace; see the README for their commands.',
+      },
+      {
+        label: 'Add project wiring',
         command: 'npx -y xtctx setup',
         hint:
-        'Writes project-level MCP config, syncs selected skills, always configures Antigravity MCP, and repairs managed instruction blocks. Use --global-mcp only for Copilot CLI.',
+          'Optional upgrade. Writes managed instruction blocks so the next agent receives the handoff without calling a tool, plus the SessionStart hook, per-tool MCP config, and skill sync. The only route for opencode.',
       },
       {
         label: 'Check what is wired',
@@ -271,7 +277,11 @@ export const site: SiteData = {
   faq: [
     {
       q: 'What problem does xtctx solve?',
-      a: 'It lets a configured AI coding tool read recent local transcript sessions from the current repo through MCP.',
+      a: 'It lets an AI coding tool read recent local transcript sessions from the current repo through MCP, including sessions from a different tool, so you can switch without re-explaining the work.',
+    },
+    {
+      q: 'Do I need to run setup in every project?',
+      a: 'No. With the plugin installed, the MCP tools resolve the project from the working directory, so retrieval works in any project with no setup at all. What setup adds is delivery: managed instruction blocks put the handoff in front of the next agent whether it calls a tool or not. Plugin first, setup where you want it automatic.',
     },
     {
       q: 'Does xtctx run a background service?',
@@ -279,7 +289,7 @@ export const site: SiteData = {
     },
     {
       q: 'Does xtctx sync skills?',
-      a: 'Yes. Setup writes the built-in xtctx-handoff skill, inventories compatible skills from connected tools, and syncs selected project skills to supported targets.',
+      a: 'The plugin ships the built-in xtctx-handoff skill. Setup additionally inventories compatible skills from connected tools and syncs selected project skills to each supported target in that tool’s native format.',
     },
     {
       q: 'Does it summarize sessions?',

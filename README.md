@@ -10,17 +10,48 @@
 
 xtctx is local cross-tool handoff for AI coding agents.
 
-It configures your project so the next tool you open can find recent local
-transcript sessions and retrieve the raw messages through MCP. It does not run
-a daemon, host an API, generate summaries, or maintain durable project memory.
+It indexes the transcript files your local coding agents already write, and
+exposes them over MCP so the next tool you open can find recent sessions and
+read the raw messages. It does not run a daemon, host an API, generate
+summaries, or maintain durable project memory.
+
+Retrieval needs no per-project setup: point any tool at the MCP server and it
+resolves the project from the working directory. `xtctx setup` is the upgrade
+that puts the context in front of the agent whether it asks or not.
 
 The intended user is a solo developer who switches between local coding agents
 and wants the next agent to recover recent context without a pasted recap.
 
 ## Install
 
-Two routes. `setup` is the supported one and covers every tool; the plugin is
-newer and covers the six that have a plugin format.
+Two routes, and they answer different questions.
+
+The **plugin** is the smaller commitment: it registers the MCP server and the
+handoff skill, and writes nothing into your project. Retrieval works
+immediately — the tools resolve the project from the working directory, so an
+unconfigured project still returns its sessions and their raw messages. What
+you are relying on is the agent choosing to call a tool, which the skill
+prompts it to do.
+
+**`setup`** writes managed blocks into the instruction files each tool already
+reads (`CLAUDE.md`, `AGENTS.md`, Cursor rules, and so on), so the next agent
+receives the handoff without deciding to ask for it. It also installs the
+Claude Code SessionStart hook, wires MCP per tool, and translates the skill
+into each tool's native format.
+
+| | Plugin | `setup` |
+|---|---|---|
+| MCP tools | yes | yes |
+| Handoff skill | yes | yes |
+| Retrieval in an unconfigured project | yes | yes |
+| Context without the agent asking | no | yes |
+| SessionStart hook (Claude Code) | no | yes |
+| Writes into your project | no | yes |
+| Tool coverage | six with a plugin format | every supported tool |
+
+Start with the plugin. Add `setup` in projects where you want the handoff to
+be automatic rather than opt-in; the two compose, and running both is the
+normal end state.
 
 ```bash
 npx -y xtctx setup
@@ -56,9 +87,16 @@ lives in the Chat view, behind the `chat.plugins.enabled` setting. opencode
 has no plugin format yet, so `setup` is the only route there.
 
 Either route registers the same MCP server (`npx -y xtctx`) and the same
-handoff skill. The plugin does not write project config, so `xtctx status`
-still reports the project as unconfigured — run `setup` as well if you want
-managed instruction blocks and hooks.
+handoff skill. Because the plugin writes no project config, `xtctx status`
+reports a plugin-only project as `Config missing (run xtctx setup)` — that
+line describes the managed blocks and hooks, not the MCP tools, which work
+regardless.
+
+One thing to expect on the plugin route: the first call in a project with a
+large transcript history builds the index from scratch and can run for
+minutes. Calls return within a refresh budget with whatever has landed so
+far, and the scan keeps going in the background, so the counts fill in over
+the first few calls rather than all at once.
 
 ## Workflow
 
