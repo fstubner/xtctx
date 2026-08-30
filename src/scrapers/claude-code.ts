@@ -6,6 +6,7 @@ import type { ChunkMetadata, ClaudeCodeChunk } from "../types/scraper.js";
 import { AbstractScraper, estimateTokens } from "./base.js";
 import { encodePathForToolDirectory, pathMatchesProject } from "../utils/project-scope.js";
 import { recordDrift, withDriftReport } from "./drift-log.js";
+import { MAX_LINE_BYTES, isWithinLineLimit } from "./limits.js";
 
 const SCRAPER_NAME = "claude-code";
 
@@ -186,6 +187,18 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
     for await (const line of reader) {
       lineNo++;
       if (!line.trim()) {
+        continue;
+      }
+
+      // Transcript files are written by another tool, so their line lengths
+      // are not ours to trust; parsing an unbounded one costs the long-lived
+      // MCP server that much resident memory.
+      if (!isWithinLineLimit(line)) {
+        recordDrift(
+          SCRAPER_NAME,
+          `${filePath}:${lineNo}`,
+          `line exceeds ${MAX_LINE_BYTES} characters; skipped`,
+        );
         continue;
       }
 

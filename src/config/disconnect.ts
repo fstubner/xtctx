@@ -102,7 +102,7 @@ export async function disconnectProject(options: DisconnectOptions = {}): Promis
     // config.yaml is rewritten with the tools disabled, never deleted — it is
     // the record that xtctx was disconnected.
     action: "updated",
-    changed: await disableToolsInProjectConfig(configPath, tools),
+    changed: await disableToolsInProjectConfig(configPath, tools, projectRoot),
   });
 
   const mcpSummary = await removeMcpServerConfigs(projectRoot, "xtctx", tools, options.homeDir ? { homeDir: options.homeDir } : {});
@@ -120,7 +120,7 @@ export async function disconnectProject(options: DisconnectOptions = {}): Promis
     writes.push({
       path,
       kind: "memory",
-      changed: await removeManagedBlocksFromFile(path),
+      changed: await removeManagedBlocksFromFile(path, projectRoot),
     });
   }
 
@@ -167,13 +167,13 @@ export async function disconnectProject(options: DisconnectOptions = {}): Promis
     writes.push({
       path: settingsPath,
       kind: "hook:claude-code",
-      changed: await removeClaudeHookFromSettings(settingsPath),
+      changed: await removeClaudeHookFromSettings(settingsPath, projectRoot),
     });
     const legacyHooksPath = join(projectRoot, ".claude", "hooks.json");
     writes.push({
       path: legacyHooksPath,
       kind: "hook:claude-code",
-      changed: await removeClaudeHook(legacyHooksPath),
+      changed: await removeClaudeHook(legacyHooksPath, projectRoot),
       note: "legacy hook file",
     });
   }
@@ -243,7 +243,11 @@ function supportedToolList(): string {
   return SUPPORTED_TOOLS.map((tool) => tool.id).join(", ");
 }
 
-async function disableToolsInProjectConfig(configPath: string, tools: ToolId[]): Promise<boolean> {
+async function disableToolsInProjectConfig(
+  configPath: string,
+  tools: ToolId[],
+  projectRoot: string,
+): Promise<boolean> {
   const raw = await readUtf8IfExists(configPath);
   if (raw === null) {
     return false;
@@ -268,7 +272,7 @@ async function disableToolsInProjectConfig(configPath: string, tools: ToolId[]):
   }
 
   config.tools = currentTools;
-  await writeFileAtomic(configPath, stringifyYaml(config));
+  await writeFileAtomic(configPath, stringifyYaml(config), { containWithin: projectRoot });
   return true;
 }
 
@@ -359,7 +363,7 @@ function plannedSkillWrites(projectRoot: string, tool: ToolId): PlannedDisconnec
   return writes;
 }
 
-async function removeManagedBlocksFromFile(filePath: string): Promise<boolean> {
+async function removeManagedBlocksFromFile(filePath: string, projectRoot: string): Promise<boolean> {
   const existing = await readUtf8IfExists(filePath);
   if (existing === null) {
     return false;
@@ -385,7 +389,9 @@ async function removeManagedBlocksFromFile(filePath: string): Promise<boolean> {
   // Put the author's line endings back: removal must not reformat the file.
   // No trailing newline is appended — whatever the file ended with is already
   // in `repaired`, and adding one is an edit to content xtctx does not own.
-  await writeFileAtomic(filePath, matchLineEndings(repaired, existing));
+  await writeFileAtomic(filePath, matchLineEndings(repaired, existing), {
+    containWithin: projectRoot,
+  });
   return true;
 }
 
@@ -477,7 +483,10 @@ function isOnlyFrontmatter(content: string): boolean {
 }
 
 /** Strip xtctx SessionStart matcher groups from .claude/settings.json. */
-async function removeClaudeHookFromSettings(settingsPath: string): Promise<boolean> {
+async function removeClaudeHookFromSettings(
+  settingsPath: string,
+  projectRoot: string,
+): Promise<boolean> {
   const raw = await readUtf8IfExists(settingsPath);
   if (raw === null) {
     return false;
@@ -529,11 +538,13 @@ async function removeClaudeHookFromSettings(settingsPath: string): Promise<boole
     return true;
   }
 
-  await writeFileAtomic(settingsPath, JSON.stringify(parsed, null, 2) + "\n");
+  await writeFileAtomic(settingsPath, JSON.stringify(parsed, null, 2) + "\n", {
+    containWithin: projectRoot,
+  });
   return true;
 }
 
-async function removeClaudeHook(hooksPath: string): Promise<boolean> {
+async function removeClaudeHook(hooksPath: string, projectRoot: string): Promise<boolean> {
   const raw = await readUtf8IfExists(hooksPath);
   if (raw === null) {
     return false;
@@ -562,7 +573,9 @@ async function removeClaudeHook(hooksPath: string): Promise<boolean> {
   }
 
   parsed.hooks.SessionStart = nextSessionStart;
-  await writeFileAtomic(hooksPath, JSON.stringify(parsed, null, 2) + "\n");
+  await writeFileAtomic(hooksPath, JSON.stringify(parsed, null, 2) + "\n", {
+    containWithin: projectRoot,
+  });
   return true;
 }
 

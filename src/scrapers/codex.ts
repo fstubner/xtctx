@@ -7,6 +7,7 @@ import type { CodexChunk } from "../types/scraper.js";
 import { AbstractScraper, estimateTokens, toDate } from "./base.js";
 import { pathMatchesProject } from "../utils/project-scope.js";
 import { recordDrift, withDriftReport } from "./drift-log.js";
+import { MAX_LINE_BYTES, isWithinLineLimit } from "./limits.js";
 
 const SCRAPER_NAME = "codex";
 
@@ -143,6 +144,13 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
 
       for await (const line of reader) {
         if (!line.trim()) {
+          continue;
+        }
+
+        // See limits.ts: line length here is the writing tool's choice, not
+        // ours, and an unbounded line is buffered whole before parsing.
+        if (!isWithinLineLimit(line)) {
+          warnDrift(filePath, `JSONL line exceeds ${MAX_LINE_BYTES} chars; skipped`, 0);
           continue;
         }
 

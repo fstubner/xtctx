@@ -17,6 +17,27 @@ export function normalizeNewlines(input: string): string {
   return input.replace(/\r\n/g, "\n");
 }
 
+/**
+ * Strip marker text out of a value being interpolated into a managed block.
+ *
+ * Removal keys purely on the literal marker strings, so a marker that appears
+ * *inside* a block ends it early: the rest of the block is then left in the
+ * file as debris, glued to whatever user content follows, along with a stale
+ * end marker that poisons every later run.
+ *
+ * The reachable route is the project path — `Project root: ${projectRoot}` is
+ * interpolated verbatim, and a directory name containing the marker string is
+ * legal on POSIX. Neutering the value is enough, and is preferable to throwing:
+ * a path xtctx cannot render is still a project the user wants set up.
+ *
+ * What this does NOT defend is a user hand-writing both markers into their own
+ * file; that is indistinguishable from a real block without a per-block nonce,
+ * which would change the format and orphan every block already written.
+ */
+export function stripMarkers(value: string): string {
+  return value.split(MARKERS.begin).join("").split(MARKERS.end).join("");
+}
+
 export function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

@@ -91,7 +91,7 @@ export async function syncProjectSkills(options: SkillSyncOptions): Promise<Skil
     writes.push({
       path: sourcePath,
       kind: `skill-source:${skillId}`,
-      changed: await writeIfChanged(sourcePath, content),
+      changed: await writeIfChanged(sourcePath, content, projectRoot),
     });
   }
 
@@ -114,6 +114,9 @@ export async function syncProjectSkills(options: SkillSyncOptions): Promise<Skil
         skill,
         mode: capability.mode,
         targetPath,
+        // Every skill target path is built from `projectRoot`, so that is the
+        // root the write must stay inside.
+        containWithin: projectRoot,
       });
       writes.push({ path: write.path, kind: `skill:${tool.id}:${skill.id}`, changed: write.changed });
     }
@@ -289,6 +292,7 @@ async function syncSkillToTarget(input: {
   skill: SkillSelection;
   mode: SkillSyncMode;
   targetPath: string;
+  containWithin: string;
 }): Promise<{ path: string; changed: boolean }> {
   const content = await readFile(input.skill.path, "utf-8");
   const parsed = parseSkillContent(input.skill.id, content, input.skill.path, "xtctx");
@@ -300,7 +304,7 @@ async function syncSkillToTarget(input: {
   });
   return {
     path: input.targetPath,
-    changed: await writeIfChanged(input.targetPath, rendered),
+    changed: await writeIfChanged(input.targetPath, rendered, input.containWithin),
   };
 }
 
@@ -509,14 +513,23 @@ function hashContent(content: string): string {
   return `${HASH_PREFIX}${createHash("sha256").update(normalizeNewlines(content).trimEnd() + "\n").digest("hex")}`;
 }
 
-async function writeIfChanged(filePath: string, content: string): Promise<boolean> {
+/**
+ * `containWithin` is passed by every caller rather than defaulted: every skill
+ * write here is project-scoped, but making the root explicit is what stops a
+ * later home-scoped caller from silently inheriting the wrong one.
+ */
+async function writeIfChanged(
+  filePath: string,
+  content: string,
+  containWithin: string,
+): Promise<boolean> {
   const normalized = normalizeNewlines(content);
   const existing = await readUtf8IfExists(filePath);
   if (existing !== null && normalizeNewlines(existing) === normalized) {
     return false;
   }
 
-  await writeFileAtomic(filePath, normalized);
+  await writeFileAtomic(filePath, normalized, { containWithin });
   return true;
 }
 

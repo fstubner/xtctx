@@ -18,6 +18,12 @@ const ACTIVE_FRAME_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 /** Keep the preview to a line: this lands in the agent's boot context. */
 const PREVIEW_CHARS = 200;
+/**
+ * A real branch name is far shorter than this. The cap is here because the
+ * value is transcript-supplied rather than read from git, so its length is
+ * the attacker's choice, not the repository's.
+ */
+const BRANCH_CHARS = 120;
 
 export async function runHook(options: HookOptions = {}): Promise<void> {
   if (options.event && options.event !== "session-start") {
@@ -76,8 +82,15 @@ function isActive(session: SessionSummary): boolean {
  * authority, and nothing here is derived from more than one field.
  */
 function activeFrame(session: SessionSummary): string[] {
+  // The branch is not read from the local repo — the scrapers lift it out of
+  // the transcript (`obj.gitBranch`, `git.branch`, `context.branch`) and the
+  // helpers around those reads only type-check the value. So it is untrusted
+  // text on exactly the same footing as the preview below, and it lands in
+  // the next agent's context window: a newline in it can forge a heading.
   const branch = session.git_branch
-    ? ` on ${session.git_branch}${session.git_commit ? ` @ ${session.git_commit.slice(0, 8)}` : ""}`
+    ? ` on ${inlineSafe(session.git_branch).slice(0, BRANCH_CHARS)}${
+        session.git_commit ? ` @ ${inlineSafe(session.git_commit).slice(0, 8)}` : ""
+      }`
     : "";
 
   const lines = [
