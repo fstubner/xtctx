@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.21.5](https://github.com/fstubner/xtctx/compare/xtctx-v0.21.4...xtctx-v0.21.5) (2026-08-30)
+
+
+### Bug Fixes
+
+* **security:** close prototype pollution, write escape, and injection paths ([#283](https://github.com/fstubner/xtctx/issues/283)) ([fdcffc7](https://github.com/fstubner/xtctx/commit/fdcffc704baf3f3a73854c969c619084618f4891))
+
 ## [0.21.4](https://github.com/fstubner/xtctx/compare/xtctx-v0.21.3...xtctx-v0.21.4) (2026-08-30)
 
 
