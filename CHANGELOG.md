@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.21.7](https://github.com/fstubner/xtctx/compare/xtctx-v0.21.6...xtctx-v0.21.7) (2026-08-30)
+
+
+### Documentation
+
+* present the plugin as the entry point and setup as the upgrade ([#287](https://github.com/fstubner/xtctx/issues/287)) ([4cb456b](https://github.com/fstubner/xtctx/commit/4cb456bb16b95c773297697466d64fed3adfa188))
+
 ## [0.21.6](https://github.com/fstubner/xtctx/compare/xtctx-v0.21.5...xtctx-v0.21.6) (2026-08-30)
 
 
