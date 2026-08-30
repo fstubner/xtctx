@@ -24,6 +24,11 @@ function journal(path: Array<string | number>, value: unknown): string {
   ].join("\n");
 }
 
+/** Drain the generator — replay only happens as it is consumed. */
+function replay(raw: string): unknown[] {
+  return [...parseChatSessionFile(raw, "s.jsonl", "fixture://copilot")];
+}
+
 describe("copilot journal replay: prototype pollution", () => {
   afterEach(() => {
     // Undo anything a regression leaks, so one failure cannot cascade into
@@ -36,7 +41,7 @@ describe("copilot journal replay: prototype pollution", () => {
   it("does not let a __proto__ key path reach Object.prototype", () => {
     const raw = journal(["__proto__", "xtctxPwned"], "yes");
 
-    [...parseChatSessionFile(raw, "s.jsonl", "fixture://copilot")];
+    replay(raw);
 
     expect(({} as Record<string, unknown>).xtctxPwned).toBeUndefined();
   });
@@ -44,7 +49,7 @@ describe("copilot journal replay: prototype pollution", () => {
   it("does not let a constructor.prototype key path reach Object.prototype", () => {
     const raw = journal(["constructor", "prototype", "xtctxPwned"], "yes");
 
-    [...parseChatSessionFile(raw, "s.jsonl", "fixture://copilot")];
+    replay(raw);
 
     expect(({} as Record<string, unknown>).xtctxPwned).toBeUndefined();
   });
@@ -55,7 +60,7 @@ describe("copilot journal replay: prototype pollution", () => {
     // xtctx passes never owns these names.
     const raw = journal(["__proto__", "nativeBinding"], "/tmp/evil.node");
 
-    [...parseChatSessionFile(raw, "s.jsonl", "fixture://copilot")];
+    replay(raw);
 
     expect("nativeBinding" in {}).toBe(false);
   });
@@ -65,7 +70,7 @@ describe("copilot journal replay: prototype pollution", () => {
     // normal field has to keep working, or replay is broken rather than safe.
     const raw = journal(["customTitle"], "renamed session");
 
-    const [session] = [...parseChatSessionFile(raw, "s.jsonl", "fixture://copilot")];
+    const [session] = replay(raw);
 
     expect((session as Record<string, unknown>).customTitle).toBe("renamed session");
   });
