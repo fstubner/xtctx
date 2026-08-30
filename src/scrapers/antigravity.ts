@@ -225,6 +225,8 @@ export class AntigravityScraper extends AbstractScraper<AntigravityChunk> {
 
     const brainDir = join(this.antigravityRoot, "brain");
     const sessionDirs = await listDirectories(brainDir);
+    let fallbackChunks = 0;
+    const fallbackSessions = new Set<string>();
 
     for (const sessionDir of sessionDirs) {
       const sessionId = basename(sessionDir);
@@ -240,6 +242,8 @@ export class AntigravityScraper extends AbstractScraper<AntigravityChunk> {
           continue;
         }
 
+        fallbackChunks += 1;
+        fallbackSessions.add(artifact.sessionId);
         yield this.parseRaw({
           sessionId: artifact.sessionId,
           timestamp: artifact.timestamp,
@@ -252,6 +256,30 @@ export class AntigravityScraper extends AbstractScraper<AntigravityChunk> {
           sourcePath: artifact.sourcePath,
         });
       }
+    }
+
+    // Serving brain artifacts instead of the language server is not a quiet
+    // equivalent. Measured against the real store on a machine where the
+    // server was unreachable: 45 sessions produced 99 chunks, 27 of them a
+    // single chunk, and every one was labelled `assistant` because artifacts
+    // carry no role. Not one user turn survived — which for a handoff tool
+    // loses the half that matters, the instructions rather than the replies.
+    //
+    // Nothing said so. `degradation` is only set when the listing throws or no
+    // server is found, so a listing that returns zero conversations fell
+    // through to here reporting success. This is the "warn, never silently
+    // drop" rule applied to the case that was slipping past it.
+    //
+    // Only when the fallback actually served something: a machine with no
+    // Antigravity history has nothing to warn about.
+    if (fallbackChunks > 0) {
+      recordDrift(
+        SCRAPER_NAME,
+        `antigravity-brain:${this.antigravityRoot}`,
+        `language server returned nothing; served ${fallbackChunks} brain artifact(s) across ` +
+          `${fallbackSessions.size} session(s) instead. Artifacts carry no role, so user turns ` +
+          `are absent and every chunk reads as assistant.`,
+      );
     }
 
     failIfDegraded(degradation);

@@ -5,6 +5,74 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.21.3](https://github.com/fstubner/xtctx/compare/xtctx-v0.21.2...xtctx-v0.21.3) (2026-08-30)
+
+
+### Bug Fixes
+
+* **landing:** source hero version from package.json ([#280](https://github.com/fstubner/xtctx/issues/280)) ([7ff3f04](https://github.com/fstubner/xtctx/commit/7ff3f043cb5d34c93725f888151f2f4001dce837))
+
+## [0.21.2](https://github.com/fstubner/xtctx/compare/xtctx-v0.21.1...xtctx-v0.21.2) (2026-08-30)
+
+
+### Performance
+
+* go back to MiniLM, which indexes three times faster ([#278](https://github.com/fstubner/xtctx/issues/278)) ([b57f3a8](https://github.com/fstubner/xtctx/commit/b57f3a82981176672c1637a6fc61012c8ade97ee))
+
+## [0.21.1](https://github.com/fstubner/xtctx/compare/xtctx-v0.21.0...xtctx-v0.21.1) (2026-08-29)
+
+
+### Performance
+
+* cap how many segments one window contributes to its vector ([#276](https://github.com/fstubner/xtctx/issues/276)) ([7e2693b](https://github.com/fstubner/xtctx/commit/7e2693b0af761523d52e4a7ee2c88e61beb215e5))
+
+## [0.21.0](https://github.com/fstubner/xtctx/compare/xtctx-v0.20.5...xtctx-v0.21.0) (2026-08-29)
+
+
+### Features
+
+* report how long indexing takes and how much is left ([#275](https://github.com/fstubner/xtctx/issues/275)) ([ff26c53](https://github.com/fstubner/xtctx/commit/ff26c53fb434436dd32745a4840d6b3dfad8e0a5))
+
+
+### Documentation
+
+* describe how a handoff flows through the parts ([#271](https://github.com/fstubner/xtctx/issues/271)) ([9c1e3c1](https://github.com/fstubner/xtctx/commit/9c1e3c12d5de4165477ffad456e26dcd3283198d))
+
+## [0.20.5](https://github.com/fstubner/xtctx/compare/xtctx-v0.20.4...xtctx-v0.20.5) (2026-08-29)
+
+
+### Bug Fixes
+
+* stop hybrid search hiding everything not yet vectorized ([#272](https://github.com/fstubner/xtctx/issues/272)) ([c7bebed](https://github.com/fstubner/xtctx/commit/c7bebed4648b1efc3e8900718662e231314521a6))
+
+## [0.20.4](https://github.com/fstubner/xtctx/compare/xtctx-v0.20.3...xtctx-v0.20.4) (2026-08-29)
+
+
+### Bug Fixes
+
+* report when Antigravity serves brain artifacts instead of transcripts ([#269](https://github.com/fstubner/xtctx/issues/269)) ([8d9cf60](https://github.com/fstubner/xtctx/commit/8d9cf6030eb8f037dc5bc2bc9f87a44837fbd281))
+
+## [0.20.3](https://github.com/fstubner/xtctx/compare/xtctx-v0.20.2...xtctx-v0.20.3) (2026-08-29)
+
+
+### Dependencies
+
+* bump actions/github-script from 7.1.0 to 9.0.0 ([#183](https://github.com/fstubner/xtctx/issues/183)) ([d39cc50](https://github.com/fstubner/xtctx/commit/d39cc50f709783c6e48089f746c3663cd6ea14a4))
+
+## [0.20.2](https://github.com/fstubner/xtctx/compare/xtctx-v0.20.1...xtctx-v0.20.2) (2026-08-29)
+
+
+### Dependencies
+
+* bump actions/upload-pages-artifact from 3.0.1 to 5.0.0 ([#187](https://github.com/fstubner/xtctx/issues/187)) ([f5b6fb4](https://github.com/fstubner/xtctx/commit/f5b6fb4dd7a1026c1a24912df33df4931d5395e7))
+
+## [0.20.1](https://github.com/fstubner/xtctx/compare/xtctx-v0.20.0...xtctx-v0.20.1) (2026-08-29)
+
+
+### Dependencies
+
+* bump peter-evans/create-issue-from-file from 5.0.1 to 6.0.0 ([#185](https://github.com/fstubner/xtctx/issues/185)) ([9cd6d67](https://github.com/fstubner/xtctx/commit/9cd6d67c5c4410379b9516b8447998934d6b2116))
+
 ## [0.20.0](https://github.com/fstubner/xtctx/compare/xtctx-v0.19.0...xtctx-v0.20.0) (2026-08-29)
 
 

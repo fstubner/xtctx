@@ -4,6 +4,7 @@ import { inspectManagedFile, pathExists } from "../config/setup.js";
 import { inspectMcpWiring } from "../config/mcp-config.js";
 import { inspectSkillStatus } from "../config/skills.js";
 import { createProjectServices, type ProjectServices } from "../runtime/services.js";
+import { estimateVectorBacklog, formatDuration } from "../utils/duration.js";
 import { readDriftLog, type DriftLogFile } from "../scrapers/drift-log.js";
 import { SUPPORTED_TOOLS } from "../tools/sources.js";
 import { readXtctxPackage } from "../utils/package-info.js";
@@ -70,7 +71,10 @@ export async function renderStatusBlock(
   }
   lines.push(`Index    ${services.dbPath}`);
   lines.push(`MCP      npx -y xtctx`);
-  lines.push(`Scan     ${status.last_scan_at ?? "never"}`);
+  const scanTook = formatDuration(status.last_scan_ms);
+  lines.push(
+    `Scan     ${status.last_scan_at ?? "never"}${scanTook ? ` (took ${scanTook})` : ""}`,
+  );
   if (status.embedding_error) {
     lines.push(`Search   semantic unavailable (keyword only): ${status.embedding_error}`);
   }
@@ -78,6 +82,20 @@ export async function renderStatusBlock(
     `Data     ${status.sessions} sessions, ${status.messages} messages, ` +
       `${status.retrieval_units} retrieval windows, ${status.vectorized_units} vectorized`,
   );
+  // A backlog is only meaningful as a duration: "1762 windows left" says
+  // nothing until it says "about 30 seconds".
+  const backlog = estimateVectorBacklog(
+    status.retrieval_units,
+    status.vectorized_units,
+    status.vector_ms_per_unit,
+  );
+  if (backlog.remaining > 0) {
+    const rate = status.vector_ms_per_unit ? `${status.vector_ms_per_unit}ms/window` : "rate unknown";
+    lines.push(
+      `Embed    ${backlog.remaining} windows outstanding, ${rate}` +
+        `${backlog.eta ? `, about ${backlog.eta} of embedding left` : ""}`,
+    );
+  }
   lines.push("");
   lines.push("Tools:");
 

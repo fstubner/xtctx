@@ -1,4 +1,5 @@
 import type { SessionService } from "../../handoff/types.js";
+import { estimateVectorBacklog, formatDuration } from "../../utils/duration.js";
 import { sanitizeErrorMessage } from "../../utils/errors.js";
 
 interface ContinuityStatusParams {
@@ -37,11 +38,25 @@ export function createContinuityStatusHandler(service: SessionService) {
       "",
       `- Project root: ${status.project_root}`,
       `- Index: ${status.db_path}`,
-      `- Last scan: ${status.last_scan_at ?? "never"}`,
+      `- Last scan: ${status.last_scan_at ?? "never"}${formatDuration(status.last_scan_ms) ? ` (took ${formatDuration(status.last_scan_ms)})` : ""}`,
       `- Sessions: ${status.sessions}`,
       `- Messages: ${status.messages}`,
       `- Retrieval windows: ${status.retrieval_units}`,
       `- Vectorized windows: ${status.vectorized_units}`,
+      // The backlog as a duration, so an agent can tell "semantic search is
+      // still warming up" from "semantic search is ready".
+      ...(() => {
+        const backlog = estimateVectorBacklog(
+          status.retrieval_units,
+          status.vectorized_units,
+          status.vector_ms_per_unit,
+        );
+        if (backlog.remaining === 0) return [];
+        return [
+          `- Embedding outstanding: ${backlog.remaining} windows` +
+            `${backlog.eta ? ` (about ${backlog.eta})` : ""}`,
+        ];
+      })(),
       `- Vector model: ${status.vector_model}`,
       ...(status.embedding_error
         ? [`- Semantic search unavailable (keyword only): ${status.embedding_error}`]

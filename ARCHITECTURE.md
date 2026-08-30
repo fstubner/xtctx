@@ -2,8 +2,8 @@
 
 One npm package, no services. Everything runs in the invoking process on the
 developer's machine. `docs/architecture.md` describes module internals; this
-document fixes the parts, the boundaries between them, and what each part is
-allowed to trust.
+document fixes the parts, how a handoff actually flows through them, the
+boundaries between them, and what each part is allowed to trust.
 
 ## Parts
 
@@ -39,6 +39,65 @@ allowed to trust.
   synced skills, the Claude Code hook in `.claude/settings.json`).
 - **Landing site** (`landing/`) — static Astro site on GitHub Pages;
   no runtime relationship to the package.
+
+## Lifecycle
+
+The problem: you work in one tool, switch to another, and the second has no
+idea what the first just did. The parts above exist to let the second read the
+first's transcripts.
+
+**Setup, once per project.** `xtctx setup` registers the MCP server in each
+installed tool's own config format — seven of them, and no two alike
+(`.mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json` under a `servers` key
+rather than `mcpServers`, TOML tables for Codex, a combined command array for
+opencode, app-level JSON for Antigravity) — then writes managed instruction
+blocks into the memory files those tools read, syncs the handoff skill, and
+installs a startup hook where the tool supports one. Nothing runs afterwards;
+there is no daemon to leave behind.
+
+**Serving a call.** A coding agent spawns `npx -y xtctx` over stdio, gets the
+five read-only tools, and the process exits when the agent is done with it.
+On the first call that needs data, the index refreshes: every scraper reads
+its own tool's store, yields only chunks attributable to this project, and the
+results land in `.xtctx/state/xtctx.db`.
+
+**How a conversation becomes searchable.** Messages are grouped into
+overlapping retrieval windows — eight messages, stride four — so a hit carries
+the turns around it rather than one orphaned line. Each window is indexed
+twice: into FTS5 for keyword search, and as one embedding vector.
+
+**Ranking.** `keyword` mode scores 0.75 keyword, 0.15 recency, 0.1 continuity.
+`hybrid`, the default, blends 0.6 semantic with 0.4 keyword. Keyword position
+comes from bm25 ordering but is rescored as a linear decay, because bm25
+favours short documents and a one-line mention was outranking the paragraph
+that decided something. Semantic matches are gated twice: a per-window floor
+(0.15) and a per-query confidence floor (0.4). When nothing clears the second
+one, semantic results are dropped wholesale and only keyword hits remain —
+whether a query found anything is a property of the query, not of each window,
+and no answer beats a confident wrong one.
+
+**Hybrid is never worse than keyword**, at any level of vector coverage, and
+the eval gates that. It has to be stated because it was silently false: the
+vector query inner-joined the embeddings table, so a keyword hit on a window
+not yet embedded was absent rather than ranked lower, and hybrid's recall
+tracked the vectorized fraction — half embedded, half the recall; none
+embedded, nothing at all. A partly-embedded index is the ordinary state of a
+fresh one, so the default mode was reaching a fraction of what the cheaper
+mode reached. Windows without a vector are now candidates scored on the
+evidence they have, and one with no vector is treated as unknown similarity
+rather than none, because scoring it zero penalises it for its position in a
+queue.
+
+**Bounded, so a tool call always returns.** Scanning gets four seconds,
+vectorizing six, and an indexed view is treated as current for thirty. Work
+left over resumes on the next call. The embedding model loads lazily and only
+for semantic search; `hybrid` deliberately answers from keyword while it is
+still loading, so the first call after a cold start is fast rather than
+blocked.
+
+**What comes back is raw.** Sessions, message text, and pointers — never a
+generated summary. A recap is the lossy artefact this exists to replace, and
+the transcripts remain authoritative.
 
 ## Boundaries
 

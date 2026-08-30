@@ -1,21 +1,47 @@
-export const DEFAULT_EMBEDDING_MODEL = "Xenova/all-mpnet-base-v2";
+/**
+ * The embedding model, chosen on indexing throughput as much as on ranking.
+ *
+ * mpnet-q8 ranks better on the sixty-query eval, each model at its own swept
+ * confidence threshold:
+ *
+ *   MiniLM fp32   mrr 0.598  recall@5 0.850  top1 0.450   at 0.36
+ *   mpnet q8      mrr 0.654  recall@5 0.933  top1 0.483   at 0.40
+ *
+ * It was the default for a day on the strength of that table, which measured
+ * only half the question. What the table left out is what embedding actually
+ * costs, and the figure used at the time — 18ms per embed — came from
+ * benchmarking strings like "warm query number 5". A real segment is 1024
+ * characters, the model's full sequence window, and costs far more.
+ *
+ * Back to back over 291 real segments from this project's index, mpnet first:
+ *
+ *   mpnet q8      ~360ms per segment
+ *   MiniLM fp32   ~116ms per segment
+ *
+ * and MiniLM alone in a fresh process, with the segment cap applied, ~65ms.
+ * The absolute figures move with what else the process has loaded; the ratio
+ * is the durable part, and it favours MiniLM by three times or better.
+ *
+ * Over this project's ~12,000 segments that is tens of minutes of embedding
+ * either way, but roughly three times fewer of them. Vectorizing is budgeted
+ * per call, so the difference is not "slower indexing" in the background — it
+ * is how long a project's semantic search stays partly blind, tool call after
+ * tool call.
+ *
+ * Five queries of recall and two of top-1 on a sixty-query corpus do not buy
+ * fifty extra minutes of that. Measure throughput on real content before
+ * moving this again; a per-embed figure taken on short strings says nothing
+ * about it.
+ */
+export const DEFAULT_EMBEDDING_MODEL = "Xenova/all-MiniLM-L6-v2";
 /**
  * Weight precision to load the model at.
  *
- * `q8` quantizes the weights to 8-bit integers, which for this model is a
- * 110MB download against 416MB for `fp32`. Both were swept against the
- * ranking eval at their own best confidence threshold, since a comparison at
- * a fixed threshold measures the mismatch rather than the model:
- *
- *   q8     mrr 0.654  recall@5 0.933  top1 0.483   at 0.40
- *   fp32   mrr 0.702  recall@5 0.933  top1 0.533   at 0.45
- *
- * fp32 does rank better. It costs four times the download for it, on a tool
- * whose first run already makes an agent wait, and the recall the agent
- * actually reads back is identical — the difference is ordering within a
- * result set that the agent sees all of. Not worth 306MB.
+ * fp32 for MiniLM: the model is 86MB at full precision, so quantizing saves
+ * little and costs accuracy. The q8 tradeoff only mattered for mpnet, where
+ * fp32 was 416MB.
  */
-export const DEFAULT_EMBEDDING_DTYPE = "q8";
+export const DEFAULT_EMBEDDING_DTYPE = "fp32";
 const MAX_SEQ_TOKENS = 256;
 /** ~4 characters per token, the budget splitTextForEmbedding segments to. */
 const MAX_SEQ_CHARS = MAX_SEQ_TOKENS * 4;
@@ -152,6 +178,43 @@ function toFloat32Array(data: Float32Array | Float64Array | number[]): Float32Ar
     return data;
   }
   return Float32Array.from(data);
+}
+
+/**
+ * Most segments any one window contributes to its vector.
+ *
+ * Windows are mean-pooled, so a window split into four hundred segments costs
+ * four hundred embeddings to produce one averaged vector that represents
+ * nothing in particular. Measured over this project's 1,770 windows: the
+ * median is 4 segments and the 95th percentile 17, but the largest is 392 —
+ * a single 400,899-character window.
+ *
+ * Sixteen keeps the whole distribution below the 95th percentile intact and
+ * touches 5.9% of windows, removing about a fifth of the embedding work. It
+ * is a cap on cost, not the main lever: segment *count* was never the
+ * dominant term, segment *cost* is (~360ms each on mpnet against ~116ms on
+ * MiniLM), so this trims the tail rather than solving the total.
+ */
+export const MAX_SEGMENTS_PER_UNIT = 16;
+
+/**
+ * Reduce a window's segments to at most `limit`, spread across its span.
+ *
+ * Evenly sampled rather than truncated: the opening 16KB of a 400KB window is
+ * an arbitrary slice of it, while a spread still reflects how the window
+ * begins, develops and ends — which is what a pooled vector is meant to
+ * summarise. Order is preserved so pooling stays deterministic.
+ */
+export function capSegments(segments: string[], limit = MAX_SEGMENTS_PER_UNIT): string[] {
+  if (segments.length <= limit) {
+    return segments;
+  }
+  const step = segments.length / limit;
+  const sampled: string[] = [];
+  for (let index = 0; index < limit; index += 1) {
+    sampled.push(segments[Math.min(segments.length - 1, Math.floor(index * step))]);
+  }
+  return sampled;
 }
 
 /**

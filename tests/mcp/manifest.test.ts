@@ -41,10 +41,12 @@ class LimitHonoringService implements SessionService {
       // model fails, and the status contract requires the field either way.
       embedding_error: null,
       last_scan_at: "2026-05-10T10:00:00.000Z",
+      last_scan_ms: null,
       sessions: this.sessions.length,
       messages: 0,
       retrieval_units: 0,
       vectorized_units: 0,
+      vector_ms_per_unit: null,
       vector_model: "fixture",
       tools: [],
     };

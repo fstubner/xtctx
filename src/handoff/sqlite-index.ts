@@ -11,6 +11,7 @@ import {
   poolVectors,
   splitTextForEmbedding,
   type EmbeddingProvider,
+  capSegments,
 } from "./embeddings.js";
 import type {
   HandoffStatus,
@@ -60,6 +61,19 @@ interface SqliteHandoffIndexOptions {
    * never been set up.
    */
   createIfMissing?: boolean;
+  /**
+   * Stop searches from vectorizing anything they find unvectorized.
+   *
+   * For measuring how retrieval behaves at a given fraction of the corpus
+   * embedded, which is the ordinary state of a fresh index and cannot be held
+   * still otherwise: `vectorBudgetMs` bounds a pass but the deadline is
+   * checked between batches, so one full batch always runs and the fraction
+   * under test refills before it can be scored.
+   *
+   * Not a product setting. Nothing in `src/` passes it — an index that never
+   * embeds is a search that degrades to keyword forever.
+   */
+  freezeVectors?: boolean;
 }
 
 /**
@@ -182,41 +196,44 @@ const MIN_SEMANTIC_COSINE = 0.15;
  * Swept against the eval for DEFAULT_EMBEDDING_MODEL, which is the only way
  * this number means anything: it is a cut through one model's cosine
  * distribution, so it is not portable and every model change needs its own
- * sweep. Measured on the sixty-query corpus, hybrid:
+ * sweep. Measured on the sixty-query corpus, hybrid, false positives zero
+ * except where noted:
  *
- *   0.32   mrr 0.656  recall@5 0.883  top1 0.483   (false positives 0.10)
- *   0.40   mrr 0.654  recall@5 0.933  top1 0.483   <- here
- *   0.45   mrr 0.639  recall@5 0.933  top1 0.450   (false positives 0)
+ *   0.28   mrr 0.571  recall@5 0.783  top1 0.433   (false positives 0.05)
+ *   0.32   mrr 0.581  recall@5 0.800  top1 0.433
+ *   0.36   mrr 0.598  recall@5 0.850  top1 0.450   <- here
+ *   0.40   mrr 0.592  recall@5 0.850  top1 0.433
  *
- * Held at 0.36 — where MiniLM wanted it — this model looked like it regressed
- * false positives, which is the trap this comment exists to stop the next
- * person falling into. The model was fine; the threshold belonged to the
- * model it was swept for.
+ * The trap worth naming: held at 0.36 while the default was mpnet, that model
+ * looked like it regressed false positives to 0.10. It had not — the
+ * threshold simply belonged to the distribution it was cut from. A model
+ * comparison at a fixed threshold measures the mismatch, not the model.
  *
  * Raising it also costs pure `vector` mode recall, since that mode has no
- * keyword hits to fall back on. Hybrid is the default and the mode agents
- * actually use, and it gains what vector loses, because raising the bar drops
- * weak semantic matches and lets the keyword signal carry those queries
- * instead. Optimising the mode nobody calls would be the wrong trade.
+ * keyword hits to fall back on — 0.50 at 0.32 against 0.383 at 0.36. Hybrid
+ * is the default and the mode agents actually use, and it gains what vector
+ * loses, because raising the bar drops weak semantic matches and lets the
+ * keyword signal carry those queries instead. Optimising the mode nobody
+ * calls would be the wrong trade.
  *
  * What no value here can do is tell a real query from a well-formed one about
  * a topic the corpus has never discussed. Best-window cosine over the eval
- * corpus, by kind of query:
+ * corpus under this model, by kind of query:
  *
- *   genuine                          0.277 - 0.582
- *   absent, shares vocabulary        0.310 - 0.457
- *   absent, shares no vocabulary     0.246 - 0.396
- *   gibberish                        0.117 - 0.314
+ *   genuine                          0.211 - 0.656
+ *   absent, shares vocabulary        0.147 - 0.405
+ *   absent, shares no vocabulary     0.140 - 0.302
+ *   gibberish                        0.115 - 0.225
  *
- * The first two ranges overlap almost entirely, so no cut separates them, and
- * a query about something never discussed in words the corpus does use will
- * always be answerable-looking. The last two sit under the threshold outright,
- * which is the part this does buy: a query sharing no vocabulary with the
- * corpus returns nothing, as does gibberish.
+ * The first two ranges overlap, so no cut separates them, and a query about
+ * something never discussed in words the corpus does use will always be
+ * answerable-looking. The last two sit under the threshold, which is the part
+ * this does buy: a query sharing no vocabulary with the corpus returns
+ * nothing, as does gibberish.
  *
  * If it needs to move, move it against the eval rather than against one query.
  */
-const MIN_CONFIDENT_COSINE = 0.4;
+const MIN_CONFIDENT_COSINE = 0.36;
 /**
  * Weight of the recency/continuity tie-break in the relevance modes. Small
  * enough that it only ever separates candidates that are otherwise equal.
@@ -243,6 +260,7 @@ export class SqliteHandoffIndex implements SessionService {
   private readonly vectorBudgetMs: number;
   private scanStartedMs = 0;
   private readonly createIfMissing: boolean;
+  private readonly freezeVectors: boolean;
   /** Windows still waiting to be vectorized after the last search gave up its budget. */
   private vectorBacklog = 0;
   private readonly embeddingProvider: EmbeddingProvider;
@@ -262,6 +280,7 @@ export class SqliteHandoffIndex implements SessionService {
     this.refreshBudgetMs = Math.max(0, options.refreshBudgetMs ?? DEFAULT_REFRESH_BUDGET_MS);
     this.vectorBudgetMs = Math.max(0, options.vectorBudgetMs ?? DEFAULT_VECTOR_BUDGET_MS);
     this.createIfMissing = options.createIfMissing ?? true;
+    this.freezeVectors = options.freezeVectors ?? false;
     this.initialized = this.initialize();
     // Attach a no-op handler so a failed open cannot become an unhandled
     // rejection (which would kill the process) before the first caller
@@ -428,6 +447,14 @@ export class SqliteHandoffIndex implements SessionService {
     const retrievalUnitCount = count(db, "retrieval_units");
     const vectorizedUnitCount = count(db, "retrieval_unit_vectors");
     const lastScan = getSetting(db, "last_scan_at");
+    // Settings are text; a value written by an older version, or by hand, must
+    // not turn a status report into NaN.
+    const numericSetting = (key: string): number | null => {
+      const raw = getSetting(db, key);
+      if (raw === null) return null;
+      const value = Number(raw);
+      return Number.isFinite(value) ? value : null;
+    };
     const indexedByTool = new Map(
       (
         db
@@ -464,10 +491,12 @@ export class SqliteHandoffIndex implements SessionService {
       project_root: this.projectRoot,
       db_path: this.dbPath,
       last_scan_at: lastScan,
+      last_scan_ms: numericSetting("last_scan_ms"),
       sessions: sessionCount,
       messages: messageCount,
       retrieval_units: retrievalUnitCount,
       vectorized_units: vectorizedUnitCount,
+      vector_ms_per_unit: numericSetting("vector_ms_per_unit"),
       vector_model: this.embeddingProvider.model,
       embedding_error: getSetting(db, "last_error:embeddings"),
       tools,
@@ -648,6 +677,7 @@ export class SqliteHandoffIndex implements SessionService {
     }
 
     setSetting(db, "last_scan_at", startedAt);
+    setSetting(db, "last_scan_ms", String(Date.now() - Date.parse(startedAt)));
 
     // Warm vectors here too, not only inside a search.
     //
@@ -950,29 +980,56 @@ export class SqliteHandoffIndex implements SessionService {
       )
       .all(this.embeddingProvider.model, ...filters, ...branches) as VectorUnitRow[];
 
-    if (rows.length === 0) {
+    const keywordRows =
+      mode === "hybrid" ? this.queryKeywordUnits(query, limit, toolFilter, branchFilter) : [];
+
+    /**
+     * Windows that matched on words but have no vector yet.
+     *
+     * These used to be unreachable. The query above inner-joins the vector
+     * table, so hybrid could only ever return units that were already
+     * embedded, and a keyword hit on anything else was invisible. Vectorizing
+     * is budgeted and runs eight windows at a time on semantic searches only,
+     * so a partly-embedded index is the ordinary state rather than an edge
+     * case — this project sat at 8 vectorized windows out of 1,770.
+     *
+     * Measured on the eval by freezing the vectorized fraction, hybrid recall
+     * tracked coverage almost exactly — 0.500 at half embedded, 0.250 at a
+     * quarter, nothing at all at zero — while keyword held 0.850 throughout.
+     * Hybrid is the default mode, so the default was a strict subset of the
+     * cheaper one it is supposed to improve on.
+     */
+    const vectorized = new Set(rows.map((row) => row.unit_id));
+    const keywordOnly = keywordRows.filter((row) => !vectorized.has(row.unit_id));
+
+    if (rows.length === 0 && keywordOnly.length === 0) {
       return [];
     }
 
-    const keywordRows =
-      mode === "hybrid" ? this.queryKeywordUnits(query, limit, toolFilter, branchFilter) : [];
     const keywordScores = rankKeywordRows(keywordRows);
-    const queryVector = await this.embeddingProvider.embed(query);
-    const timeRange = getTimeRange(rows.map((row) => row.ended_at));
-    const candidates = rows
-      .map((row) => {
-        const rawCosine = cosineSimilarity(
-          queryVector,
-          deserializeVector(row.vector, row.dimensions),
-        );
-        return {
-          row,
-          rawCosine,
-          keywordScore: keywordScores.get(row.unit_id) ?? 0,
-          recencyScore: scoreRecency(row.ended_at, timeRange),
-          continuityScore: scoreContinuity(row.message_end_index, row.session_message_count),
-        };
-      })
+    // Only needed to score vectors; skip the model entirely when there are none.
+    const queryVector = rows.length > 0 ? await this.embeddingProvider.embed(query) : null;
+    const timeRange = getTimeRange([...rows, ...keywordOnly].map((row) => row.ended_at));
+    const candidates = [
+      ...rows.map((row) => ({
+        row: row as RetrievalUnitRow,
+        rawCosine: queryVector
+          ? cosineSimilarity(queryVector, deserializeVector(row.vector, row.dimensions))
+          : 0,
+        keywordScore: keywordScores.get(row.unit_id) ?? 0,
+        recencyScore: scoreRecency(row.ended_at, timeRange),
+        continuityScore: scoreContinuity(row.message_end_index, row.session_message_count),
+      })),
+      // No semantic evidence yet — carried on the keyword match alone, which
+      // the filter below still requires.
+      ...keywordOnly.map((row) => ({
+        row,
+        rawCosine: 0,
+        keywordScore: keywordScores.get(row.unit_id) ?? 0,
+        recencyScore: scoreRecency(row.ended_at, timeRange),
+        continuityScore: scoreContinuity(row.message_end_index, row.session_message_count),
+      })),
+    ]
       // Require actual evidence. Raw cosine sits near zero for unrelated
       // content, so without this the entire corpus came back for a query
       // matching nothing, formatted exactly like a real hit. A unit qualifies
@@ -1014,12 +1071,20 @@ export class SqliteHandoffIndex implements SessionService {
       .map((item) => {
         // A lone survivor is the best match by definition, not the worst.
         const semanticScore = spread > 0 ? (item.rawCosine - lowest) / spread : 1;
+        // A window with no vector has *unknown* similarity, not zero. Blending
+        // it as zero docks it 60% of the available score for not having been
+        // embedded yet, so a mediocre vectorized match outranked a strong
+        // keyword one purely by being earlier in the queue: at half coverage
+        // that held recall to 0.600 against keyword's 0.850. Scoring those on
+        // the evidence they do have — the keyword blend — removes the penalty
+        // without inventing a similarity for them.
+        const unvectorized = !vectorized.has(item.row.unit_id);
         return {
           ...item,
           semanticScore,
-          relevance: Math.max(0, Math.min(1, item.rawCosine)),
+          relevance: unvectorized ? undefined : Math.max(0, Math.min(1, item.rawCosine)),
           score: blendScores(
-            mode,
+            unvectorized ? "keyword" : mode,
             semanticScore,
             item.keywordScore,
             item.recencyScore,
@@ -1066,6 +1131,9 @@ export class SqliteHandoffIndex implements SessionService {
   }
 
   private async ensureVectors(toolFilter?: string[]): Promise<void> {
+    if (this.freezeVectors) {
+      return;
+    }
     const db = this.getDb();
     const filters = normalizeToolFilter(toolFilter);
     const toolWhere = filters.length > 0 ? `AND u.tool IN (${placeholders(filters.length)})` : "";
@@ -1112,16 +1180,19 @@ export class SqliteHandoffIndex implements SessionService {
     // for the whole corpus. Every batch below commits before the next starts,
     // so an unfinished pass is progress, not wasted work.
     const deadline = this.vectorBudgetMs > 0 ? Date.now() + this.vectorBudgetMs : Infinity;
+    const passStartedAt = Date.now();
+    let embedded = 0;
     for (let start = 0; start < rows.length; start += unitBatchSize) {
       if (Date.now() >= deadline) {
         this.vectorBacklog = rows.length - start;
         break;
       }
       const batch = rows.slice(start, start + unitBatchSize);
+      embedded += batch.length;
       // Long windows are segmented to the model's sequence budget and
       // mean-pooled, so content beyond the window's opening still shapes
       // the unit's vector.
-      const segmented = batch.map((row) => splitTextForEmbedding(row.content));
+      const segmented = batch.map((row) => capSegments(splitTextForEmbedding(row.content)));
       const segmentVectors = await this.embeddingProvider.embedBatch(segmented.flat());
 
       let cursor = 0;
@@ -1146,6 +1217,14 @@ export class SqliteHandoffIndex implements SessionService {
         });
       });
       transaction();
+    }
+
+    // Per window rather than per pass, so a pass that embedded eight and one
+    // that embedded eight hundred report a comparable figure — and so the
+    // backlog can be read as a duration rather than a count.
+    if (embedded > 0) {
+      const perUnit = Math.round(((Date.now() - passStartedAt) / embedded) * 10) / 10;
+      setSetting(db, "vector_ms_per_unit", String(perUnit));
     }
   }
 
