@@ -1,27 +1,56 @@
 name: auto-merge-release-pr
 
+# Enables auto-merge on release-please's PR, but at most one release per day.
+#
+# Without the daily gate, every `fix:`/`feat:` merge cascaded straight to a
+# release: release-please opened a PR, this workflow armed auto-merge on it
+# within seconds, CI passed, and it merged itself. On 2026-08-30 that produced
+# five versions (0.21.3 through 0.21.7) between 09:34 and 16:58 — none of which
+# anyone was waiting for, and none of which had soaked long enough to be found
+# wrong. Version numbers that churn are noise to everyone downstream.
+#
+# So the release PR is now *held* rather than merged when a release already
+# went out today. Held is the normal state, not an error: work accumulates on
+# the open PR and goes out in one release the next day. release-please keeps
+# the PR up to date as more lands, so nothing is lost by waiting.
+#
+# "Today" is UTC, matching the timestamps on the releases this reads. A repo
+# used from one timezone will occasionally see the day roll over mid-evening;
+# that is a deliberate simplification, not an oversight — the ceiling is about
+# cadence, not about a precise midnight.
+#
+# npm is unaffected either way: `publish.yml` is manual and reaching npm still
+# takes someone running it.
+
 on:
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
     branches: [main]
+  # A held PR gets no further `pull_request` events once work stops landing,
+  # so without this it would wait for the next unrelated push to be released.
+  # This is what actually lets "tomorrow" happen on a quiet day.
+  schedule:
+    - cron: "0 7 * * *" # 07:00 UTC daily
+  # The escape hatch for a severe defect in what is already published, which
+  # is the one case the daily ceiling is meant to yield to. `force: true`
+  # skips the date check; anything else still respects it.
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Set true to release even if one already went out today"
+        required: false
+        default: "false"
+        type: string
 
 permissions:
-  contents: write
+  contents: read
   pull-requests: write
 
 jobs:
   enable-auto-merge:
-    # The author check matters: without it, anyone with push access could
-    # name a branch release-please--* and receive standing auto-merge to main.
-    if: >
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      startsWith(github.event.pull_request.head.ref, 'release-please--') &&
-      contains(fromJSON('["github-actions[bot]", "fstubner"]'), github.event.pull_request.user.login) &&
-      github.event.pull_request.state == 'open' &&
-      github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
-      - name: Enable auto-merge for release PR
+      - name: Enable auto-merge for release PR, at most once a day
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           # Must be the PAT, not GITHUB_TOKEN: the merge this enables is
@@ -33,10 +62,81 @@ jobs:
           # workflow exists to automate away.
           github-token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
           script: |
-            const pr = context.payload.pull_request;
+            const ALLOWED_AUTHORS = ["github-actions[bot]", "fstubner"];
+            const forced = context.eventName === "workflow_dispatch"
+              && context.payload.inputs?.force === "true";
+
+            // Resolve the PR. A `pull_request` event carries it; the schedule
+            // and manual paths have to go and find the open release PR, and
+            // finding none is the ordinary case on a day with nothing to ship.
+            let pr = context.payload.pull_request ?? null;
             if (!pr) {
-              core.setFailed("No pull request payload found.");
+              const { data: open } = await github.rest.pulls.list({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                state: "open",
+                base: "main",
+                per_page: 100,
+              });
+              pr = open.find((candidate) =>
+                candidate.head.ref.startsWith("release-please--")
+              ) ?? null;
+              if (!pr) {
+                core.info("No open release PR. Nothing to do.");
+                return;
+              }
+            }
+
+            // The author and branch checks matter: without them, anyone with
+            // push access could name a branch release-please--* and receive
+            // standing auto-merge to main. These ran as a job-level `if`
+            // before; they live here now because the schedule path has no
+            // pull_request payload for that expression to read.
+            if (!pr.head.repo || pr.head.repo.full_name !== `${context.repo.owner}/${context.repo.repo}`) {
+              core.info(`PR #${pr.number} is from a fork. Skipping.`);
               return;
+            }
+            if (!pr.head.ref.startsWith("release-please--")) {
+              core.info(`PR #${pr.number} is not a release PR. Skipping.`);
+              return;
+            }
+            if (!ALLOWED_AUTHORS.includes(pr.user.login)) {
+              core.info(`PR #${pr.number} author ${pr.user.login} is not allowed. Skipping.`);
+              return;
+            }
+            if (pr.state !== "open" || pr.draft) {
+              core.info(`PR #${pr.number} is not an open, ready PR. Skipping.`);
+              return;
+            }
+
+            // The ceiling. `listReleases` is used rather than `getLatestRelease`
+            // because the latter hides drafts and prereleases, and a release
+            // cut today under either shape still spends today's budget.
+            if (!forced) {
+              const { data: releases } = await github.rest.repos.listReleases({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                per_page: 10,
+              });
+              const stamp = (r) => r.published_at ?? r.created_at;
+              const latest = releases
+                .map(stamp)
+                .filter(Boolean)
+                .sort()
+                .at(-1);
+
+              if (latest) {
+                const today = new Date().toISOString().slice(0, 10);
+                const latestDay = new Date(latest).toISOString().slice(0, 10);
+                if (latestDay === today) {
+                  core.notice(
+                    `Holding release PR #${pr.number}: ${latestDay} already has a release. ` +
+                    `It will merge on the next scheduled run, or dispatch this workflow ` +
+                    `with force=true for a severe defect in what is already published.`
+                  );
+                  return;
+                }
+              }
             }
 
             if (pr.auto_merge) {
@@ -60,7 +160,10 @@ jobs:
                 { pullRequestId: pr.node_id },
               );
 
-              core.info(`Enabled auto-merge for release PR #${pr.number}.`);
+              core.info(
+                `Enabled auto-merge for release PR #${pr.number}` +
+                `${forced ? " (forced)" : ""}.`
+              );
             } catch (error) {
               core.setFailed(`Failed to enable auto-merge for PR #${pr.number}: ${error}`);
             }

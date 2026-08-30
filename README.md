@@ -259,5 +259,24 @@ ownership, and scheduling state. See
 
 ## Release
 
-Release Please manages versions and changelog. GitHub Releases publish to npm
-through OIDC trusted publishing.
+Release Please manages versions and the changelog. Merging a `fix:` or `feat:`
+commit to `main` opens or updates a release PR; merging that PR cuts the
+GitHub release and tag.
+
+Two gates sit on that path:
+
+- **At most one release a day.** `auto-merge-release-pr.yml` arms auto-merge on
+  the release PR only when no release has gone out that day (UTC). Otherwise it
+  holds the PR, which is the normal state rather than an error — work
+  accumulates on it and ships in one release the next day, via a daily
+  scheduled run. Dispatch that workflow with `force=true` to override, which is
+  for a severe defect in what is already published.
+- **npm is manual.** `publish.yml` runs on `workflow_dispatch` only and requires
+  typing `publish`. Cutting a GitHub release does **not** reach npm; someone has
+  to run that workflow. It publishes through OIDC trusted publishing.
+
+Releases are published rather than drafted, deliberately. Drafts are hidden from
+GitHub's `releases/latest` endpoint, which Release Please reads to find the last
+release — so with drafts it saw a pre-draft version forever, proposed a release
+covering the entire history, and auto-merge landed it. That cut 54 versions in
+an hour. The gate belongs on npm, not on draft status.
