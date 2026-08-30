@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.21.2](https://github.com/fstubner/xtctx/compare/xtctx-v0.21.1...xtctx-v0.21.2) (2026-08-30)
+
+
+### Performance
+
+* go back to MiniLM, which indexes three times faster ([#278](https://github.com/fstubner/xtctx/issues/278)) ([b57f3a8](https://github.com/fstubner/xtctx/commit/b57f3a82981176672c1637a6fc61012c8ade97ee))
+
 ## [0.21.1](https://github.com/fstubner/xtctx/compare/xtctx-v0.21.0...xtctx-v0.21.1) (2026-08-29)
 
 
