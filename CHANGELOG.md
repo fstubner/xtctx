@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.21.4](https://github.com/fstubner/xtctx/compare/xtctx-v0.21.3...xtctx-v0.21.4) (2026-08-30)
+
+
+### Dependencies
+
+* bump astro from 7.2.3 to 7.2.7 in /landing ([#186](https://github.com/fstubner/xtctx/issues/186)) ([a6d2edf](https://github.com/fstubner/xtctx/commit/a6d2edf2f7970649667d7a7122b6c67bae3de4d5))
+
 ## [0.21.3](https://github.com/fstubner/xtctx/compare/xtctx-v0.21.2...xtctx-v0.21.3) (2026-08-30)
 
 
