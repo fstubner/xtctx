@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.21.3](https://github.com/fstubner/xtctx/compare/xtctx-v0.21.2...xtctx-v0.21.3) (2026-08-30)
+
+
+### Bug Fixes
+
+* **landing:** source hero version from package.json ([#280](https://github.com/fstubner/xtctx/issues/280)) ([7ff3f04](https://github.com/fstubner/xtctx/commit/7ff3f043cb5d34c93725f888151f2f4001dce837))
+
 ## [0.21.2](https://github.com/fstubner/xtctx/compare/xtctx-v0.21.1...xtctx-v0.21.2) (2026-08-30)
 
 
