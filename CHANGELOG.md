@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.21.6](https://github.com/fstubner/xtctx/compare/xtctx-v0.21.5...xtctx-v0.21.6) (2026-08-30)
+
+
+### Bug Fixes
+
+* **index:** repair session roll-ups a killed scan never reached ([#285](https://github.com/fstubner/xtctx/issues/285)) ([9fead69](https://github.com/fstubner/xtctx/commit/9fead69e2de827072f427a8702e6e7d2211e5d3c))
+
 ## [0.21.5](https://github.com/fstubner/xtctx/compare/xtctx-v0.21.4...xtctx-v0.21.5) (2026-08-30)
 
 
