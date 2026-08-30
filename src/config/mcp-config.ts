@@ -311,7 +311,18 @@ export async function syncToolMcpConfigs(
     }
     writtenPaths.add(configPath);
 
-    const result = await writeMcpConfig(tool, configPath, scope, renderer, servers);
+    // Project configs are contained by the project root; user-level ones
+    // (Antigravity, Copilot CLI, global Codex) by the home directory they were
+    // built from. Containing a global write by the project root would refuse a
+    // perfectly legitimate write.
+    const result = await writeMcpConfig(
+      tool,
+      configPath,
+      scope,
+      renderer,
+      servers,
+      scope === "project" ? projectRoot : home,
+    );
     results.push(result);
   }
 
@@ -347,7 +358,16 @@ export async function removeMcpServerConfigs(
     }
     writtenPaths.add(target.path);
 
-    results.push(await removeMcpConfig(tool, target.path, target.scope, renderer, serverName));
+    results.push(
+      await removeMcpConfig(
+        tool,
+        target.path,
+        target.scope,
+        renderer,
+        serverName,
+        target.scope === "project" ? projectRoot : home,
+      ),
+    );
   }
 
   return { results };
@@ -363,6 +383,7 @@ async function writeMcpConfig(
   scope: "project" | "global",
   renderer: McpRenderer,
   servers: McpServerDefinition[],
+  containWithin: string,
 ): Promise<McpSyncResult> {
   try {
     const format = renderer.format ?? "json";
@@ -447,7 +468,7 @@ async function writeMcpConfig(
       };
     }
 
-    await writeFileAtomic(configPath, content);
+    await writeFileAtomic(configPath, content, { containWithin });
 
     return {
       tool,
@@ -823,6 +844,7 @@ async function removeMcpConfig(
   scope: "project" | "global",
   renderer: McpRenderer,
   serverName: string,
+  containWithin: string,
 ): Promise<McpRemoveResult> {
   try {
     const format = renderer.format ?? "json";
@@ -875,7 +897,7 @@ async function removeMcpConfig(
     const content = serializeConfig(updated, format);
 
     if (normalizeNewlines(existingContent) !== normalizeNewlines(content)) {
-      await writeFileAtomic(configPath, content);
+      await writeFileAtomic(configPath, content, { containWithin });
     }
 
     return {

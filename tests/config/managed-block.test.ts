@@ -3,6 +3,7 @@ import {
   MARKERS,
   countManagedBlocks,
   removeManagedBlocks,
+  stripMarkers,
 } from "@xtctx/config/managed-block";
 
 const { begin, end } = MARKERS;
@@ -75,5 +76,52 @@ describe("removeManagedBlocks", () => {
   it("counts matched blocks", () => {
     const content = [begin, "a", end, "mid", begin, "b", end].join("\n");
     expect(countManagedBlocks(content)).toBe(2);
+  });
+});
+
+/**
+ * Removal keys purely on the literal marker strings, so a marker interpolated
+ * *into* a block ends it early — leaving the block's tail in the file glued to
+ * the user's next line, plus a stale end marker that breaks every later run.
+ * The reachable route is the project path, which is rendered verbatim and can
+ * legally contain the marker text on POSIX.
+ */
+describe("stripMarkers", () => {
+  it("removes an end marker embedded in an interpolated value", () => {
+    expect(stripMarkers(`/tmp/${end}/x`)).toBe("/tmp//x");
+  });
+
+  it("removes a begin marker too", () => {
+    expect(stripMarkers(`/srv/${begin}/p`)).toBe("/srv//p");
+  });
+
+  it("leaves ordinary values byte-for-byte alone", () => {
+    const path = "H:\\projects\\my-app";
+    expect(stripMarkers(path)).toBe(path);
+  });
+
+  it("keeps a rendered block removable when the value tried to forge a marker", () => {
+    // The whole point: after stripping, the block still has exactly one
+    // begin/end pair, so removal takes the block and nothing else.
+    const hostile = `/tmp/${end}/x`;
+    const block = [begin, `Project root: ${stripMarkers(hostile)}`, "body", end].join("\n");
+    const file = `USER TOP\n\n${block}\n`;
+
+    // Removal takes back exactly what setup wrote: the block, the "\n\n"
+    // before it, and the single trailing "\n" after the final one.
+    expect(countManagedBlocks(file)).toBe(1);
+    expect(removeManagedBlocks(file)).toBe("USER TOP");
+  });
+
+  it("shows the damage the guard prevents when the value is left raw", () => {
+    // Without stripping, the embedded end marker terminates the block early:
+    // the block's own tail survives as debris and a stale end marker is left
+    // in the file, which then breaks every later run.
+    const hostile = `/tmp/${end}/x`;
+    const file = `USER TOP\n\n${[begin, `Project root: ${hostile}`, "body", end].join("\n")}\n`;
+
+    expect(countManagedBlocks(file)).toBe(1);
+    expect(removeManagedBlocks(file)).toContain("body");
+    expect(removeManagedBlocks(file)).toContain(end);
   });
 });

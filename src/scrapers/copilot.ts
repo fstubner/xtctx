@@ -539,7 +539,29 @@ function sortRequestsByTime(requests: unknown[]): unknown[] {
   );
 }
 
+/**
+ * Key-path segments that reach the prototype chain instead of the object's own
+ * data. The path comes out of the journal file, so it is attacker-controlled:
+ * walking `__proto__` lands on `Object.prototype`, and writing there poisons
+ * every object in the process.
+ *
+ * That is not a contained parsing bug. `better-sqlite3` reads its options with
+ * `in`, which traverses the prototype chain, and turns a string `nativeBinding`
+ * into a `require()` of that path — while the scrapers open databases with
+ * `{readonly, fileMustExist}`, which owns neither key and so inherits both.
+ *
+ * `constructor` is currently unreachable by accident, because `readAtPath`
+ * bails on a function, but it is listed rather than relied upon: the guard
+ * should not depend on a `typeof` check elsewhere staying exactly as it is.
+ */
+const UNSAFE_PATH_SEGMENTS = new Set(["__proto__", "constructor", "prototype"]);
+
+function hasUnsafeSegment(path: Array<string | number>): boolean {
+  return path.some((key) => typeof key === "string" && UNSAFE_PATH_SEGMENTS.has(key));
+}
+
 function readAtPath(root: Record<string, unknown>, path: Array<string | number>): unknown {
+  if (hasUnsafeSegment(path)) return undefined;
   let node: unknown = root;
   for (const key of path) {
     if (node === null || typeof node !== "object") return undefined;
@@ -553,7 +575,7 @@ function setAtPath(
   path: Array<string | number>,
   value: unknown,
 ): void {
-  if (path.length === 0) return;
+  if (path.length === 0 || hasUnsafeSegment(path)) return;
   const parent = readAtPath(root, path.slice(0, -1));
   if (parent === null || typeof parent !== "object") return;
   (parent as Record<string | number, unknown>)[path[path.length - 1]] = value;

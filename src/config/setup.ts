@@ -6,6 +6,7 @@ import {
   countManagedBlocks,
   matchLineEndings,
   removeManagedBlocks,
+  stripMarkers,
 } from "./managed-block.js";
 import { stringify as stringifyYaml } from "yaml";
 import {
@@ -86,7 +87,11 @@ export async function setupProject(options: SetupOptions = {}): Promise<SetupRes
   writes.push({
     path: configPath,
     kind: "config",
-    changed: await writeIfChanged(configPath, renderProjectConfig(projectRoot, skillSync.config)),
+    changed: await writeIfChanged(
+      configPath,
+      renderProjectConfig(projectRoot, skillSync.config),
+      projectRoot,
+    ),
   });
 
   // The index holds raw transcript text from every configured tool, so
@@ -98,6 +103,7 @@ export async function setupProject(options: SetupOptions = {}): Promise<SetupRes
     changed: await writeIfChanged(
       join(xtctxDir, ".gitignore"),
       ["# Local transcript index — never commit (holds raw conversation text).", "state/", ""].join("\n"),
+      projectRoot,
     ),
   });
 
@@ -142,7 +148,7 @@ export async function setupProject(options: SetupOptions = {}): Promise<SetupRes
     writes.push({
       path: target.path,
       kind: `memory:${target.tool}`,
-      changed: await upsertManagedBlock(target.path, block, target.prelude),
+      changed: await upsertManagedBlock(target.path, block, projectRoot, target.prelude),
     });
   }
 
@@ -325,7 +331,10 @@ function renderManagedBlock(input: {
     "# xtctx Handoff",
     "",
     `Tool: ${input.tool}`,
-    `Project root: ${input.projectRoot}`,
+    // Stripped, not raw: a path containing the end marker (legal on POSIX)
+    // would terminate the block early, leaving its tail as debris in the
+    // user's file plus a stale marker that breaks every later run.
+    `Project root: ${stripMarkers(input.projectRoot)}`,
     `Integration mode: ${input.hookMode}`,
     "",
     "xtctx is configured for cross-tool handoff in this project.",
@@ -361,7 +370,10 @@ async function installClaudeHook(projectRoot: string): Promise<boolean> {
   // Claude Code reads hooks from .claude/settings.json (matcher-group shape).
   // Earlier xtctx versions wrote a flat array to .claude/hooks.json, which
   // Claude Code never loads — migrate those entries out.
-  const legacyChanged = await removeLegacyClaudeHook(join(projectRoot, ".claude", "hooks.json"));
+  const legacyChanged = await removeLegacyClaudeHook(
+    join(projectRoot, ".claude", "hooks.json"),
+    projectRoot,
+  );
 
   const settingsPath = join(projectRoot, ".claude", "settings.json");
   const existing = await readJsonIfExists(settingsPath);
@@ -389,11 +401,15 @@ async function installClaudeHook(projectRoot: string): Promise<boolean> {
     { hooks: [{ type: "command", command: CLAUDE_HOOK_COMMAND }] },
   ];
   root.hooks = hooks;
-  const changed = await writeIfChanged(settingsPath, JSON.stringify(root, null, 2) + "\n");
+  const changed = await writeIfChanged(
+    settingsPath,
+    JSON.stringify(root, null, 2) + "\n",
+    projectRoot,
+  );
   return changed || legacyChanged;
 }
 
-async function removeLegacyClaudeHook(hooksPath: string): Promise<boolean> {
+async function removeLegacyClaudeHook(hooksPath: string, projectRoot: string): Promise<boolean> {
   const existing = await readJsonIfExists(hooksPath);
   if (!isRecord(existing) || !isRecord(existing.hooks)) {
     return false;
@@ -422,12 +438,13 @@ async function removeLegacyClaudeHook(hooksPath: string): Promise<boolean> {
   }
 
   hooks.SessionStart = kept;
-  return writeIfChanged(hooksPath, JSON.stringify(existing, null, 2) + "\n");
+  return writeIfChanged(hooksPath, JSON.stringify(existing, null, 2) + "\n", projectRoot);
 }
 
 async function upsertManagedBlock(
   filePath: string,
   block: string,
+  containWithin: string,
   prelude = "",
 ): Promise<boolean> {
   const existing = await readUtf8IfExists(filePath);
@@ -443,7 +460,7 @@ async function upsertManagedBlock(
     prelude && !hasFrontmatter && !repaired.startsWith(prelude.trimEnd()) ? prelude : "";
   const separator = repaired.length > 0 ? "\n\n" : "";
   const content = `${prefix}${repaired}${separator}${block}`;
-  return writeIfChanged(filePath, content);
+  return writeIfChanged(filePath, content, containWithin);
 }
 
 function findStaleReferences(content: string): string[] {
@@ -459,7 +476,17 @@ function findStaleReferences(content: string): string[] {
   return stale.filter((value) => value.pattern.test(content)).map((value) => value.label);
 }
 
-async function writeIfChanged(filePath: string, content: string): Promise<boolean> {
+/**
+ * `containWithin` is passed by every caller rather than defaulted, because the
+ * correct root differs per write: project files belong to the project root,
+ * user-level files to the home directory. A default here would silently apply
+ * one caller's root to another's file.
+ */
+async function writeIfChanged(
+  filePath: string,
+  content: string,
+  containWithin: string,
+): Promise<boolean> {
   const existing = await readUtf8IfExists(filePath);
   // Preserve the existing file's dominant line endings instead of silently
   // converting a CRLF-authored file to LF.
@@ -468,7 +495,7 @@ async function writeIfChanged(filePath: string, content: string): Promise<boolea
     return false;
   }
 
-  await writeFileAtomic(filePath, finalContent);
+  await writeFileAtomic(filePath, finalContent, { containWithin });
   return true;
 }
 
