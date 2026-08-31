@@ -69,6 +69,12 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
     private readonly claudeProjectsDir: string,
     stateDir: string,
     private readonly projectRoot?: string,
+    /**
+     * The project's store directory, as stated by Claude Code rather than
+     * reconstructed. Hooks receive a documented `transcript_path`, whose
+     * directory this is; see `readAllSessions` for why that beats deriving it.
+     */
+    private readonly projectStoreDir?: string,
   ) {
     super(stateDir);
   }
@@ -124,6 +130,23 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
   }
 
   private async *readAllSessions(since: Date): AsyncIterable<ClaudeCodeChunk> {
+    // When the tool told us where its transcripts are, believe it.
+    //
+    // Reconstructing the location means re-implementing Claude Code's own path
+    // encoding, which maps `:`, `\` and `/` all to `-` and so cannot be
+    // inverted: `H:/projects/a` and `H:/projects-a` produce one directory
+    // name. `CLAUDE_CONFIG_DIR` defeats it outright by moving the whole tree
+    // somewhere the derived path never looks, and then xtctx reads nothing and
+    // reports it as an empty history.
+    //
+    // A directory named by the tool is also better provenance than one we
+    // guessed: nothing else can collide with it, so a record carrying no `cwd`
+    // is safely ours.
+    if (this.projectStoreDir) {
+      yield* this.readProjectDir(this.projectStoreDir, since, true);
+      return;
+    }
+
     let projectDirs: string[];
 
     try {
@@ -149,12 +172,22 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
       const projectDir = join(this.claudeProjectsDir, projectHash);
       const exactDirectory =
         encodedProject === null || projectHash.toLowerCase() === encodedProject;
+      yield* this.readProjectDir(projectDir, since, exactDirectory);
+    }
+  }
+
+  private async *readProjectDir(
+    projectDir: string,
+    since: Date,
+    exactDirectory: boolean,
+  ): AsyncIterable<ClaudeCodeChunk> {
+    {
       let files: string[];
 
       try {
         files = await readdir(projectDir);
       } catch {
-        continue;
+        return;
       }
 
       for (const file of files) {

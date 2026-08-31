@@ -49,6 +49,14 @@ async function canonicalProjectRoot(projectPath: string): Promise<string> {
 export interface ProjectServicesOptions {
   /** Diagnostics pass false so inspecting a project does not create one. */
   createIfMissing?: boolean;
+  /**
+   * Store directories a tool named for itself, keyed by tool id.
+   *
+   * The hook path supplies Claude Code's, taken from the `transcript_path`
+   * every hook receives. Everything else leaves this empty and the scrapers
+   * reconstruct their locations as before.
+   */
+  storeDirs?: Record<string, string | undefined>;
 }
 
 export async function createProjectServices(
@@ -71,7 +79,15 @@ export async function createProjectServices(
   // point of the file is that they get to decide.
   const scrapers = config.error
     ? []
-    : createDefaultScrapers(stateDir, overrides, projectRoot).filter((scraper) => {
+    : createDefaultScrapers(
+        stateDir,
+        overrides,
+        projectRoot,
+        // Recorded by the session-start hook from the `transcript_path` the
+        // host tool passes it. The hook cannot use it itself — it reads the
+        // existing index without scraping — so this is where it lands.
+        { ...(await readRecordedStoreDirs(stateDir)), ...(options.storeDirs ?? {}) },
+      ).filter((scraper) => {
         const toolConfig = config.tools[scraper.tool];
         return toolConfig?.enabled !== false;
       });
@@ -146,4 +162,29 @@ function normalizeTools(input: unknown): ProjectConfig["tools"] {
   }
 
   return tools;
+}
+
+/**
+ * Store directories the session-start hook recorded, if any.
+ *
+ * Absent for every project set up without hooks, and for tools that send no
+ * payload — in which case the scrapers reconstruct their locations exactly as
+ * before. An unreadable or malformed file is treated the same as no file: this
+ * is an accuracy improvement, not a dependency.
+ */
+async function readRecordedStoreDirs(
+  stateDir: string,
+): Promise<Record<string, string | undefined>> {
+  try {
+    const raw = await readFile(join(stateDir, "store-dirs.json"), "utf-8");
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return Object.fromEntries(
+      Object.entries(parsed).filter(
+        (entry): entry is [string, string] =>
+          typeof entry[1] === "string" && entry[1].length > 0,
+      ),
+    );
+  } catch {
+    return {};
+  }
 }
