@@ -32,12 +32,61 @@ function normalizeProjectPath(value: string): string {
     normalized = decodePathLike(normalized);
   }
 
-  return normalized
+  const cleaned = normalized
     .replace(/\\/g, "/")
     .replace(/^\/([a-zA-Z]:\/)/, "$1")
     .replace(/\/+/g, "/")
-    .replace(/\/$/g, "")
-    .toLowerCase();
+    .replace(/\/$/g, "");
+
+  return foldCase(resolveTraversal(cleaned));
+}
+
+/**
+ * Collapse `.` and `..` segments lexically.
+ *
+ * The candidate is a `cwd` another tool wrote into a transcript, so it is
+ * untrusted: without this, `<root>/../other-client/secret.ts` starts with
+ * `<root>/` and is served as this project's content. Resolution has to be
+ * lexical rather than `realpath` — these paths come from a file, frequently
+ * describe a machine or a directory that no longer exists, and a filesystem
+ * lookup would turn a comparison into an I/O call on every record.
+ *
+ * A leading `..` that would climb above the root is dropped rather than kept,
+ * so a path can never escape upward into a prefix that matches something else.
+ */
+function resolveTraversal(path: string): string {
+  if (!path.includes("./")) {
+    return path;
+  }
+
+  const leadingSlash = path.startsWith("/");
+  const out: string[] = [];
+  for (const segment of path.split("/")) {
+    if (segment === "." || segment === "") {
+      continue;
+    }
+    if (segment === "..") {
+      out.pop();
+      continue;
+    }
+    out.push(segment);
+  }
+
+  return (leadingSlash ? "/" : "") + out.join("/");
+}
+
+/**
+ * Case-fold only where the filesystem does.
+ *
+ * Windows and macOS default to case-insensitive, so `H:/App` and `H:/app` are
+ * one directory and must compare equal. On a case-sensitive filesystem they
+ * are two different projects, and folding them together merged their
+ * transcripts — the same boundary breach from the other direction.
+ */
+function foldCase(path: string): string {
+  return process.platform === "win32" || process.platform === "darwin"
+    ? path.toLowerCase()
+    : path;
 }
 
 function fileUrlToPathLike(value: string): string {

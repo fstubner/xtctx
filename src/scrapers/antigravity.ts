@@ -1542,13 +1542,13 @@ function runtimeConversationMatchesProject(
  * case is genuinely ambiguous from a path alone, and it is a far narrower
  * claim than "anywhere on the machine".
  */
-function textMentionsProject(
+export function textMentionsProject(
   value: string,
   projectRoot: string,
   antigravityRoot?: string,
 ): boolean {
   const text = normalizeSearchText(value);
-  if (text.includes(normalizeSearchText(projectRoot))) {
+  if (mentionsPathWithBoundary(text, normalizeSearchText(projectRoot))) {
     return true;
   }
 
@@ -1719,6 +1719,47 @@ async function readTextIfExists(path: string): Promise<string | null> {
     return await readFile(path, "utf-8");
   } catch {
     return null;
+  }
+}
+
+/**
+ * Whether `text` records `path` as a whole path rather than as a prefix of a
+ * longer one.
+ *
+ * A bare `includes` filed every sibling whose name merely starts with this
+ * project's: a root of `h:/projects/app` matched `h:/projects/app-secret/…`
+ * and `h:/projects/appendix/…`, handing their transcripts to this project.
+ * That is the third time this comparison has leaked along the same edge — the
+ * two comments above record a `<name>` word match and a `/playground/<name>/`
+ * match — and each previous fix tightened the pattern without adding the
+ * boundary the pattern needed.
+ *
+ * A match counts when the next character cannot continue the final path
+ * segment: end of text, a `/`, or a delimiter. Anything a filename could
+ * contain — a letter, digit, `-`, `.`, `_` — means this is a different
+ * directory that happens to share a prefix.
+ */
+function mentionsPathWithBoundary(text: string, path: string): boolean {
+  if (!path) {
+    return false;
+  }
+
+  // Whitespace, quotes and brackets end a path in prose, JSON and stack
+  // traces alike; the set is an allowlist so an unlisted character is treated
+  // as a continuation and rejected.
+  const DELIMITERS = new Set([" ", "\t", "\n", "\r", '"', "'", "`", ")", "]", "}", ">", ",", ";", "|"]);
+
+  let from = 0;
+  for (;;) {
+    const at = text.indexOf(path, from);
+    if (at === -1) {
+      return false;
+    }
+    const next = text[at + path.length];
+    if (next === undefined || next === "/" || DELIMITERS.has(next)) {
+      return true;
+    }
+    from = at + 1;
   }
 }
 
