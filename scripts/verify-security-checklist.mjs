@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 
 const checklistPath = resolve(process.cwd(), "docs", "security", "owasp-asvs-lite.md");
@@ -29,6 +30,31 @@ if (unchecked.length > 0) {
 const checked = [...content.matchAll(/^- \[[xX]\] (.+)$/gm)];
 if (checked.length === 0) {
   throw new Error(`No completed checklist controls found in ${checklistPath}.`);
+}
+
+// A control may cite the tests that back it, as
+// `<!-- verified-by: path, path -->`. Those paths are checked to exist, which
+// is what stops a citation outliving the test it names — a stale citation
+// reads as stronger evidence than no citation at all.
+//
+// This does not check that the test proves the control; nothing can. It does
+// mean the eight annotated controls are anchored to code that runs in CI,
+// rather than resting on the review date alone.
+const cited = [...content.matchAll(/<!--\s*verified-by:\s*([^>]+?)\s*-->/g)]
+  .flatMap((match) => match[1].split(",").map((part) => part.trim()))
+  .filter(Boolean);
+
+const missingEvidence = [];
+for (const relative of cited) {
+  if (!existsSync(resolve(process.cwd(), relative))) {
+    missingEvidence.push(relative);
+  }
+}
+if (missingEvidence.length > 0) {
+  const summary = missingEvidence.map((item) => `- ${item}`).join("\n");
+  throw new Error(
+    `Security checklist cites tests that no longer exist:\n${summary}`,
+  );
 }
 
 // Every control here is self-attested prose: this script cannot verify any of
@@ -67,12 +93,14 @@ if (ageDays > REVIEW_FAIL_DAYS) {
 if (ageDays > REVIEW_WARN_DAYS) {
   console.warn(
     `WARNING: security checklist last reviewed ${ageDays} days ago (${reviewed[1]}). ` +
-      `These ${checked.length} controls are self-attested prose that nothing verifies; ` +
-      `re-read them and update the date. Fails at ${REVIEW_FAIL_DAYS} days.`,
+      `${cited.length} citations are checked to resolve, but the controls ` +
+      `themselves are judgements no script can hold; re-read them and update ` +
+      `the date. Fails at ${REVIEW_FAIL_DAYS} days.`,
   );
 }
 
 console.log(
   `Security checklist present and complete: ${checklistPath} ` +
-    `(${checked.length} controls, reviewed ${ageDays} days ago)`,
+    `(${checked.length} controls, ${cited.length} test citations verified, ` +
+    `reviewed ${ageDays} days ago)`,
 );
