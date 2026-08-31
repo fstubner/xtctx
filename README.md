@@ -259,24 +259,26 @@ ownership, and scheduling state. See
 
 ## Release
 
-Release Please manages versions and the changelog. Merging a `fix:` or `feat:`
-commit to `main` opens or updates a release PR; merging that PR cuts the
-GitHub release and tag.
+Nothing is released by merging. Cutting a release is one manual action: run the
+**release** workflow, choose `patch`/`minor`/`major`, and type `release` to
+confirm. It runs `verify:release` first, then bumps the version, writes the
+CHANGELOG entry from GitHub's generated notes, commits, tags, creates the
+GitHub release, and publishes to npm.
 
-Two gates sit on that path:
+Untick `publish_npm` to cut a release without publishing. To publish a version
+that was tagged earlier, run the **publish** workflow on its own against that
+tag — it verifies the checked-out commit really carries the tag for the version
+in `package.json`, so a branch tip cannot be published by mistake.
 
-- **At most one release a day.** `auto-merge-release-pr.yml` arms auto-merge on
-  the release PR only when no release has gone out that day (UTC). Otherwise it
-  holds the PR, which is the normal state rather than an error — work
-  accumulates on it and ships in one release the next day, via a daily
-  scheduled run. Dispatch that workflow with `force=true` to override, which is
-  for a severe defect in what is already published.
-- **npm is manual.** `publish.yml` runs on `workflow_dispatch` only and requires
-  typing `publish`. Cutting a GitHub release does **not** reach npm; someone has
-  to run that workflow. It publishes through OIDC trusted publishing.
+This replaced an automatic pipeline. Every `fix:`/`feat:` merge opened a release
+PR that a second workflow auto-merged within seconds, so merging any change at
+all cut a release: five versions went out between 09:34 and 16:58 on
+2026-08-30, none awaited, none soaked. A per-day ceiling was tried first and was
+the wrong shape — capping unwanted releases still leaves them unwanted.
 
-Releases are published rather than drafted, deliberately. Drafts are hidden from
-GitHub's `releases/latest` endpoint, which Release Please reads to find the last
-release — so with drafts it saw a pre-draft version forever, proposed a release
-covering the entire history, and auto-merge landed it. That cut 54 versions in
-an hour. The gate belongs on npm, not on draft status.
+Releases are published rather than drafted, deliberately, and `publish.yml` has
+no `release: published` trigger. It had one once, with releases drafted so
+nothing published itself, and that broke outright: GitHub's `releases/latest`
+endpoint hides drafts, the release tooling read that endpoint to find the last
+release, so it saw a pre-draft version forever and proposed a release covering
+the entire history. It cut 54 versions in an hour.

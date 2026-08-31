@@ -1,0 +1,189 @@
+name: release
+
+# The only way a release happens. One deliberate action: write the release
+# note entry, tag it, then publish to npm.
+#
+# It replaces an automatic pipeline. Every `fix:`/`feat:` merge opened a
+# release PR, a second workflow armed auto-merge on it within seconds, and it
+# merged itself — so a release was cut by the act of merging any change at all.
+# On 2026-08-30 that produced five versions between 09:34 and 16:58, none of
+# which anyone was waiting for and none of which had soaked long enough to be
+# found wrong. A per-day ceiling was tried first and was the wrong shape:
+# capping unwanted releases still leaves them unwanted. Nothing is released now
+# unless someone runs this.
+#
+# Notes come from GitHub's own generator over the commits since the last tag,
+# so there is no changelog tooling to keep in step with the commit history.
+#
+# Every value that reaches a shell goes through the environment. `${{ }}` is
+# substituted before the shell parses the line, and release notes are arbitrary
+# text from commit messages and PR titles — writable by anyone who can open a
+# PR — so inlining them would make them executable.
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Which part of the version to raise"
+        required: true
+        default: patch
+        type: choice
+        options: [patch, minor, major]
+      confirm:
+        description: "Type release to cut and publish; anything else stops"
+        required: true
+        type: string
+      publish_npm:
+        description: "Publish to npm as well as cutting the release"
+        required: true
+        default: true
+        type: boolean
+
+# Never cut two releases at once, and never interrupt one part-way: a killed
+# run between the tag push and the npm publish leaves a version tagged but
+# unpublished, which is the state this repo already spent nine versions in.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  cut:
+    if: github.event.inputs.confirm == 'release'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
+      tag: ${{ steps.bump.outputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Tags are needed to find the previous release, and the default
+          # shallow clone has none.
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            landing/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install landing dependencies
+        run: npm --prefix landing ci
+
+      # Before anything is written. A release that fails its own gates should
+      # leave no tag, no commit and no version bump behind to unpick.
+      - name: Verify release
+        run: npm run verify:release
+
+      - name: Bump version
+        id: bump
+        env:
+          BUMP: ${{ github.event.inputs.bump }}
+        run: |
+          set -euo pipefail
+          previous=$(node -p 'require("./package.json").version')
+          npm version "$BUMP" --no-git-tag-version >/dev/null
+          version=$(node -p 'require("./package.json").version')
+          echo "$previous -> $version"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=xtctx-v${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate release notes
+        id: notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.bump.outputs.tag }}
+        run: |
+          set -euo pipefail
+          previous_tag=$(git tag --list 'xtctx-v*' --sort=-v:refname | head -n1 || true)
+          echo "previous tag: ${previous_tag:-<none>}"
+          # GitHub generates the notes from the commits in the range, so the
+          # release entry and the history cannot drift apart.
+          notes=$(gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+            -f tag_name="$TAG" \
+            -f target_commitish="${GITHUB_SHA}" \
+            ${previous_tag:+-f previous_tag_name="$previous_tag"} \
+            --jq .body)
+          # A random delimiter: notes are attacker-influenceable text, and a
+          # fixed one appearing inside them would let a commit message inject
+          # further step outputs.
+          delimiter="NOTES_$(openssl rand -hex 16)"
+          {
+            echo "body<<${delimiter}"
+            echo "$notes"
+            echo "${delimiter}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Write the CHANGELOG entry
+        env:
+          NOTES: ${{ steps.notes.outputs.body }}
+          VERSION: ${{ steps.bump.outputs.version }}
+          TAG: ${{ steps.bump.outputs.tag }}
+        run: |
+          set -euo pipefail
+          today=$(date -u +%Y-%m-%d)
+          {
+            printf '## [%s](https://github.com/%s/releases/tag/%s) (%s)\n\n' \
+              "$VERSION" "$GITHUB_REPOSITORY" "$TAG" "$today"
+            printf '%s\n\n' "$NOTES"
+          } > /tmp/entry.md
+          # Insert above the previous newest entry, keeping the file's header.
+          # Release Please owned this file before; its format is preserved so
+          # the existing entries stay readable alongside the new ones.
+          first_entry=$(grep -n '^## ' CHANGELOG.md | head -n1 | cut -d: -f1 || true)
+          if [ -n "${first_entry:-}" ]; then
+            head -n "$((first_entry - 1))" CHANGELOG.md > /tmp/new.md
+            cat /tmp/entry.md >> /tmp/new.md
+            tail -n +"${first_entry}" CHANGELOG.md >> /tmp/new.md
+          else
+            cat CHANGELOG.md /tmp/entry.md > /tmp/new.md
+          fi
+          mv /tmp/new.md CHANGELOG.md
+
+      - name: Commit, tag and push
+        env:
+          VERSION: ${{ steps.bump.outputs.version }}
+          TAG: ${{ steps.bump.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json CHANGELOG.md
+          git commit -m "chore(release): ${VERSION}"
+          git tag "$TAG"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+          git push origin "$TAG"
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NOTES: ${{ steps.notes.outputs.body }}
+          VERSION: ${{ steps.bump.outputs.version }}
+          TAG: ${{ steps.bump.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # --notes-file, not --notes, for the same reason as the step above.
+          printf '%s\n' "$NOTES" > /tmp/notes.md
+          gh release create "$TAG" --title "xtctx: v${VERSION}" --notes-file /tmp/notes.md
+
+  # Reuses publish.yml rather than repeating it: the tag check, the
+  # verify:release gate, the OIDC publish and the post-publish registry smoke
+  # all live there, and are equally correct when someone publishes an
+  # already-tagged version by hand.
+  publish:
+    needs: cut
+    if: github.event.inputs.publish_npm == 'true'
+    uses: ./.github/workflows/publish.yml
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      confirm: publish
