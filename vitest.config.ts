@@ -12,6 +12,9 @@ export default defineConfig({
     // 5392ms on windows-latest — and a timeout there reads as a product
     // failure rather than a slow machine.
     testTimeout: 30_000,
+    // Turns down budgets that describe production latency rather than
+    // correctness; see the file for why a fanned-out suite cannot pay them.
+    setupFiles: ["tests/setup.ts"],
     coverage: {
       provider: "v8",
       include: ["src/**/*.ts"],

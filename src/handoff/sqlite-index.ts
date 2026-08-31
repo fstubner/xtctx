@@ -23,6 +23,7 @@ import type {
   SessionSummary,
 } from "./types.js";
 import { cosineSimilarity, deserializeVector, serializeVector } from "./vector.js";
+import { NullEmbeddingProvider } from "./null-embeddings.js";
 
 interface ToolRuntime {
   tool: string;
@@ -192,6 +193,36 @@ const RETRIEVAL_UNIT_RECONCILE_LIMIT = 4;
  */
 const DEFAULT_EMBEDDING_WARM_BUDGET_MS = 5_000;
 
+/**
+ * Override for the warm budget, in milliseconds; `0` disables the wait.
+ *
+ * The wait exists because this process is usually the only one there will be,
+ * so deferring vectorising to "the next scan" meant never. That reasoning does
+ * not apply to a test, where every scan would block on a model load nothing in
+ * the test is asserting — and with a suite fanned out across workers, each one
+ * paying that separately is contention rather than coverage.
+ */
+/**
+ * The real model unless `XTCTX_DISABLE_EMBEDDINGS=1`.
+ *
+ * The switch is for the test suite, where several workers each loading a
+ * ~100MB ONNX model exhausted memory and killed the worker rather than
+ * failing an embedding. Search already degrades to keyword without vectors,
+ * so a suite that is not asserting embeddings loses no coverage by skipping
+ * the load — and the one test that is asserting them constructs the real
+ * provider directly, so it still exercises the real thing.
+ */
+function defaultEmbeddingProvider(): EmbeddingProvider {
+  return process.env.XTCTX_DISABLE_EMBEDDINGS === "1"
+    ? new NullEmbeddingProvider()
+    : new TransformersEmbeddingProvider(DEFAULT_EMBEDDING_MODEL);
+}
+
+function embeddingWarmBudgetFromEnv(): number | undefined {
+  const raw = Number.parseInt(process.env.XTCTX_EMBEDDING_WARM_MS ?? "", 10);
+  return Number.isFinite(raw) && raw >= 0 ? raw : undefined;
+}
+
 /** Poll interval while waiting for the model; see `waitUntilEmbeddingReady`. */
 const EMBEDDING_WARM_POLL_MS = 100;
 const DEFAULT_WINDOW_SIZE = 8;
@@ -304,13 +335,15 @@ export class SqliteHandoffIndex implements SessionService {
     options: SqliteHandoffIndexOptions = {},
   ) {
     this.embeddingProvider =
-      options.embeddingProvider ?? new TransformersEmbeddingProvider(DEFAULT_EMBEDDING_MODEL);
+      options.embeddingProvider ?? defaultEmbeddingProvider();
     this.windowSize = Math.max(2, Math.floor(options.windowSize ?? DEFAULT_WINDOW_SIZE));
     this.windowStride = Math.max(1, Math.floor(options.windowStride ?? DEFAULT_WINDOW_STRIDE));
     this.refreshBudgetMs = Math.max(0, options.refreshBudgetMs ?? DEFAULT_REFRESH_BUDGET_MS);
     this.embeddingWarmBudgetMs = Math.max(
       0,
-      options.embeddingWarmBudgetMs ?? DEFAULT_EMBEDDING_WARM_BUDGET_MS,
+      options.embeddingWarmBudgetMs ??
+        embeddingWarmBudgetFromEnv() ??
+        DEFAULT_EMBEDDING_WARM_BUDGET_MS,
     );
     this.vectorBudgetMs = Math.max(0, options.vectorBudgetMs ?? DEFAULT_VECTOR_BUDGET_MS);
     this.createIfMissing = options.createIfMissing ?? true;
