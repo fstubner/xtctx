@@ -151,7 +151,18 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
         // See limits.ts: line length here is the writing tool's choice, not
         // ours, and an unbounded line is buffered whole before parsing.
         if (!isWithinLineLimit(line)) {
-          warnDrift(filePath, `JSONL line exceeds ${MAX_LINE_BYTES} chars; skipped`, 0);
+          // A `compacted` record inlines the whole prior conversation in
+          // `replacement_history`, so it is routinely tens of megabytes and
+          // carries nothing unique: those turns are already indexed from the
+          // `response_item` and `event_msg` records they were copied from.
+          // Reporting it as drift on every scan is the crying-wolf failure
+          // this project already made once with `atis-latch`.
+          //
+          // Read from the head of the line rather than by parsing it, because
+          // parsing is the cost the cap exists to avoid.
+          if (!isKnownBulkyRecord(line)) {
+            warnDrift(filePath, `JSONL line exceeds ${MAX_LINE_BYTES} chars; skipped`, 0);
+          }
           continue;
         }
 
@@ -523,4 +534,21 @@ function describeType(value: unknown): string {
   if (value === null) return "null";
   if (Array.isArray(value)) return "array";
   return typeof value;
+}
+
+/**
+ * Record types expected to exceed the line cap while carrying nothing the
+ * conversation does not already hold elsewhere in the file.
+ *
+ * Measured on a real 865MB transcript: 47 of 21,109 lines exceeded 8MB, the
+ * largest 22.4MB, and every one was `compacted`.
+ */
+const BULKY_RESTATEMENT_TYPES = new Set(["compacted"]);
+
+/** How much of an oversized line to inspect for its `type`. */
+const TYPE_PEEK_CHARS = 200;
+
+export function isKnownBulkyRecord(line: string): boolean {
+  const type = /"type"\s*:\s*"([^"]+)"/.exec(line.slice(0, TYPE_PEEK_CHARS))?.[1];
+  return type !== undefined && BULKY_RESTATEMENT_TYPES.has(type);
 }
