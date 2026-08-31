@@ -87,6 +87,15 @@ export function describeDisconnectPlan(options: DisconnectOptions = {}): {
         "Antigravity stores MCP config at app level, so disconnect removes xtctx from Antigravity globally.",
       );
     }
+
+    // Copilot CLI's config is equally machine-wide, and setup only writes it
+    // under --global-mcp — so disconnect can remove an entry it never added,
+    // for every project, and said nothing while doing it.
+    if (tool === "copilot-cli") {
+      warnings.push(
+        "Copilot CLI stores MCP config at user level, so disconnect removes xtctx from Copilot CLI for every project on this machine.",
+      );
+    }
   }
 
   for (const path of memoryPathsToDisconnect(projectRoot, tools, options.all === true)) {
@@ -286,7 +295,16 @@ async function disableToolsInProjectConfig(
     return false;
   }
 
-  const parsed = parseYaml(raw) as unknown;
+  // Every other reader of this file degrades on unparseable YAML rather than
+  // throwing; this one did not, so a stray tab made uninstalling impossible.
+  // Disconnect is the command someone reaches for when things are already
+  // wrong, which is the worst moment to require a well-formed config.
+  let parsed: unknown;
+  try {
+    parsed = parseYaml(raw);
+  } catch {
+    parsed = null;
+  }
   const config = isRecord(parsed) ? parsed : {};
   const currentTools = isRecord(config.tools) ? { ...config.tools } : {};
   let changed = false;

@@ -141,6 +141,7 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
       let sandboxed = false;
       let messageIndex = 0;
       let projectMatched = this.projectRoot ? false : true;
+      let unattributedWarned = false;
 
       for await (const line of reader) {
         if (!line.trim()) {
@@ -231,6 +232,19 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
         }
 
         if (!projectMatched) {
+          // Failing closed is right — an unattributable transcript must not be
+          // served to this project. Failing *silently* is not: opencode warns
+          // for the identical case, and a whole transcript vanishing with no
+          // signal is indistinguishable from the scraper working. Warned once
+          // per file, not per record.
+          if (!unattributedWarned) {
+            unattributedWarned = true;
+            warnDrift(
+              filePath,
+              "no record names a project directory; transcript excluded from this project",
+              0,
+            );
+          }
           continue;
         }
 

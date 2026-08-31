@@ -1,5 +1,5 @@
 import type { SessionService, SessionSummary } from "../../handoff/types.js";
-import { indexingPayload } from "./sessions.js";
+import { indexingPayload, validatedFilter } from "./sessions.js";
 
 interface HandoffManifestParams {
   session_refs?: string[];
@@ -35,7 +35,11 @@ export function createHandoffManifestHandler(service: SessionService) {
       missingRefs = requestedRefs.filter((_, index) => resolved[index] === null);
     } else {
       const limit = normalizeLimit(params.limit, DEFAULT_LIMIT);
-      selected = await service.listRecentSessions(limit, params.tool_filter, params.branch_filter);
+      selected = await service.listRecentSessions(
+        limit,
+        validatedFilter(params.tool_filter, "tool_filter"),
+        validatedFilter(params.branch_filter, "branch_filter"),
+      );
       missingRefs = [];
     }
 

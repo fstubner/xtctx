@@ -6,6 +6,7 @@ import type { CopilotChunk } from "../types/scraper.js";
 import { AbstractScraper, estimateTokens, toDate } from "./base.js";
 import { pathMatchesProject } from "../utils/project-scope.js";
 import { recordDrift, withDriftReport } from "./drift-log.js";
+import { MAX_FILE_BYTES, isWithinFileLimit } from "./limits.js";
 
 /** VS Code stores Copilot Chat history in workspaceStorage SQLite files. */
 const SESSIONS_KEY = "interactive.sessions";
@@ -188,6 +189,13 @@ export class CopilotScraper extends AbstractScraper<CopilotChunk> {
       }
 
       const filePath = join(sessionsDir, name);
+      // The whole file is read into memory and then split, so an oversized one
+      // costs the long-lived server twice its size. These files are written by
+      // another tool, so their size is not ours to trust.
+      if (!(await isWithinFileLimit(filePath))) {
+        warnDrift(filePath, `chat session file exceeds ${MAX_FILE_BYTES} bytes; skipped`, 0);
+        continue;
+      }
       let raw: string;
       try {
         raw = await readFile(filePath, "utf-8");

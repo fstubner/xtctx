@@ -11,6 +11,13 @@ import { MAX_LINE_BYTES, isWithinLineLimit } from "./limits.js";
 const SCRAPER_NAME = "claude-code";
 
 /**
+ * How many cwd-less records to hold while waiting for one that names a
+ * project. Real files name one within the first few records; the cap only
+ * bounds a pathological file that never does.
+ */
+const MAX_PENDING_UNATTRIBUTED = 500;
+
+/**
  * Mutation shapes the claude-code scraper tolerates silently (no warn, no
  * throw). Everything else that falls outside the happy path warns.
  */
@@ -184,6 +191,10 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
 
     let messageIndex = 0;
     let lineNo = 0;
+    /** null until a record in this file names a project. */
+    let fileIsOurs: boolean | null = null;
+    /** Records with no `cwd`, held until `fileIsOurs` is known. */
+    const pending: ClaudeCodeChunk[] = [];
     for await (const line of reader) {
       lineNo++;
       if (!line.trim()) {
@@ -220,7 +231,37 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
         continue;
       }
 
-      if (!this.recordMatchesProject(obj, exactDirectory)) {
+      // Ownership is decided per file, from the file's own records.
+      //
+      // The store directory cannot decide it: Claude Code encodes `:`, `\`
+      // and `/` all to `-`, so `H:/projects/a` and `H:/projects-a` share one
+      // directory. Treating an exact directory match as provenance therefore
+      // handed one project the other's records — and 26% of real records carry
+      // no `cwd`, so that was the common path, not an edge.
+      //
+      // A record that names its own `cwd` is unambiguous and also settles the
+      // file: the rest of the file belongs wherever that one does.
+      const recordCwd =
+        typeof obj.cwd === "string" && obj.cwd.length > 0 ? obj.cwd : null;
+      if (this.projectRoot && recordCwd) {
+        const mine = pathMatchesProject(recordCwd, this.projectRoot);
+        if (fileIsOurs === null) {
+          fileIsOurs = mine;
+          if (mine) {
+            yield* pending;
+          } else if (pending.length > 0) {
+            recordDrift(
+              SCRAPER_NAME,
+              filePath,
+              `${pending.length} record(s) without cwd dropped: this file belongs to ${recordCwd}`,
+            );
+          }
+          pending.length = 0;
+        }
+        if (!mine) {
+          continue;
+        }
+      } else if (this.projectRoot && fileIsOurs === false) {
         continue;
       }
 
@@ -291,7 +332,45 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
         continue;
       }
 
+      // Still no evidence either way: hold it until a record with a `cwd`
+      // settles the file. The cap keeps a file that never names one from
+      // growing this without bound; past it, fall back to the directory match,
+      // which is all the old code ever had.
+      if (this.projectRoot && fileIsOurs === null && !recordCwd) {
+        if (pending.length < MAX_PENDING_UNATTRIBUTED) {
+          pending.push(chunk);
+          continue;
+        }
+        fileIsOurs = exactDirectory;
+        if (!exactDirectory) {
+          recordDrift(
+            SCRAPER_NAME,
+            filePath,
+            `${pending.length} record(s) without cwd dropped: no record in this file names a project`,
+          );
+          pending.length = 0;
+          continue;
+        }
+        yield* pending;
+        pending.length = 0;
+      }
+
       yield chunk;
+    }
+
+    // The file ended without any record naming a project. Nothing better than
+    // the directory match is available, so use it — and say so when it drops
+    // content, rather than losing it silently.
+    if (pending.length > 0) {
+      if (exactDirectory) {
+        yield* pending;
+      } else {
+        recordDrift(
+          SCRAPER_NAME,
+          filePath,
+          `${pending.length} record(s) without cwd dropped: no record in this file names a project`,
+        );
+      }
     }
   }
 
@@ -300,7 +379,8 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
    *
    * Encoded names are ambiguous — `-` stands for `:`, `\` and `/` alike — so
    * this only decides which directories are worth opening. Each record's own
-   * `cwd` is what actually attributes it (see `recordMatchesProject`), which
+   * `cwd` is what actually attributes it — the per-file ownership check in
+   * `readSessionFile` — which
    * is both unambiguous and platform-independent. Keeping the prefix wide
    * here lets sessions started from a subdirectory through; the per-record
    * check then rejects a sibling like `<project>--secret`.
@@ -322,19 +402,6 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
    * Records without a `cwd` fall back to the directory-name decision already
    * made by `filterProjectDirs`.
    */
-  private recordMatchesProject(obj: Record<string, unknown>, exactDirectory: boolean): boolean {
-    if (!this.projectRoot) {
-      return true;
-    }
-    const cwd = obj.cwd;
-    if (typeof cwd !== "string" || cwd.length === 0) {
-      // No provenance on the record. An exact store-directory match is itself
-      // provenance, so keep it; a directory that only matched by prefix could
-      // be a plain sibling (`proj-v2` beside `proj`), so fail closed.
-      return exactDirectory;
-    }
-    return pathMatchesProject(cwd, this.projectRoot);
-  }
 }
 
 /**

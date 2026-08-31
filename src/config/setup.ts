@@ -319,12 +319,18 @@ function renderProjectConfig(projectRoot: string, skills: ProjectSkillConfig): s
       args: ["-y", "xtctx"],
     },
     skills,
+    // `storePath` is deliberately not written. It is optional at read time —
+    // absent means "use this tool's default for this machine" — and setup was
+    // writing exactly that default, so the field carried no information while
+    // baking an absolute home path, including the OS username, into a file
+    // meant to be committable. It also broke portability: a cloned repo
+    // pointed every scraper at the original author's home directory. Set it by
+    // hand to override a store that is not in its usual place.
     tools: Object.fromEntries(
       SUPPORTED_TOOLS.map((tool) => [
         tool.id,
         {
           enabled: true,
-          storePath: tool.defaultStorePath(),
           hook: tool.hookMode,
         },
       ]),
