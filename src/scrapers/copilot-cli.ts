@@ -1,11 +1,12 @@
-import { createReadStream } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { createInterface } from "node:readline";
 import type { CopilotCliChunk } from "../types/scraper.js";
 import { pathMatchesProject } from "../utils/project-scope.js";
 import { AbstractScraper, estimateTokens, toDate } from "./base.js";
 import { recordDrift, withDriftReport } from "./drift-log.js";
+import { fileHeadHash, resumeOffset } from "./base.js";
+import { readJsonlLines } from "./jsonl-reader.js";
+import type { FileCursor } from "../types/scraper.js";
 
 const SCRAPER_NAME = "copilot-cli";
 
@@ -65,6 +66,11 @@ function warnDrift(sourcePath: string, surprise: string, _recordsAffected: numbe
 }
 
 export class CopilotCliScraper extends AbstractScraper<CopilotCliChunk> {
+  /** Resume points from the last scan; empty on a full sync. */
+  private cursors: Record<string, FileCursor> = {};
+  private updatedCursors: Record<string, FileCursor> = {};
+  private resuming = false;
+
   readonly tool = "copilot-cli";
 
   constructor(
@@ -91,14 +97,27 @@ export class CopilotCliScraper extends AbstractScraper<CopilotCliChunk> {
   async *scrape(since?: Date): AsyncIterable<CopilotCliChunk> {
     const state = await this.getLastScrapedPosition();
     const cutoff = since ?? state.lastTimestamp;
-    yield* withDriftReport(SCRAPER_NAME, this.readAllSessions(cutoff), this.stateDir);
+    yield* withDriftReport(SCRAPER_NAME, this.readAllSessions(cutoff, true), this.stateDir);
   }
 
   async *fullSync(): AsyncIterable<CopilotCliChunk> {
     yield* withDriftReport(SCRAPER_NAME, this.readAllSessions(new Date(0)), this.stateDir);
   }
 
-  private async *readAllSessions(since: Date): AsyncIterable<CopilotCliChunk> {
+  /** See the codex scraper: `fullSync` neither resumes nor records. */
+  private async *readAllSessions(since: Date, resume = false): AsyncIterable<CopilotCliChunk> {
+    this.cursors = resume ? ((await this.getLastScrapedPosition()).files ?? {}) : {};
+    this.updatedCursors = {};
+    this.resuming = resume;
+
+    yield* this.readAllSessionsInner(since);
+
+    if (resume && Object.keys(this.updatedCursors).length > 0) {
+      await this.saveScrapedPosition({ files: this.updatedCursors });
+    }
+  }
+
+  private async *readAllSessionsInner(since: Date): AsyncIterable<CopilotCliChunk> {
     let sessionDirs: string[];
     try {
       sessionDirs = await readdir(this.sessionStateDir);
@@ -140,20 +159,36 @@ export class CopilotCliScraper extends AbstractScraper<CopilotCliChunk> {
     sessionId: string,
     since: Date,
   ): AsyncIterable<CopilotCliChunk> {
-    const reader = createInterface({
-      input: createReadStream(filePath, { encoding: "utf8" }),
-      crlfDelay: Infinity,
-    });
+    // Resume where the last scan stopped; see the codex scraper for the guards.
+    const size = await fileSize(filePath);
+    const cursor = this.cursors[filePath];
+    const checkHash =
+      this.resuming && cursor ? await fileHeadHash(filePath, cursor.offset) : null;
+    const startAt = size === null ? 0 : resumeOffset(cursor, size, checkHash ?? undefined);
+    if (size !== null && startAt > 0 && startAt >= size) {
+      return;
+    }
 
-    let messageIndex = 0;
+    const resumed = startAt > 0 ? cursor?.context : undefined;
+
+    let messageIndex = resumed?.messageIndex ?? 0;
     let lineNo = 0;
     // null = no session.start context seen yet; only consulted when scoped.
-    let projectMatch: boolean | null = null;
-    let gitBranch: string | undefined;
-    let gitCommit: string | undefined;
+    // Carried across a resume: it is set by the `session.start` record at the
+    // head of the file, which a resumed read never sees again.
+    let projectMatch: boolean | null = resumed ? resumed.projectMatched : null;
+    let gitBranch: string | undefined = resumed?.gitBranch;
+    let gitCommit: string | undefined = resumed?.gitCommit;
+    let readTo = startAt;
 
-    for await (const line of reader) {
+    for await (const entry of readJsonlLines(filePath, { start: startAt })) {
+      readTo = entry.endOffset;
       lineNo++;
+      const line = entry.line;
+      if (line === null) {
+        warnDrift(filePath, `line exceeds the cap; skipped`, lineNo);
+        continue;
+      }
       if (!line.trim()) {
         // ACCEPTED_DEGRADATIONS.blankJsonlLine
         continue;
@@ -321,6 +356,27 @@ export class CopilotCliScraper extends AbstractScraper<CopilotCliChunk> {
       };
       messageIndex++;
     }
+
+    // Only once the file has been read through, so an interrupted read never
+    // records a position past what it delivered.
+    if (this.resuming && size !== null) {
+      const headHash = await fileHeadHash(filePath, readTo);
+      this.updatedCursors[filePath] = {
+        offset: readTo,
+        size,
+        ...(headHash ? { headHash } : {}),
+        context: {
+          sessionId,
+          messageIndex,
+          // `false` only when scoping actually rejected this file; an
+          // undecided `null` means no session.start was seen, and the
+          // unscoped default is to accept.
+          projectMatched: projectMatch ?? true,
+          gitBranch,
+          gitCommit,
+        },
+      };
+    }
   }
 }
 
@@ -453,4 +509,13 @@ function describeType(value: unknown): string {
   if (value === null) return "null";
   if (Array.isArray(value)) return "array";
   return typeof value;
+}
+
+/** Size in bytes, or null when it cannot be read — in which case do not resume. */
+async function fileSize(path: string): Promise<number | null> {
+  try {
+    return (await stat(path)).size;
+  } catch {
+    return null;
+  }
 }
