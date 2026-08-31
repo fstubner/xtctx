@@ -1,6 +1,12 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, rename, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
-import type { ConversationChunk, ConversationScraper, ScraperState } from "../types/scraper.js";
+import type {
+  ConversationChunk,
+  ConversationScraper,
+  FileCursor,
+  ScraperState,
+} from "../types/scraper.js";
 
 export class ScraperStateManager {
   constructor(private readonly stateDir: string) {}
@@ -143,7 +149,94 @@ export abstract class AbstractScraper<T extends ConversationChunk = Conversation
     return this.stateManager.load(this.tool);
   }
 
-  async saveScrapedPosition(state: ScraperState): Promise<void> {
-    await this.stateManager.save(this.tool, state);
+  /**
+   * Merge into the stored state rather than replacing it.
+   *
+   * Two writers share this file and neither knows about the other's fields.
+   * The index saves `{ lastTimestamp }` when a scrape completes; a scraper
+   * saves `{ files }` as it goes. Replacing meant whichever wrote last erased
+   * the other, and the per-file resume points would have been dropped on every
+   * scan — silently, since losing them only costs a re-read.
+   */
+  async saveScrapedPosition(state: Partial<ScraperState>): Promise<void> {
+    const existing = await this.stateManager.load(this.tool);
+    await this.stateManager.save(this.tool, {
+      ...existing,
+      ...state,
+      files: { ...(existing.files ?? {}), ...(state.files ?? {}) },
+    });
+  }
+}
+
+/**
+ * Where to resume reading an append-only file, given what a previous scan
+ * recorded and what the file looks like now.
+ *
+ * The shrink check is what makes resuming safe to assume rather than safe to
+ * hope. These files are append-only in practice, but that is an observation
+ * about how the tools behave today, not a guarantee any of them documents. A
+ * file smaller than the offset we stored has been rewritten or truncated, so
+ * the offset means nothing and the only correct move is to read it again from
+ * the start. The optimisation then degrades to the behaviour it replaced,
+ * rather than silently skipping content.
+ */
+export function resumeOffset(
+  cursor: FileCursor | undefined,
+  currentSize: number,
+  currentHeadHash?: string,
+): number {
+  // No context means the derived state a resumed read depends on was never
+  // recorded, so resuming would drop or misattribute everything after it.
+  if (!cursor || cursor.offset <= 0 || !cursor.context) {
+    return 0;
+  }
+  if (currentSize < cursor.offset) {
+    return 0;
+  }
+  // A head that no longer matches means the file was rewritten rather than
+  // appended to, so the offset points into different content.
+  if (cursor.headHash !== undefined && cursor.headHash !== currentHeadHash) {
+    return 0;
+  }
+  return cursor.offset;
+}
+
+/** Most leading bytes fingerprinted to tell an append from a rewrite. */
+export const FILE_HEAD_HASH_BYTES = 1024;
+
+/**
+ * Hash the leading bytes of a file, or null when it cannot be read.
+ *
+ * `upTo` bounds the window to bytes that were already present when the offset
+ * was recorded. Hashing a fixed 1024 regardless would cover the whole of any
+ * file shorter than that, so every append would change the hash and resume
+ * would be refused forever — the check has to describe the part of the file
+ * that appending cannot touch.
+ *
+ * Null means "unknown", and `resumeOffset` refuses to resume on it, which is
+ * the safe direction: the cost is a re-read.
+ */
+export async function fileHeadHash(path: string, upTo: number): Promise<string | null> {
+  const window = Math.min(FILE_HEAD_HASH_BYTES, Math.max(0, upTo));
+  if (window === 0) {
+    return null;
+  }
+
+  try {
+    const handle = await open(path, "r");
+    try {
+      const buffer = Buffer.alloc(window);
+      const { bytesRead } = await handle.read(buffer, 0, window, 0);
+      if (bytesRead < window) {
+        // Shorter than the window it was recorded over: rewritten, not
+        // appended to.
+        return null;
+      }
+      return createHash("sha256").update(buffer).digest("hex");
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    return null;
   }
 }
