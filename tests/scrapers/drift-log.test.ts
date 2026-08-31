@@ -422,7 +422,15 @@ describe("drift logs written by concurrent processes", () => {
             const child = spawn(
               process.execPath,
               [resolve("node_modules/tsx/dist/cli.mjs"), worker, stateDir, label],
-              { stdio: "ignore" },
+              {
+                stdio: "ignore",
+                // The production budget is sized for an MCP tool call, where a
+                // stalled flush blocks a user. This test deliberately makes
+                // three processes fight over one file while the rest of the
+                // suite loads the machine, so at three seconds it measured the
+                // machine rather than the lock and failed intermittently.
+                env: { ...process.env, XTCTX_LOCK_WAIT_MS: "60000" },
+              },
             );
             child.once("error", rejectPromise);
             child.once("exit", (code) =>
@@ -483,5 +491,53 @@ describe("a scraper's own drift log", () => {
 
     const log = await readDriftLog(stateDir, "claude-code");
     expect(log?.surprises.some((entry) => entry.surprise.includes("world_state"))).toBe(true);
+  });
+});
+
+/**
+ * The lock's timeout used to break a lock whose holder was demonstrably alive.
+ * That let two writers interleave a read-modify-write over one file, which is
+ * the corruption the lock exists to prevent — so on a loaded machine the
+ * timeout caused exactly the loss it was protecting against.
+ *
+ * Giving up costs nothing, because a failed write keeps its batch pending for
+ * the next flush. Breaking the lock can discard what another process already
+ * committed.
+ */
+describe("a lock held by a live process", () => {
+  let stateDir = "";
+
+  beforeEach(async () => {
+    stateDir = await mkdtemp(join(tmpdir(), "xtctx-drift-live-lock-"));
+  });
+
+  afterEach(async () => {
+    await rm(stateDir, { recursive: true, force: true });
+  });
+
+  it("is never broken, however long the wait runs", async () => {
+    const lockPath = join(stateDir, "codex-drift.json.lock");
+    // This test's own pid: alive by definition, for as long as it runs.
+    await writeFile(lockPath, String(process.pid), "utf-8");
+
+    async function* source(): AsyncGenerator<number> {
+      recordDrift("codex", "/store/a.jsonl:1", "a surprise nobody may lose");
+      yield 1;
+    }
+
+    const previous = process.env.XTCTX_LOCK_WAIT_MS;
+    process.env.XTCTX_LOCK_WAIT_MS = "150";
+    try {
+      // Fails open: the scan completes even though the log could not be written.
+      for await (const _ of withDriftReport("codex", source(), stateDir)) void _;
+    } finally {
+      if (previous === undefined) delete process.env.XTCTX_LOCK_WAIT_MS;
+      else process.env.XTCTX_LOCK_WAIT_MS = previous;
+    }
+
+    // The lock survived, so no second writer was ever invited in.
+    await expect(readFile(lockPath, "utf-8")).resolves.toBe(String(process.pid));
+    // And nothing was half-written to the log it could not take.
+    expect(await readDriftLog(stateDir, "codex")).toBeNull();
   });
 });
