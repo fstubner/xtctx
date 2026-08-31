@@ -1,13 +1,14 @@
-import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import { basename } from "node:path";
-import { createInterface } from "node:readline";
 import { glob } from "glob";
 import type { CodexChunk } from "../types/scraper.js";
 import { AbstractScraper, estimateTokens, toDate } from "./base.js";
 import { pathMatchesProject } from "../utils/project-scope.js";
 import { recordDrift, withDriftReport } from "./drift-log.js";
 import { MAX_LINE_BYTES, isWithinLineLimit } from "./limits.js";
+import { fileHeadHash, resumeOffset } from "./base.js";
+import { readJsonlLines } from "./jsonl-reader.js";
+import type { FileCursor } from "../types/scraper.js";
 
 const SCRAPER_NAME = "codex";
 
@@ -81,7 +82,7 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
   async *scrape(since?: Date): AsyncIterable<CodexChunk> {
     const state = await this.getLastScrapedPosition();
     const cutoff = since ?? state.lastTimestamp;
-    yield* withDriftReport(SCRAPER_NAME, this.readAllSessions(cutoff), this.stateDir);
+    yield* withDriftReport(SCRAPER_NAME, this.readAllSessions(cutoff, true), this.stateDir);
   }
 
   async *fullSync(): AsyncIterable<CodexChunk> {
@@ -122,28 +123,64 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
    * Session-level state (session ID, approval mode, sandbox flag) is tracked
    * across events so that every message chunk carries accurate metadata.
    */
-  private async *readAllSessions(since: Date): AsyncIterable<CodexChunk> {
+  /**
+   * `resume` is false for `fullSync`, which exists to re-read everything.
+   *
+   * Both halves matter. Resuming there would defeat the purpose of the call,
+   * and recording a cursor from it would leave the next incremental scrape
+   * starting at end-of-file, so a rebuild would silently suppress the reads
+   * that follow it.
+   */
+  private async *readAllSessions(since: Date, resume = false): AsyncIterable<CodexChunk> {
     const files = await this.resolveJsonlFiles();
+    const fileCursors = resume ? ((await this.getLastScrapedPosition()).files ?? {}) : {};
+    const updated: Record<string, FileCursor> = {};
 
     for (const filePath of files) {
       try {
       const sessionIdFromFile = inferSessionId(filePath);
-      const reader = createInterface({
-        input: createReadStream(filePath, { encoding: "utf8" }),
-        crlfDelay: Infinity,
-      });
+
+      // Resume where the last scan stopped rather than re-reading the file.
+      //
+      // These are append-only logs, and re-reading them dominated every scan:
+      // a real store here holds 18GB across 841 files with 94% of it in 17
+      // that never change again. `resumeOffset` refuses the cursor when the
+      // file has shrunk or when the carried context is missing, so a wrong
+      // assumption costs a full re-read rather than skipped records.
+      const size = await fileSize(filePath);
+      const cursor = fileCursors[filePath];
+      // Hashed over the window the cursor was recorded against, so an append
+      // cannot change it. See `fileHeadHash`.
+      const checkHash =
+        resume && cursor ? await fileHeadHash(filePath, cursor.offset) : null;
+      const startAt = size === null ? 0 : resumeOffset(cursor, size, checkHash ?? undefined);
+      if (size !== null && startAt > 0 && startAt >= size) {
+        continue;
+      }
+
+      const resumed = startAt > 0 ? cursor?.context : undefined;
 
       // Session-level state, updated as we encounter meta/context events.
-      let sessionId = sessionIdFromFile;
-      let approvalMode: ApprovalMode = "suggest";
-      let gitBranch: string | undefined;
-      let gitCommit: string | undefined;
-      let sandboxed = false;
-      let messageIndex = 0;
-      let projectMatched = this.projectRoot ? false : true;
+      // On a resume these come from the cursor: they are derived from records
+      // at the head of the file that this read will never see.
+      let sessionId = resumed?.sessionId ?? sessionIdFromFile;
+      let approvalMode: ApprovalMode = (resumed?.approvalMode as ApprovalMode) ?? "suggest";
+      let gitBranch: string | undefined = resumed?.gitBranch;
+      let gitCommit: string | undefined = resumed?.gitCommit;
+      let sandboxed = resumed?.sandboxed ?? false;
+      let messageIndex = resumed?.messageIndex ?? 0;
+      let projectMatched = resumed?.projectMatched ?? (this.projectRoot ? false : true);
       let unattributedWarned = false;
+      let readTo = startAt;
 
-      for await (const line of reader) {
+      for await (const entry of readJsonlLines(filePath, { start: startAt })) {
+        readTo = entry.endOffset;
+        const line = entry.line;
+        if (line === null) {
+          // Over the cap and discarded unread; see the classification below.
+          if (!entry.oversized) continue;
+          continue;
+        }
         if (!line.trim()) {
           continue;
         }
@@ -408,10 +445,38 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
         });
         messageIndex++;
       }
+
+      // Only after the file has been read through without throwing. Recording
+      // a position mid-read would skip whatever the failure interrupted.
+      if (resume && size !== null) {
+        const recordHash = await fileHeadHash(filePath, readTo);
+        updated[filePath] = {
+          offset: readTo,
+          size,
+          ...(recordHash ? { headHash: recordHash } : {}),
+          context: {
+            sessionId,
+            messageIndex,
+            projectMatched,
+            approvalMode,
+            gitBranch,
+            gitCommit,
+            sandboxed,
+          },
+        };
+      }
       } catch (err) {
-        // One unreadable file must not abort the remaining session files.
+        // One unreadable file must not abort the remaining session files, and
+        // no cursor is recorded for it — the next scan reads it again from
+        // wherever it last succeeded.
         warnDrift(filePath, `unreadable transcript file: ${(err as Error).message}`, 0);
       }
+    }
+
+    if (Object.keys(updated).length > 0) {
+      // Merged by `saveScrapedPosition`, so this does not disturb the
+      // `lastTimestamp` the index writes when the whole scrape completes.
+      await this.saveScrapedPosition({ files: updated });
     }
   }
 
@@ -551,4 +616,13 @@ const TYPE_PEEK_CHARS = 200;
 export function isKnownBulkyRecord(line: string): boolean {
   const type = /"type"\s*:\s*"([^"]+)"/.exec(line.slice(0, TYPE_PEEK_CHARS))?.[1];
   return type !== undefined && BULKY_RESTATEMENT_TYPES.has(type);
+}
+
+/** Size in bytes, or null when it cannot be read — in which case do not resume. */
+async function fileSize(path: string): Promise<number | null> {
+  try {
+    return (await stat(path)).size;
+  } catch {
+    return null;
+  }
 }

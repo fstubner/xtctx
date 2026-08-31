@@ -37,11 +37,58 @@ export interface ConversationChunk {
   metadata: ChunkMetadata;
 }
 
+/**
+ * State carried across a resume, because it is derived from records at the
+ * start of a file that a resumed read never sees again.
+ *
+ * `messageIndex` and `projectMatched` are load-bearing rather than
+ * conveniences: chunk ids hash the index, so restarting it would re-emit the
+ * whole session under new ids, and `projectMatched` is set by the
+ * `session_meta` and `turn_context` records at the head of the file, so
+ * without it a resumed read attributes nothing and silently drops every
+ * record it reads.
+ */
+export interface FileCursorContext {
+  sessionId: string;
+  messageIndex: number;
+  projectMatched: boolean;
+  approvalMode?: string;
+  gitBranch?: string;
+  gitCommit?: string;
+  sandboxed?: boolean;
+}
+
+/** Where a previous scan stopped inside one append-only file. */
+export interface FileCursor {
+  /** Byte offset just past the last complete line consumed. */
+  offset: number;
+  /** File size when that offset was recorded; a smaller size means rewritten. */
+  size: number;
+  /**
+   * Hash of the file's first bytes when the offset was recorded.
+   *
+   * Size alone cannot tell an append from a rewrite: a rewritten file that
+   * happens to be as large as the old offset resumes mid-line and yields
+   * garbage. An append never changes the head; a rewrite almost always does.
+   */
+  headHash?: string;
+  /** Absent means resume is unsafe, so the file is read from the start. */
+  context?: FileCursorContext;
+}
+
 export interface ScraperState {
   lastTimestamp: Date;
   lastOffset?: number;
   lastRowId?: number;
   checksum?: string;
+  /**
+   * Resume points for append-only transcript files, keyed by absolute path.
+   *
+   * A read optimisation only: what gets emitted is still decided by
+   * `lastTimestamp` and each scraper's own filters. Losing this file costs a
+   * full re-read, never correctness.
+   */
+  files?: Record<string, FileCursor>;
 }
 
 export interface ConversationScraper<
