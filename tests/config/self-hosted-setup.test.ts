@@ -11,7 +11,7 @@
  * appended a second hook on every run and disconnect could not have removed
  * either. These tests pin both halves.
  */
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -27,19 +27,37 @@ const SELF_PKG = JSON.stringify({
 describe("self-hosted project detection", () => {
   let root = "";
   let home = "";
+  let realArgv1: string | undefined;
 
   beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), "xtctx-self-"));
+    root = await realpath(await mkdtemp(join(tmpdir(), "xtctx-self-")));
     home = await mkdtemp(join(tmpdir(), "xtctx-self-home-"));
+    realArgv1 = process.argv[1];
   });
 
   afterEach(async () => {
+    if (realArgv1 === undefined) delete process.argv[1];
+    else process.argv[1] = realArgv1;
     await rm(root, { recursive: true, force: true });
     await rm(home, { recursive: true, force: true });
   });
 
-  it("runs the built entry point instead of npx inside the xtctx repo", async () => {
+  /**
+   * Stand the project up as xtctx *and* make its built entry point the file
+   * this process is running, which together are what self-hosting now
+   * requires.
+   */
+  async function beSelfHosted(): Promise<string> {
     await writeFile(join(root, "package.json"), SELF_PKG, "utf-8");
+    const entry = join(root, "dist", "src", "cli", "index.js");
+    await mkdir(join(root, "dist", "src", "cli"), { recursive: true });
+    await writeFile(entry, "// built entry point\n", "utf-8");
+    process.argv[1] = entry;
+    return entry;
+  }
+
+  it("runs the built entry point instead of npx inside the xtctx repo", async () => {
+    await beSelfHosted();
 
     const def = await xtctxServerDefinition(root);
 
@@ -49,6 +67,36 @@ describe("self-hosted project detection", () => {
     // Absolute: an MCP client's cwd when spawning a server is not guaranteed
     // to be the project root, unlike a Claude Code hook's.
     expect((def.args ?? [])[0]?.startsWith(root)).toBe(true);
+  });
+
+  it("uses npx in a foreign repo that merely claims to be xtctx", async () => {
+    // The finding this pins. `package.json` is attacker-controlled data in any
+    // repo you clone, so name-plus-bin authenticates nothing: it let a hostile
+    // checkout nominate its own `dist/src/cli/index.js` as an MCP server and a
+    // SessionStart hook command — and the Antigravity write puts that into a
+    // machine-global config, so it outlives the project you ran setup in.
+    //
+    // Running code we are already running grants no new trust; running code a
+    // cloned directory nominated grants all of it.
+    await writeFile(join(root, "package.json"), SELF_PKG, "utf-8");
+    await mkdir(join(root, "dist", "src", "cli"), { recursive: true });
+    await writeFile(join(root, "dist", "src", "cli", "index.js"), "console.log('pwned')\n", "utf-8");
+    // This process is running something else entirely — the normal case for
+    // `npx xtctx setup` in a directory someone else prepared.
+    process.argv[1] = join(home, "somewhere", "else.js");
+
+    const def = await xtctxServerDefinition(root);
+
+    expect(def.command).toBe("npx");
+    expect(def.args).toEqual(["-y", "xtctx"]);
+  });
+
+  it("uses npx when the repo has no built entry point to authenticate against", async () => {
+    // Fails closed: npx is always safe, so an unresolvable entry point picks it.
+    await writeFile(join(root, "package.json"), SELF_PKG, "utf-8");
+    process.argv[1] = join(root, "dist", "src", "cli", "index.js");
+
+    expect((await xtctxServerDefinition(root)).command).toBe("npx");
   });
 
   it("uses npx everywhere else", async () => {
@@ -85,7 +133,7 @@ describe("self-hosted project detection", () => {
     // The regression the marker change guards. With the old marker the
     // self-hosted command matched nothing, so every setup appended another
     // hook and the file grew without bound.
-    await writeFile(join(root, "package.json"), SELF_PKG, "utf-8");
+    await beSelfHosted();
     await mkdir(join(root, ".xtctx"), { recursive: true });
 
     await setupProject({ projectPath: root, homeDir: home });

@@ -1,7 +1,8 @@
 import { createProjectServices } from "../runtime/services.js";
 import type { SessionSummary } from "../handoff/types.js";
 import { dirname, join } from "node:path";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
+import { writeFileAtomic } from "../utils/atomic-file.js";
 import { inlineSafe } from "../utils/untrusted-text.js";
 
 export interface HookOptions {
@@ -236,8 +237,14 @@ async function rememberStoreDirs(
       return;
     }
 
-    await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, `${JSON.stringify(merged, null, 2)}\n`, "utf-8");
+    // Atomic, and contained: this was a plain `writeFile` straight at a
+    // predictable path, so a `.xtctx/state` symlinked out of the project — or
+    // a file pre-planted at the target — redirected the write. The path is
+    // derived from the project root, and a cloned repo chooses what its own
+    // directories are, so containment is the check that matters.
+    await writeFileAtomic(path, `${JSON.stringify(merged, null, 2)}\n`, {
+      containWithin: projectRoot,
+    });
   } catch {
     // See the docstring: never fail the session over a cache write.
   }

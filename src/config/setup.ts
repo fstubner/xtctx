@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm, stat } from "node:fs/promises";
+import { mkdir, readFile, realpath, rm, stat } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { writeFileAtomic } from "../utils/atomic-file.js";
 import {
@@ -254,6 +254,18 @@ const SELF_HOSTED_ENTRY = "./dist/src/cli/index.js";
  * Used only for text that gets committed; see the call site.
  */
 function portablePath(arg: string, projectRoot: string): string {
+  // Absolute first, and it is not a shortcut. Every path this needs to rewrite
+  // is built with `join(projectRoot, …)`, so anything relative is a flag or a
+  // package name. Without this test `relative()` resolves a bare `-y` against
+  // the *process cwd*, and `cd project && npx -y xtctx setup` — the documented
+  // way to run it — made the cwd the project root and turned the flag into
+  // `./-y`. The block then advertised `npx ./-y ./xtctx`, a command that does
+  // not exist, and its contents depended on which directory setup was run
+  // from, so re-running churned a committed file.
+  if (!isAbsolute(arg)) {
+    return arg;
+  }
+
   const rel = relative(projectRoot, arg);
   if (!rel || rel.startsWith("..") || isAbsolute(rel)) {
     return arg;
@@ -272,8 +284,22 @@ function portablePath(arg: string, projectRoot: string): string {
  * It also meant the hook ran whatever npx had cached rather than the working
  * tree, so a developer could be debugging output no longer in their source.
  *
- * Both checks matter: a user's unrelated project that happens to be named
- * `xtctx` will not also declare this package's `bin` entry.
+ * What the branch decides is which code gets configured to run: as an MCP
+ * server, as a SessionStart hook command, and — through Antigravity — in a
+ * *machine-global* config that outlives the project setup ran in. So the
+ * question it answers is a trust question, and `package.json` cannot answer
+ * it. Name and `bin` are just strings in a file, and every file in a cloned
+ * repository is attacker-controlled; a hostile checkout that copied them
+ * nominated its own `dist/src/cli/index.js` and xtctx wired it up.
+ *
+ * The authenticating step is the third check: the built entry point has to be
+ * the file this process is *already executing*. That grants no new trust —
+ * the operator ran this code to get here — while a checkout merely claiming
+ * the name grants all of it. It also happens to be the precise condition the
+ * npx problem needs, since running from `dist/` is what someone developing
+ * xtctx does.
+ *
+ * Fails closed: anything unresolvable picks npx, which is always safe.
  */
 async function isSelfHostedProject(projectRoot: string): Promise<boolean> {
   const pkg = await readJsonIfExists(join(projectRoot, "package.json"));
@@ -281,7 +307,38 @@ async function isSelfHostedProject(projectRoot: string): Promise<boolean> {
     return false;
   }
   const bin = pkg.bin;
-  return isRecord(bin) && typeof bin.xtctx === "string" && bin.xtctx.includes("cli/index.js");
+  if (!(isRecord(bin) && typeof bin.xtctx === "string" && bin.xtctx.includes("cli/index.js"))) {
+    return false;
+  }
+
+  return runningFromProject(projectRoot);
+}
+
+/**
+ * True when the CLI file this process is running is the project's own built
+ * entry point.
+ *
+ * Compared through `realpath` because the ways of invoking it differ by a
+ * symlink: `node ./dist/src/cli/index.js` names it directly, while a
+ * `node_modules/.bin/xtctx` shim points at the same file under another name.
+ */
+async function runningFromProject(projectRoot: string): Promise<boolean> {
+  const entry = process.argv[1];
+  if (!entry) {
+    return false;
+  }
+
+  try {
+    const [running, built] = await Promise.all([
+      realpath(resolve(entry)),
+      realpath(join(projectRoot, "dist", "src", "cli", "index.js")),
+    ]);
+    return running === built;
+  } catch {
+    // Either path is missing — most often a repo whose `dist/` has not been
+    // built. Nothing to authenticate against, so use npx.
+    return false;
+  }
 }
 
 export async function xtctxServerDefinition(projectRoot?: string): Promise<McpServerDefinition> {
