@@ -65,7 +65,15 @@ export async function main(argv = process.argv): Promise<void> {
 
   program
     .name("xtctx")
-    .description("Local cross-tool handoff for AI coding agents")
+    .description(
+      [
+        "Local cross-tool handoff for AI coding agents",
+        "",
+        "Run with no command and non-interactive stdio and xtctx starts its MCP",
+        "server over stdio. Set XTCTX_NO_AUTO_MCP=1 to print this help instead,",
+        "which is what you want when scripting xtctx from a pipe.",
+      ].join("\n"),
+    )
     .version(CLI_VERSION)
     .showHelpAfterError();
 

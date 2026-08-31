@@ -15,6 +15,18 @@ export interface StatusOptions {
 
 export async function runStatus(options: StatusOptions = {}): Promise<void> {
   const projectRoot = resolve(options.projectPath ?? process.cwd());
+
+  // A path that does not exist produced a full, plausible status report about
+  // it — ending in "run xtctx setup" — so a typo'd `--project` answered
+  // confidently about nothing. Diagnostics that cannot tell a mistyped path
+  // from an unconfigured one are worse than no diagnostics.
+  if (!existsSync(projectRoot)) {
+    process.stderr.write(`No such directory: ${projectRoot}
+`);
+    process.exitCode = 1;
+    return;
+  }
+
   // Diagnostics do not configure. Running `status` on a project left a
   // database behind in one it had only been asked to look at.
   const services = await createProjectServices(projectRoot, { createIfMissing: false });
@@ -270,6 +282,7 @@ function managedTargets(projectRoot: string): Array<{ label: string; path: strin
 export function storePathNotes(
   definition: (typeof SUPPORTED_TOOLS)[number] | undefined,
   storePaths: string[],
+  homeDir: string = process.env.USERPROFILE ?? process.env.HOME ?? "",
 ): string[] {
   if (!definition) {
     return [];
@@ -287,6 +300,23 @@ export function storePathNotes(
     if (normalizePath(path) === normalizePath(resolved)) {
       continue;
     }
+    // Before the staleness check: where a path points matters more than
+    // whether it resolves today. A share that is offline reads as "stale"
+    // otherwise, which is the reassuring half of a two-part fact.
+    // An override is legal by design, but not every override is equal. One
+    // inside your home is the ordinary case — a tool keeping data somewhere
+    // unusual. One outside it arrived from somewhere, and `.xtctx/config.yaml`
+    // is committable, so a cloned repo can point a scraper at a network share
+    // or another account and nothing would otherwise say so.
+    if (homeDir && !isInsideDir(path, homeDir)) {
+      notes.push(
+        `custom store path OUTSIDE your home directory: ${path} — ` +
+          `xtctx will read transcripts from there. If you did not set this, ` +
+          `check .xtctx/config.yaml (it is committable, so a cloned repo can carry one)`,
+      );
+      continue;
+    }
+
     if (!existsSync(path) && existsSync(resolved)) {
       notes.push(
         `stale store path: ${path} does not exist, but ${definition.id} has a store at ` +
@@ -298,6 +328,12 @@ export function storePathNotes(
   }
 
   return notes;
+}
+
+function isInsideDir(candidate: string, root: string): boolean {
+  const c = normalizePath(candidate);
+  const r = normalizePath(root);
+  return c === r || c.startsWith(`${r}/`);
 }
 
 function normalizePath(value: string): string {
