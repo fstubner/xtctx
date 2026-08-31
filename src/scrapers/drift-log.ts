@@ -155,6 +155,19 @@ const LOCK_PID_GRACE_MS = 250;
  * -digit milliseconds, so seconds are already enormous headroom.
  */
 const MAX_LOCK_WAIT_MS = 3_000;
+
+/**
+ * Override for the wait budget, in milliseconds.
+ *
+ * The default is sized for an MCP tool call, not for correctness under
+ * contention. A test that deliberately makes several processes fight over one
+ * log is measuring the lock, and on a loaded machine three seconds says more
+ * about the machine than about the lock.
+ */
+function lockWaitBudgetMs(): number {
+  const raw = Number.parseInt(process.env.XTCTX_LOCK_WAIT_MS ?? "", 10);
+  return Number.isFinite(raw) && raw > 0 ? raw : MAX_LOCK_WAIT_MS;
+}
 const LOCK_RETRY_MS = 25;
 
 /**
@@ -184,7 +197,7 @@ const LOCK_CONTENTION_CODES = new Set(["EEXIST", "EPERM", "EACCES", "EBUSY"]);
  * which is worse than the interleaving the lock prevents.
  */
 async function withFileLock<T>(lockPath: string, work: () => Promise<T>): Promise<T> {
-  const giveUpAt = Date.now() + MAX_LOCK_WAIT_MS;
+  const giveUpAt = Date.now() + lockWaitBudgetMs();
   let brokeLock = false;
   for (;;) {
     try {
@@ -217,6 +230,22 @@ async function withFileLock<T>(lockPath: string, work: () => Promise<T>): Promis
       if ((holderAlive || withinGrace) && Date.now() < giveUpAt) {
         await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_MS));
         continue;
+      }
+
+      // A live holder's lock is never broken, however long the wait has run.
+      //
+      // Breaking one lets two writers interleave a read-modify-write over the
+      // same file, which is the corruption the lock exists to prevent — so the
+      // timeout was capable of causing exactly the loss it was protecting
+      // against, and did, whenever a loaded machine starved the holder past
+      // three seconds. Giving up instead costs nothing: the caller keeps the
+      // batch and the next flush writes it, whereas a broken lock can discard
+      // surprises another process had already committed.
+      if (holderAlive) {
+        throw new Error(
+          `drift log lock held by live process ${holder} for ${heldFor}ms; ` +
+            "leaving the batch pending for the next flush",
+        );
       }
 
       if (Date.now() >= giveUpAt) {
