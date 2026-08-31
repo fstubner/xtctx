@@ -109,7 +109,9 @@ describe("vector warming in a short-lived process", () => {
       dbPath,
       tempDir,
       [{ tool: "codex", scraper: new OneShotScraper(Array.from({ length: 16 }, (_, i) => chunk(i))) }],
-      { embeddingProvider: provider },
+      // Set explicitly: this test asserts the wait, and `tests/setup.ts`
+      // zeroes it for every suite that does not.
+      { embeddingProvider: provider, embeddingWarmBudgetMs: 5_000 },
     );
 
     await index.listRecentSessions(5);
