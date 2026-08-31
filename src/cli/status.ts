@@ -300,36 +300,35 @@ export function storePathNotes(
     if (normalizePath(path) === normalizePath(resolved)) {
       continue;
     }
-    // Before the staleness check: where a path points matters more than
-    // whether it resolves today. A share that is offline reads as "stale"
-    // otherwise, which is the reassuring half of a two-part fact.
-    // An override is legal by design, but not every override is equal. One
-    // inside your home is the ordinary case — a tool keeping data somewhere
-    // unusual. One outside it arrived from somewhere, and `.xtctx/config.yaml`
-    // is committable, so a cloned repo can point a scraper at a network share
-    // or another account and nothing would otherwise say so.
-    // Emitted alongside the notes below, not instead of them. Where a path
-    // points and whether it resolves are independent facts, and suppressing
-    // the staleness hint lost the actionable half — the path that does exist
-    // and how to adopt it — for exactly the paths most worth explaining.
-    if (homeDir && !isInsideDir(path, homeDir)) {
-      notes.push(
-        `custom store path OUTSIDE your home directory: ${path} — ` +
-          `xtctx will read transcripts from there. If you did not set this, ` +
-          `check .xtctx/config.yaml (it is committable, so a cloned repo can carry one)`,
-      );
-    }
+
+    // One note per path, whatever is wrong with it.
+    //
+    // An override is legal by design — a cloned repo can legitimately point a
+    // scraper anywhere — but not every override is equal. One inside your home
+    // is a tool keeping data somewhere unusual. One outside it arrived from
+    // somewhere, and `.xtctx/config.yaml` is committable, so a clone can carry
+    // one and nothing would otherwise say so.
+    //
+    // It is a qualifier on the note rather than a note of its own: where a
+    // path points and whether it resolves are independent facts, and emitting
+    // them separately doubled the count callers read as "problems with this
+    // path". Saying both in one line keeps the actionable half — the store
+    // that does exist, and how to adopt it — attached to the warning.
+    const suffix =
+      homeDir && !isInsideDir(path, homeDir)
+        ? " — WARNING: this is outside your home directory; xtctx will read " +
+          "transcripts from there. If you did not set it, check .xtctx/config.yaml " +
+          "(it is committable, so a cloned repo can carry one)"
+        : "";
 
     if (!existsSync(path) && existsSync(resolved)) {
       notes.push(
         `stale store path: ${path} does not exist, but ${definition.id} has a store at ` +
-          `${resolved} — re-run 'xtctx setup --yes' to point at it`,
+          `${resolved} — re-run 'xtctx setup --yes' to point at it${suffix}`,
       );
       continue;
     }
-    if (!homeDir || isInsideDir(path, homeDir)) {
-      notes.push(`custom store path (not the ${definition.id} default): ${path}`);
-    }
+    notes.push(`custom store path (not the ${definition.id} default): ${path}${suffix}`);
   }
 
   return notes;

@@ -18,7 +18,8 @@ const HOME = "C:/Users/someone";
 describe("storePathNotes", () => {
   it("names a store path that leaves the user's home directory", () => {
     const notes = storePathNotes(claude, ["//attacker-share/transcripts"], HOME);
-    expect(notes.join(" ")).toMatch(/OUTSIDE your home directory/);
+    expect(notes).toHaveLength(1);
+    expect(notes.join(" ")).toMatch(/outside your home directory/i);
     expect(notes.join(" ")).toMatch(/committable/);
   });
 
@@ -27,7 +28,7 @@ describe("storePathNotes", () => {
     // but not the one about reading transcripts from somewhere you did not
     // choose, which is the claim this guards.
     const notes = storePathNotes(claude, [`${HOME}/elsewhere/claude`], HOME);
-    expect(notes.join(" ")).not.toMatch(/OUTSIDE/);
+    expect(notes.join(" ")).not.toMatch(/outside your home directory/i);
     expect(notes.length).toBeGreaterThan(0);
   });
 
@@ -44,8 +45,12 @@ describe("storePathNotes", () => {
     // dir is inside HOME, so it passed there and only the matrix saw it.
     const notes = storePathNotes(claude, ["/elsewhere/gone/claude"], HOME);
     const joined = notes.join(" ");
-    expect(joined).toMatch(/OUTSIDE your home directory/);
-    expect(joined).toMatch(/stale store path|custom store path/);
-    expect(notes.length).toBeGreaterThan(1);
+    // One note carrying both facts. Emitting two doubled the count callers
+    // read as "problems with this path", which broke an existing expectation
+    // on Linux only — the temp dir is outside HOME there and inside it on
+    // Windows, so it passed locally and only the matrix saw it.
+    expect(notes).toHaveLength(1);
+    expect(joined).toMatch(/outside your home directory/i);
+    expect(joined).toMatch(/store path/);
   });
 });
