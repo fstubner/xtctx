@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.21.9](https://github.com/fstubner/xtctx/compare/xtctx-v0.21.8...xtctx-v0.21.9) (2026-08-31)
+
+
+### Bug Fixes
+
+* **index:** repair unit coverage, vectorise in-process, make the security gate assert ([#295](https://github.com/fstubner/xtctx/issues/295)) ([5fd62d9](https://github.com/fstubner/xtctx/commit/5fd62d9fdac33355424290bafa161c567adee104))
+* **scope:** close three project-boundary leaks ([#293](https://github.com/fstubner/xtctx/issues/293)) ([2043ffc](https://github.com/fstubner/xtctx/commit/2043ffc6e98387a3929495284703f0fe53b79113))
+
 ## [0.21.8](https://github.com/fstubner/xtctx/compare/xtctx-v0.21.7...xtctx-v0.21.8) (2026-08-31)
 
 
