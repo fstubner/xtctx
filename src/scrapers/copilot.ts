@@ -189,6 +189,24 @@ export class CopilotScraper extends AbstractScraper<CopilotChunk> {
       }
 
       const filePath = join(sessionsDir, name);
+
+      // Skip files untouched since the last scrape.
+      //
+      // Not a timestamp cursor: the comment below explains why one of those
+      // caused permanent turn loss, since Copilot stamps only a session-level
+      // creationDate that individual turns inherit. This is a *file* mtime,
+      // and a file VS Code has not written cannot have gained a turn — so
+      // every turn in every changed file is still emitted every cycle, and the
+      // correctness property is untouched. Without this the scraper re-read
+      // and re-parsed the entire history on every refresh, which is the only
+      // scraper that does so and grows without bound.
+      if (sinceMs > 0) {
+        const modifiedAt = await fileModifiedMs(filePath);
+        if (modifiedAt !== null && modifiedAt <= sinceMs) {
+          continue;
+        }
+      }
+
       // The whole file is read into memory and then split, so an oversized one
       // costs the long-lived server twice its size. These files are written by
       // another tool, so their size is not ours to trust.
@@ -685,4 +703,16 @@ function describeType(value: unknown): string {
   if (value === null) return "null";
   if (Array.isArray(value)) return "array";
   return typeof value;
+}
+
+/**
+ * File mtime in epoch ms, or null when it cannot be read — in which case the
+ * caller must fall back to reading the file, since "unknown" is not "unchanged".
+ */
+async function fileModifiedMs(path: string): Promise<number | null> {
+  try {
+    return (await stat(path)).mtimeMs;
+  } catch {
+    return null;
+  }
 }
