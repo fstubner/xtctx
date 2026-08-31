@@ -43,7 +43,14 @@ const MAX_MESSAGE_CHARS = 16_000;
  * Checked here rather than in the index, because this is the boundary the
  * untrusted argument arrives at.
  */
-function validatedFilter(value: unknown, field: string): string[] | undefined {
+/**
+ * Exported so every tool taking a filter enforces the same rule. The manifest
+ * handler carried no validation at all, so `tool_filter: "cursor"` — a bare
+ * string where an array belongs — was passed through and silently ignored,
+ * returning every tool. They asked for less and got more, which is the exact
+ * failure the docstring above describes.
+ */
+export function validatedFilter(value: unknown, field: string): string[] | undefined {
   if (value === undefined || value === null) {
     return undefined;
   }

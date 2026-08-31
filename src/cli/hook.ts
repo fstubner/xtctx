@@ -96,7 +96,7 @@ function activeFrame(session: SessionSummary): string[] {
   const lines = [
     "## Active context",
     "",
-    `- Session: \`${session.session_ref}\` (${session.tool}${branch})`,
+    `- Session: \`${inlineSafe(session.session_ref)}\` (${inlineSafe(session.tool)}${branch})`,
     `- Last activity: ${session.last_activity_at}`,
     `- Messages: ${session.message_count}`,
   ];
@@ -109,7 +109,7 @@ function activeFrame(session: SessionSummary): string[] {
 
   lines.push(
     "",
-    `Call \`xtctx_session_detail session_ref="${session.session_ref}"\` for the full turn history.`,
+    `Call \`xtctx_session_detail session_ref="${inlineSafe(session.session_ref)}"\` for the full turn history.`,
     "",
   );
 

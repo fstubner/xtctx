@@ -493,6 +493,13 @@ class AntigravityLanguageServerClient implements AntigravityRuntimeClient {
       (typeof worthFetching)[number],
       AntigravityRuntimeConversation
     >(worthFetching, 6, async ([sessionId, entry]) => {
+      // mapWithConcurrency turns every throw in here into a null result, and
+      // `unfetched` was only incremented on an explicit null *response*. So
+      // anything throwing after a successful fetch — a parse failure, an
+      // unexpected shape — produced a healthy-looking empty scrape with the
+      // cursor advanced, which is exactly what the degradation field exists to
+      // prevent. Counted here, where the throw is still visible.
+      try {
       const stepCount = toPositiveInteger(entry.summary.stepCount) ?? 1000;
       const response = await callLanguageServer(
         entry.endpoint,
@@ -531,6 +538,15 @@ class AntigravityLanguageServerClient implements AntigravityRuntimeClient {
         workspaces: extractWorkspaceUris(entry.summary),
         messages,
       };
+      } catch (err) {
+        unfetched += 1;
+        recordDrift(
+          SCRAPER_NAME,
+          `antigravity-ls:${entry.endpoint}`,
+          `trajectory read failed for ${sessionId}: ${(err as Error).message}`,
+        );
+        throw err;
+      }
     });
 
     const conversations = fetched.filter(
