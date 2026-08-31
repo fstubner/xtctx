@@ -87,6 +87,12 @@ describe("MCP server over stdio", () => {
     // test exists to talk to that server.
     const env = { ...sandboxEnv(home) };
     delete env.XTCTX_NO_AUTO_MCP;
+    // The rest of the suite runs with embeddings disabled, because several
+    // vitest workers each loading a ~100MB ONNX model exhausted memory. This
+    // file is the exception: one of its cases exists to prove the real model
+    // loads inside a spawned server and vectorises, so it has to opt back in
+    // for the child it spawns rather than inherit the suite's default.
+    delete env.XTCTX_DISABLE_EMBEDDINGS;
     proc = spawn(process.execPath, [resolve("node_modules/tsx/dist/cli.mjs"), resolve("src/cli/index.ts")], {
       cwd: projectRoot,
       env,
