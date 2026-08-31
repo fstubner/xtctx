@@ -1,6 +1,6 @@
 {
   "name": "xtctx",
-  "version": "0.21.7",
+  "version": "0.21.8",
   "description": "Local cross-tool handoff for AI coding agents.",
   "type": "module",
   "bin": {

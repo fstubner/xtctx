@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 This file is maintained automatically by Release Please.
 
+## [0.21.8](https://github.com/fstubner/xtctx/compare/xtctx-v0.21.7...xtctx-v0.21.8) (2026-08-31)
+
+
+### Bug Fixes
+
+* **disconnect:** do nothing in a project that was never configured ([#292](https://github.com/fstubner/xtctx/issues/292)) ([748bb02](https://github.com/fstubner/xtctx/commit/748bb02592b6bff894ad456b671ff5744071cc61))
+* **setup:** do not route xtctx through npx inside its own repo ([#290](https://github.com/fstubner/xtctx/issues/290)) ([fe9f58f](https://github.com/fstubner/xtctx/commit/fe9f58fc991bfd71404f21363b26a94a3589f861))
+
 ## [0.21.7](https://github.com/fstubner/xtctx/compare/xtctx-v0.21.6...xtctx-v0.21.7) (2026-08-30)
 
 
