@@ -1,12 +1,13 @@
 import { stat, readdir } from "node:fs/promises";
 import { join } from "node:path";
-import { createReadStream } from "node:fs";
-import { createInterface } from "node:readline";
 import type { ChunkMetadata, ClaudeCodeChunk } from "../types/scraper.js";
 import { AbstractScraper, estimateTokens } from "./base.js";
 import { encodePathForToolDirectory, pathMatchesProject } from "../utils/project-scope.js";
 import { recordDrift, withDriftReport } from "./drift-log.js";
-import { MAX_LINE_BYTES, isWithinLineLimit } from "./limits.js";
+import { MAX_LINE_BYTES } from "./limits.js";
+import { fileHeadHash, resumeOffset } from "./base.js";
+import { readJsonlLines } from "./jsonl-reader.js";
+import type { FileCursor } from "../types/scraper.js";
 
 const SCRAPER_NAME = "claude-code";
 
@@ -65,6 +66,13 @@ const NON_MESSAGE_TYPES = new Set([
 export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
   readonly tool = "claude-code";
 
+  /** Resume points from the last scan; empty on a full sync. */
+  private cursors: Record<string, FileCursor> = {};
+  /** Resume points recorded by this scan. */
+  private updatedCursors: Record<string, FileCursor> = {};
+  /** False on a full sync, which neither resumes nor records. */
+  private resuming = false;
+
   constructor(
     private readonly claudeProjectsDir: string,
     stateDir: string,
@@ -95,7 +103,7 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
   async *scrape(since?: Date): AsyncIterable<ClaudeCodeChunk> {
     const state = await this.getLastScrapedPosition();
     const cutoff = since ?? state.lastTimestamp;
-    yield* withDriftReport(SCRAPER_NAME, this.readAllSessions(cutoff), this.stateDir);
+    yield* withDriftReport(SCRAPER_NAME, this.readAllSessions(cutoff, true), this.stateDir);
   }
 
   async *fullSync(): AsyncIterable<ClaudeCodeChunk> {
@@ -129,7 +137,22 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
     };
   }
 
-  private async *readAllSessions(since: Date): AsyncIterable<ClaudeCodeChunk> {
+  /** See the codex scraper: `fullSync` neither resumes nor records. */
+  private async *readAllSessions(since: Date, resume = false): AsyncIterable<ClaudeCodeChunk> {
+    this.cursors = resume ? ((await this.getLastScrapedPosition()).files ?? {}) : {};
+    this.updatedCursors = {};
+    this.resuming = resume;
+
+    yield* this.readAllSessionsInner(since);
+
+    if (resume && Object.keys(this.updatedCursors).length > 0) {
+      // Merged by `saveScrapedPosition`, so this leaves the index's
+      // `lastTimestamp` alone.
+      await this.saveScrapedPosition({ files: this.updatedCursors });
+    }
+  }
+
+  private async *readAllSessionsInner(since: Date): AsyncIterable<ClaudeCodeChunk> {
     // When the tool told us where its transcripts are, believe it.
     //
     // Reconstructing the location means re-implementing Claude Code's own path
@@ -217,32 +240,46 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
     since: Date,
     exactDirectory: boolean,
   ): AsyncIterable<ClaudeCodeChunk> {
-    const reader = createInterface({
-      input: createReadStream(filePath, { encoding: "utf8" }),
-      crlfDelay: Infinity,
-    });
+    // Resume where the last scan stopped; see the codex scraper for why these
+    // files are safe to resume and what refuses the cursor.
+    const size = await fileSize(filePath);
+    const cursor = this.cursors[filePath];
+    const checkHash =
+      this.resuming && cursor ? await fileHeadHash(filePath, cursor.offset) : null;
+    const startAt = size === null ? 0 : resumeOffset(cursor, size, checkHash ?? undefined);
+    if (size !== null && startAt > 0 && startAt >= size) {
+      return;
+    }
 
-    let messageIndex = 0;
+    const resumed = startAt > 0 ? cursor?.context : undefined;
+
+    let messageIndex = resumed?.messageIndex ?? 0;
     let lineNo = 0;
-    /** null until a record in this file names a project. */
-    let fileIsOurs: boolean | null = null;
+    /**
+     * null until a record in this file names a project.
+     *
+     * Carried across a resume: it is decided by `cwd` fields that a resumed
+     * read never sees again, and getting it wrong means either dropping every
+     * remaining record or attributing another project's to this one.
+     */
+    let fileIsOurs: boolean | null = resumed ? resumed.projectMatched : null;
     /** Records with no `cwd`, held until `fileIsOurs` is known. */
     const pending: ClaudeCodeChunk[] = [];
-    for await (const line of reader) {
-      lineNo++;
-      if (!line.trim()) {
-        continue;
-      }
+    let readTo = startAt;
 
-      // Transcript files are written by another tool, so their line lengths
-      // are not ours to trust; parsing an unbounded one costs the long-lived
-      // MCP server that much resident memory.
-      if (!isWithinLineLimit(line)) {
+    for await (const entry of readJsonlLines(filePath, { start: startAt })) {
+      readTo = entry.endOffset;
+      lineNo++;
+      const line = entry.line;
+      if (line === null) {
         recordDrift(
           SCRAPER_NAME,
           `${filePath}:${lineNo}`,
           `line exceeds ${MAX_LINE_BYTES} characters; skipped`,
         );
+        continue;
+      }
+      if (!line.trim()) {
         continue;
       }
 
@@ -405,6 +442,24 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
         );
       }
     }
+
+    // Only once the file has been read through. `fileIsOurs` falls back to the
+    // directory match, which is the decision this read actually applied to its
+    // pending records — recording the undecided `null` would make the next
+    // resume re-derive ownership from a point where no `cwd` is left to see.
+    if (this.resuming && size !== null) {
+      const headHash = await fileHeadHash(filePath, readTo);
+      this.updatedCursors[filePath] = {
+        offset: readTo,
+        size,
+        ...(headHash ? { headHash } : {}),
+        context: {
+          sessionId,
+          messageIndex,
+          projectMatched: fileIsOurs ?? exactDirectory,
+        },
+      };
+    }
   }
 
   /**
@@ -541,4 +596,13 @@ function describeType(value: unknown): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+/** Size in bytes, or null when it cannot be read — in which case do not resume. */
+async function fileSize(path: string): Promise<number | null> {
+  try {
+    return (await stat(path)).size;
+  } catch {
+    return null;
+  }
 }
