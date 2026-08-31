@@ -1,6 +1,7 @@
 import type { SessionService } from "../../handoff/types.js";
 import { estimateVectorBacklog, formatDuration } from "../../utils/duration.js";
 import { sanitizeErrorMessage } from "../../utils/errors.js";
+import { isAbsolute, relative, sep } from "node:path";
 
 interface ContinuityStatusParams {
   format?: "markdown" | "json";
@@ -37,7 +38,10 @@ export function createContinuityStatusHandler(service: SessionService) {
       "## xtctx Continuity Status",
       "",
       `- Project root: ${status.project_root}`,
-      `- Index: ${status.db_path}`,
+      // Relative to the project root, which is on the line above. Absolute it
+      // carried the home-directory layout that `store_paths` is redacted for
+      // two branches up, while adding nothing the root does not already say.
+      `- Index: ${relativeToProject(status.db_path, status.project_root)}`,
       `- Last scan: ${status.last_scan_at ?? "never"}${formatDuration(status.last_scan_ms) ? ` (took ${formatDuration(status.last_scan_ms)})` : ""}`,
       `- Sessions: ${status.sessions}`,
       `- Messages: ${status.messages}`,
@@ -78,4 +82,10 @@ export function createContinuityStatusHandler(service: SessionService) {
 
     return lines.join("\n");
   };
+}
+
+/** `<project>/.xtctx/...` rather than the machine's absolute layout. */
+function relativeToProject(dbPath: string, projectRoot: string): string {
+  const rel = relative(projectRoot, dbPath);
+  return rel && !rel.startsWith("..") && !isAbsolute(rel) ? rel.split(sep).join("/") : dbPath;
 }

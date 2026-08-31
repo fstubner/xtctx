@@ -15,6 +15,18 @@ export interface StatusOptions {
 
 export async function runStatus(options: StatusOptions = {}): Promise<void> {
   const projectRoot = resolve(options.projectPath ?? process.cwd());
+
+  // A path that does not exist produced a full, plausible status report about
+  // it — ending in "run xtctx setup" — so a typo'd `--project` answered
+  // confidently about nothing. Diagnostics that cannot tell a mistyped path
+  // from an unconfigured one are worse than no diagnostics.
+  if (!existsSync(projectRoot)) {
+    process.stderr.write(`No such directory: ${projectRoot}
+`);
+    process.exitCode = 1;
+    return;
+  }
+
   // Diagnostics do not configure. Running `status` on a project left a
   // database behind in one it had only been asked to look at.
   const services = await createProjectServices(projectRoot, { createIfMissing: false });
@@ -270,6 +282,7 @@ function managedTargets(projectRoot: string): Array<{ label: string; path: strin
 export function storePathNotes(
   definition: (typeof SUPPORTED_TOOLS)[number] | undefined,
   storePaths: string[],
+  homeDir: string = process.env.USERPROFILE ?? process.env.HOME ?? "",
 ): string[] {
   if (!definition) {
     return [];
@@ -287,17 +300,44 @@ export function storePathNotes(
     if (normalizePath(path) === normalizePath(resolved)) {
       continue;
     }
+
+    // One note per path, whatever is wrong with it.
+    //
+    // An override is legal by design — a cloned repo can legitimately point a
+    // scraper anywhere — but not every override is equal. One inside your home
+    // is a tool keeping data somewhere unusual. One outside it arrived from
+    // somewhere, and `.xtctx/config.yaml` is committable, so a clone can carry
+    // one and nothing would otherwise say so.
+    //
+    // It is a qualifier on the note rather than a note of its own: where a
+    // path points and whether it resolves are independent facts, and emitting
+    // them separately doubled the count callers read as "problems with this
+    // path". Saying both in one line keeps the actionable half — the store
+    // that does exist, and how to adopt it — attached to the warning.
+    const suffix =
+      homeDir && !isInsideDir(path, homeDir)
+        ? " — WARNING: this is outside your home directory; xtctx will read " +
+          "transcripts from there. If you did not set it, check .xtctx/config.yaml " +
+          "(it is committable, so a cloned repo can carry one)"
+        : "";
+
     if (!existsSync(path) && existsSync(resolved)) {
       notes.push(
         `stale store path: ${path} does not exist, but ${definition.id} has a store at ` +
-          `${resolved} — re-run 'xtctx setup --yes' to point at it`,
+          `${resolved} — re-run 'xtctx setup --yes' to point at it${suffix}`,
       );
       continue;
     }
-    notes.push(`custom store path (not the ${definition.id} default): ${path}`);
+    notes.push(`custom store path (not the ${definition.id} default): ${path}${suffix}`);
   }
 
   return notes;
+}
+
+function isInsideDir(candidate: string, root: string): boolean {
+  const c = normalizePath(candidate);
+  const r = normalizePath(root);
+  return c === r || c.startsWith(`${r}/`);
 }
 
 function normalizePath(value: string): string {
