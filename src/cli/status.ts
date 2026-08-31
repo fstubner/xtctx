@@ -308,13 +308,16 @@ export function storePathNotes(
     // unusual. One outside it arrived from somewhere, and `.xtctx/config.yaml`
     // is committable, so a cloned repo can point a scraper at a network share
     // or another account and nothing would otherwise say so.
+    // Emitted alongside the notes below, not instead of them. Where a path
+    // points and whether it resolves are independent facts, and suppressing
+    // the staleness hint lost the actionable half — the path that does exist
+    // and how to adopt it — for exactly the paths most worth explaining.
     if (homeDir && !isInsideDir(path, homeDir)) {
       notes.push(
         `custom store path OUTSIDE your home directory: ${path} — ` +
           `xtctx will read transcripts from there. If you did not set this, ` +
           `check .xtctx/config.yaml (it is committable, so a cloned repo can carry one)`,
       );
-      continue;
     }
 
     if (!existsSync(path) && existsSync(resolved)) {
@@ -324,7 +327,9 @@ export function storePathNotes(
       );
       continue;
     }
-    notes.push(`custom store path (not the ${definition.id} default): ${path}`);
+    if (!homeDir || isInsideDir(path, homeDir)) {
+      notes.push(`custom store path (not the ${definition.id} default): ${path}`);
+    }
   }
 
   return notes;

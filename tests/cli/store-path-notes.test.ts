@@ -35,4 +35,17 @@ describe("storePathNotes", () => {
     const notes = storePathNotes(claude, [claude!.defaultStorePath()], HOME);
     expect(notes).toEqual([]);
   });
+
+  it("still gives the staleness hint for a path that is also outside home", () => {
+    // The two facts are independent, and CI caught them being made exclusive:
+    // on Linux the temp dir sits outside HOME, so the OUTSIDE branch fired and
+    // swallowed the "here is the store that does exist" hint — the actionable
+    // half — for exactly the paths most worth explaining. On Windows the temp
+    // dir is inside HOME, so it passed there and only the matrix saw it.
+    const notes = storePathNotes(claude, ["/elsewhere/gone/claude"], HOME);
+    const joined = notes.join(" ");
+    expect(joined).toMatch(/OUTSIDE your home directory/);
+    expect(joined).toMatch(/stale store path|custom store path/);
+    expect(notes.length).toBeGreaterThan(1);
+  });
 });
