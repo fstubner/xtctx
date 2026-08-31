@@ -36,6 +36,8 @@ interface PreparedStatements {
   sessionRollup: Statement;
   /** Repairs roll-ups a previous scan died before reaching. See its prepare. */
   reconcileSessionRollups: Statement;
+  /** Sessions whose retrieval units do not reach their last message. */
+  selectSessionsMissingUnits: Statement;
   selectSessionMessages: Statement;
   selectSessionTool: Statement;
   selectUnitIds: Statement;
@@ -51,6 +53,8 @@ interface SqliteHandoffIndexOptions {
   windowStride?: number;
   /** How long a caller waits for a scan before taking what is indexed so far. */
   refreshBudgetMs?: number;
+  /** How long a scan waits for the embedding model to load. */
+  embeddingWarmBudgetMs?: number;
   /** How long one search spends building vectors before answering with what it has. */
   vectorBudgetMs?: number;
   /**
@@ -167,6 +171,30 @@ const SCHEMA_VERSION = 2;
 
 const DEFAULT_LIMIT = 5;
 const MAX_LIMIT = 100;
+
+/**
+ * Sessions repaired per scan by `reconcileRetrievalUnits`.
+ *
+ * Small on purpose: rebuilding reads every message in a session, and scans
+ * here are routinely cut short by the client disconnecting, so a large batch
+ * would be killed before finishing and would repeat the same prefix next time.
+ * A backlog drains over a few scans instead, newest first.
+ */
+const RETRIEVAL_UNIT_RECONCILE_LIMIT = 4;
+
+/**
+ * How long a scan waits for the embedding model to finish loading.
+ *
+ * Sized against both failure modes. A warm cache loads in about a second, so
+ * this clears it comfortably and every run after the first vectorises — the
+ * case that was never happening. A cold cache takes minutes, misses this, and
+ * is left to load in the background, which is correct: `close()` waits for the
+ * scan, so this budget is also shutdown latency and cannot be generous.
+ */
+const DEFAULT_EMBEDDING_WARM_BUDGET_MS = 5_000;
+
+/** Poll interval while waiting for the model; see `waitUntilEmbeddingReady`. */
+const EMBEDDING_WARM_POLL_MS = 100;
 const DEFAULT_WINDOW_SIZE = 8;
 const DEFAULT_WINDOW_STRIDE = 4;
 const MAX_MATCHES_PER_SESSION = 3;
@@ -259,6 +287,7 @@ export class SqliteHandoffIndex implements SessionService {
    */
   private readonly refreshTtlMs = 30_000;
   private readonly refreshBudgetMs: number;
+  private readonly embeddingWarmBudgetMs: number;
   private readonly vectorBudgetMs: number;
   private scanStartedMs = 0;
   private readonly createIfMissing: boolean;
@@ -280,6 +309,10 @@ export class SqliteHandoffIndex implements SessionService {
     this.windowSize = Math.max(2, Math.floor(options.windowSize ?? DEFAULT_WINDOW_SIZE));
     this.windowStride = Math.max(1, Math.floor(options.windowStride ?? DEFAULT_WINDOW_STRIDE));
     this.refreshBudgetMs = Math.max(0, options.refreshBudgetMs ?? DEFAULT_REFRESH_BUDGET_MS);
+    this.embeddingWarmBudgetMs = Math.max(
+      0,
+      options.embeddingWarmBudgetMs ?? DEFAULT_EMBEDDING_WARM_BUDGET_MS,
+    );
     this.vectorBudgetMs = Math.max(0, options.vectorBudgetMs ?? DEFAULT_VECTOR_BUDGET_MS);
     this.createIfMissing = options.createIfMissing ?? true;
     this.freezeVectors = options.freezeVectors ?? false;
@@ -640,6 +673,7 @@ export class SqliteHandoffIndex implements SessionService {
     // scan is interrupted in the same way. Rows that already agree are not
     // written, so on a healthy index this costs one indexed count per session.
     this.prepared().reconcileSessionRollups.run();
+    this.reconcileRetrievalUnits();
 
     for (const { scraper } of this.tools) {
       if (!(await safeDetect(scraper))) {
@@ -712,8 +746,24 @@ export class SqliteHandoffIndex implements SessionService {
     // shutting the server down into a multi-minute hang. Start the load and
     // leave the vectors to the next scan instead.
     if (this.embeddingProvider.isReady?.() === false) {
+      // Warm and *wait*, bounded — do not defer to "the next scan".
+      //
+      // There usually is no next scan. The CLI is spawned per MCP session and
+      // exits shortly after the client disconnects, so `isReady()` is false at
+      // the start of every process. Returning here meant vectorising never
+      // happened at all: a real index sat at 0 vectors against 1,770 windows
+      // for 25 days, reporting them as merely "outstanding" while semantic
+      // search silently fell back to keyword on every query.
+      //
+      // The hazard the early return was protecting against is real and kept:
+      // `close()` waits for the scan, so an unbounded load would turn shutting
+      // the server down into a multi-minute hang on a cold model cache. The
+      // wait is bounded rather than skipped, and a model that misses the
+      // deadline keeps loading in the background for the next caller.
       this.embeddingProvider.warm?.();
-      return;
+      if (!(await this.waitUntilEmbeddingReady())) {
+        return;
+      }
     }
 
     try {
@@ -721,6 +771,35 @@ export class SqliteHandoffIndex implements SessionService {
     } catch {
       // Nothing to do here — search reports embedding failures where they matter.
     }
+  }
+
+  /**
+   * Poll until the embedding model is loaded, or the budget runs out.
+   *
+   * Polling rather than awaiting the load: `warm()` returns void by design, so
+   * that a caller cannot accidentally block on it. The interval is short
+   * relative to a model load and the whole wait is capped, so the cost of a
+   * provider that never becomes ready is one bounded delay per scan.
+   */
+  private async waitUntilEmbeddingReady(): Promise<boolean> {
+    const isReady = this.embeddingProvider.isReady;
+    if (!isReady) {
+      return true;
+    }
+
+    const deadline = Date.now() + this.embeddingWarmBudgetMs;
+    while (Date.now() < deadline) {
+      if (isReady.call(this.embeddingProvider)) {
+        return true;
+      }
+      await new Promise((resolve) => {
+        const timer = setTimeout(resolve, EMBEDDING_WARM_POLL_MS);
+        // Never hold the process open purely to keep polling.
+        timer.unref?.();
+      });
+    }
+
+    return isReady.call(this.embeddingProvider);
   }
 
   private upsertChunk(chunk: ConversationChunk): string | null {
@@ -775,6 +854,38 @@ export class SqliteHandoffIndex implements SessionService {
     );
 
     return sessionRef;
+  }
+
+  /**
+   * Rebuild retrieval units for sessions whose windows do not reach their last
+   * message.
+   *
+   * Units are otherwise built only for the sessions a scan touched, at the end,
+   * after every scraper — while each scraper advances its cursor as soon as it
+   * finishes and the CLI exits shortly after a client disconnects. A scan that
+   * dies in that gap leaves the messages committed, the cursor past them, and
+   * the tail of the session in no window: reachable through
+   * `xtctx_session_detail`, invisible to search, and never repaired because
+   * nothing re-reads the store.
+   *
+   * `reconcileSessionRollups` above handles the same gap for `message_count`.
+   * This is its counterpart, and the two run together for the same reason: at
+   * the start, so the repair survives an interruption of the same kind.
+   *
+   * Bounded per scan. Rebuilding reads every message in a session, and scans
+   * here are routinely cut short, so an unbounded pass over a large backlog
+   * would spend the whole scan and be killed before finishing. Most-recently
+   * active first, matching `ensureVectors`: the history a handoff reaches for
+   * is covered before the archive is, and the backlog drains over a few scans.
+   */
+  private reconcileRetrievalUnits(): void {
+    const drifted = this.prepared().selectSessionsMissingUnits.all(
+      RETRIEVAL_UNIT_RECONCILE_LIMIT,
+    ) as Array<{ session_ref: string }>;
+
+    for (const { session_ref: sessionRef } of drifted) {
+      this.rebuildRetrievalUnitsForSession(sessionRef);
+    }
   }
 
   private rebuildRetrievalUnitsForSession(sessionRef: string): void {
@@ -957,6 +1068,27 @@ export class SqliteHandoffIndex implements SessionService {
          WHERE message_count <> (
            SELECT COUNT(*) FROM messages WHERE messages.session_ref = sessions.session_ref
          )`,
+      ),
+      /**
+       * Sessions whose windows stop short of their last message.
+       *
+       * `MAX(message_end_index)` against `MAX(message_index)` is exact rather
+       * than approximate: on a healthy index every session reports a gap of
+       * zero, so this returns nothing and the scan pays one indexed pass.
+       * Ordered by recency because the repair is bounded per scan.
+       */
+      selectSessionsMissingUnits: db.prepare(
+        `SELECT s.session_ref
+         FROM sessions s
+         WHERE COALESCE(
+                 (SELECT MAX(u.message_end_index) FROM retrieval_units u
+                  WHERE u.session_ref = s.session_ref), -1
+               ) < COALESCE(
+                 (SELECT MAX(m.message_index) FROM messages m
+                  WHERE m.session_ref = s.session_ref), -1
+               )
+         ORDER BY s.last_activity_at DESC
+         LIMIT ?`,
       ),
       selectSessionMessages: db.prepare(
         `SELECT id, timestamp, role, content, message_index, source_pointer
