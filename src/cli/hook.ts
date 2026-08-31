@@ -2,6 +2,7 @@ import { createProjectServices } from "../runtime/services.js";
 import type { SessionSummary } from "../handoff/types.js";
 import { dirname, join } from "node:path";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { inlineSafe } from "../utils/untrusted-text.js";
 
 export interface HookOptions {
   projectPath?: string;
@@ -125,22 +126,6 @@ function activeFrame(session: SessionSummary): string[] {
   return lines;
 }
 
-/**
- * The banner is untrusted transcript text printed straight to the host's
- * console. `\s` does not match ESC or BEL, so collapsing whitespace alone left
- * escape sequences intact — enough for a poisoned transcript to clear the
- * screen or forge output. Control characters become spaces, so text either
- * side of one cannot be joined into a word nobody wrote.
- */
-function inlineSafe(value: string): string {
-  let out = "";
-  for (const ch of value) {
-    const code = ch.codePointAt(0) ?? 0;
-    const isFormatting = code === 0x09 || code === 0x0a || code === 0x0d;
-    out += (code < 0x20 && !isFormatting) || code === 0x7f ? " " : ch;
-  }
-  return out.replace(/\s+/g, " ").trim();
-}
 
 /** What a host tool tells its hook about the session it is starting. */
 interface HookPayload {
