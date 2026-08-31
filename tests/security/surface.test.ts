@@ -8,7 +8,6 @@ const CURRENT_SURFACE_FILES = [
   "CLAUDE.md",
   "GEMINI.md",
   join(".github", "copilot-instructions.md"),
-  join(".github", "release.yml"),
   join("docs", "architecture.md"),
   join("docs", "demo.md"),
   join("docs", "drift-canary.md"),
@@ -28,10 +27,31 @@ const REMOVED_SURFACES = [
 ];
 
 describe("current product surface", () => {
+  /**
+   * A file this list names but cannot read used to `continue`, so the check
+   * passed by not running. Renaming or deleting any surface file silently
+   * removed it from coverage while the gate stayed green — the failure mode a
+   * gate exists to prevent. Unreadable is now a failure: the list is a claim
+   * about which files describe the product, and a claim that no longer
+   * resolves is wrong whichever way it broke.
+   */
+  it("names only files that exist", async () => {
+    const missing: string[] = [];
+    for (const file of CURRENT_SURFACE_FILES) {
+      if ((await readOptionalFile(join(process.cwd(), file))) === null) {
+        missing.push(file);
+      }
+    }
+
+    expect(missing, "surface files listed but unreadable").toEqual([]);
+  });
+
   it("does not advertise removed serve, brief, durable knowledge, or writeback tools", async () => {
     for (const file of CURRENT_SURFACE_FILES) {
       const content = await readOptionalFile(join(process.cwd(), file));
       if (content === null) {
+        // Reported by the test above; skip here so one missing file does not
+        // also mask which patterns the readable files still carry.
         continue;
       }
 

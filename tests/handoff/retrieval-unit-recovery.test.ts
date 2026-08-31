@@ -1,0 +1,173 @@
+/**
+ * Retrieval units are what search reads. They are rebuilt only for the
+ * sessions a scan touched, at the end, after every scraper has finished —
+ * while each scraper advances its own cursor as soon as it finishes, and the
+ * CLI exits two seconds after stdin closes on every client disconnect.
+ *
+ * A scan that dies in that gap leaves messages committed and the cursor past
+ * them, so nothing re-reads them and the units are never rebuilt. The messages
+ * stay reachable through `xtctx_session_detail` and invisible to both keyword
+ * and semantic search — a silent hole, because the session looks fine.
+ *
+ * `reconcileSessionRollups` already repairs `message_count` for exactly this
+ * gap. There was no counterpart for units, and the maintainer's own index
+ * carried 1,343 and 356 uncovered messages in its two live sessions.
+ */
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import Database from "better-sqlite3";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { SqliteHandoffIndex } from "@xtctx/handoff/sqlite-index";
+import type { ConversationChunk, ConversationScraper, ScraperState } from "@xtctx/types/scraper";
+
+/** Cursor genuinely advances, so a later scan re-reads nothing. */
+class CursoredScraper implements ConversationScraper {
+  readonly tool = "codex";
+  private drained = false;
+  constructor(private readonly chunks: ConversationChunk[]) {}
+  async detect(): Promise<boolean> { return true; }
+  getStorePaths(): string[] { return ["fixture://codex"]; }
+  async *scrape(): AsyncIterable<ConversationChunk> {
+    if (this.drained) return;
+    yield* this.chunks;
+  }
+  async *fullSync(): AsyncIterable<ConversationChunk> { yield* this.scrape(); }
+  async getLastScrapedPosition(): Promise<ScraperState> { return { lastTimestamp: new Date(0) }; }
+  async saveScrapedPosition(_s: ScraperState): Promise<void> { this.drained = true; }
+}
+
+function chunk(i: number): ConversationChunk {
+  return {
+    tool: "codex",
+    sessionId: "s1",
+    timestamp: new Date(Date.parse("2026-05-10T10:00:00.000Z") + i * 1000),
+    role: i % 2 === 0 ? "user" : "assistant",
+    content: `message number ${i} about the parser fallback`,
+    metadata: { messageIndex: i, tokenEstimate: 1, layer: 0 },
+  };
+}
+
+/** The drift signal: windows that do not reach the session's last message. */
+function coverageGap(dbPath: string, sessionRef: string): number {
+  const db = new Database(dbPath, { readonly: true });
+  try {
+    const row = db.prepare(`
+      SELECT (SELECT MAX(message_index) FROM messages WHERE session_ref = ?) AS maxMsg,
+             COALESCE((SELECT MAX(message_end_index) FROM retrieval_units WHERE session_ref = ?), -1) AS maxCovered
+    `).get(sessionRef, sessionRef) as { maxMsg: number; maxCovered: number };
+    return row.maxMsg - row.maxCovered;
+  } finally {
+    db.close();
+  }
+}
+
+describe("retrieval unit recovery after an interrupted scan", () => {
+  let tempDir = "";
+  let dbPath = "";
+  const REF = "codex:s1";
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "xtctx-units-"));
+    dbPath = join(tempDir, "xtctx.db");
+  });
+
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("rebuilds units a previous scan never got to, without re-reading the store", async () => {
+    const chunks = Array.from({ length: 24 }, (_, i) => chunk(i));
+    const scraper = new CursoredScraper(chunks);
+
+    const first = new SqliteHandoffIndex(dbPath, tempDir, [{ tool: "codex", scraper }]);
+    await first.listRecentSessions(5);
+    await first.whenScanSettled?.();
+    await first.close();
+
+    expect(coverageGap(dbPath, REF)).toBe(0);
+
+    // Simulate the interruption: messages committed, cursor advanced, units
+    // for the tail never built. Deleting the trailing windows is the faithful
+    // row state a killed scan leaves behind.
+    const raw = new Database(dbPath);
+    raw.prepare("DELETE FROM retrieval_units WHERE session_ref = ? AND message_end_index > 7").run(REF);
+    raw.prepare("DELETE FROM retrieval_units_fts WHERE session_ref = ?").run(REF);
+    raw.close();
+
+    expect(coverageGap(dbPath, REF)).toBeGreaterThan(0);
+
+    // A fresh index over the same drained store: recovery cannot come from
+    // re-ingesting, only from reconciling what is already stored.
+    const second = new SqliteHandoffIndex(dbPath, tempDir, [{ tool: "codex", scraper }]);
+    await second.listRecentSessions(5);
+    await second.whenScanSettled?.();
+    await second.close();
+
+    expect(coverageGap(dbPath, REF)).toBe(0);
+  });
+
+  it("makes the recovered messages findable, not merely present", async () => {
+    // The point of a retrieval unit is search. Coverage arithmetic alone would
+    // pass if units were rebuilt empty.
+    const chunks = Array.from({ length: 24 }, (_, i) => chunk(i));
+    chunks[20] = {
+      ...chunks[20],
+      content: "the distinctive marmalade heuristic lives here",
+    };
+    const scraper = new CursoredScraper(chunks);
+
+    const first = new SqliteHandoffIndex(dbPath, tempDir, [{ tool: "codex", scraper }]);
+    await first.listRecentSessions(5);
+    await first.whenScanSettled?.();
+    await first.close();
+
+    const raw = new Database(dbPath);
+    raw.prepare("DELETE FROM retrieval_units WHERE session_ref = ? AND message_end_index > 7").run(REF);
+    raw.prepare("DELETE FROM retrieval_units_fts WHERE session_ref = ?").run(REF);
+    raw.close();
+
+    const second = new SqliteHandoffIndex(dbPath, tempDir, [{ tool: "codex", scraper }]);
+    await second.listRecentSessions(5);
+    await second.whenScanSettled?.();
+    const hits = await second.searchSessions("marmalade", 5);
+    await second.close();
+
+    // Assert on the matched window, not on the preview: previews truncate at
+    // 240 characters and stop well before message 20's text, so a substring
+    // check would fail on a working fix.
+    const covering = hits.flatMap((hit) => hit.matches ?? []).filter(
+      (m) => m.message_start_index <= 20 && m.message_end_index >= 20,
+    );
+    // That the window was genuinely missing beforehand is what the coverage
+    // test above establishes; probing for it here cannot work, because
+    // opening an index triggers the very reconciliation under test.
+    expect(covering.length).toBeGreaterThan(0);
+  });
+
+  it("does not rewrite units for a session that is already covered", async () => {
+    // Reconciliation must be a no-op where nothing drifted, or every scan
+    // rebuilds the whole corpus and the cost grows with history.
+    const scraper = new CursoredScraper(Array.from({ length: 12 }, (_, i) => chunk(i)));
+
+    const first = new SqliteHandoffIndex(dbPath, tempDir, [{ tool: "codex", scraper }]);
+    await first.listRecentSessions(5);
+    await first.whenScanSettled?.();
+    await first.close();
+
+    const raw = new Database(dbPath);
+    const before = raw.prepare("SELECT id, updated_at FROM retrieval_units WHERE session_ref = ? ORDER BY id").all(REF);
+    raw.close();
+
+    const second = new SqliteHandoffIndex(dbPath, tempDir, [{ tool: "codex", scraper }]);
+    await second.listRecentSessions(5);
+    await second.whenScanSettled?.();
+    await second.close();
+
+    const rawAfter = new Database(dbPath);
+    const after = rawAfter.prepare("SELECT id, updated_at FROM retrieval_units WHERE session_ref = ? ORDER BY id").all(REF);
+    rawAfter.close();
+
+    expect(after).toEqual(before);
+  });
+});

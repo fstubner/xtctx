@@ -17,7 +17,7 @@
     "build": "npm run clean && tsc",
     "dev": "tsx watch src/cli/index.ts",
     "test": "vitest run --exclude=tests/smoke/** --exclude=tests/drift/** --exclude=tests/eval/**",
-    "test:security": "vitest run tests/security",
+    "test:security": "vitest run tests/security tests/mcp/hardening.test.ts tests/utils/atomic-file.test.ts tests/utils/project-boundary.test.ts tests/scrapers/copilot-journal-safety.test.ts tests/config/disconnect-unconfigured.test.ts",
     "test:integration": "vitest run tests/integration",
     "test:drift": "vitest run tests/drift",
     "drift:update-snapshots": "node scripts/run-with-env.mjs XTCTX_UPDATE_SNAPSHOTS=1 -- vitest run tests/drift",
