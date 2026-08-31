@@ -44,7 +44,6 @@ interface PreparedStatements {
   insertUnit: Statement;
   insertUnitFts: Statement;
   deleteUnit: Statement;
-  deleteUnitFts: Statement;
 }
 
 interface SqliteHandoffIndexOptions {
@@ -942,12 +941,23 @@ export class SqliteHandoffIndex implements SessionService {
       (stmts.selectUnitIds.all(sessionRef) as Array<{ id: string }>).map((row) => row.id),
     );
 
+    const stale = [...existing].filter((unitId) => !desired.has(unitId));
+
     const applyDiff = db.transaction(() => {
-      for (const unitId of existing) {
-        if (!desired.has(unitId)) {
-          stmts.deleteUnitFts.run(unitId);
-          stmts.deleteUnit.run(unitId);
-        }
+      // The FTS delete goes out once for the whole batch rather than once per
+      // unit. `unit_id` is an UNINDEXED column of an FTS5 table, so every
+      // delete against it scans the virtual table — measured at ~9ms across
+      // 1,770 rows, which a rebuild of a few hundred units turns into seconds.
+      // Batching makes that one scan instead of N. (The scan itself is
+      // inherent to UNINDEXED columns; removing it needs an external-content
+      // FTS keyed on rowid, which is a schema migration, not a patch.)
+      if (stale.length > 0) {
+        db.prepare(
+          `DELETE FROM retrieval_units_fts WHERE unit_id IN (${placeholders(stale.length)})`,
+        ).run(...stale);
+      }
+      for (const unitId of stale) {
+        stmts.deleteUnit.run(unitId);
       }
       for (const [unitId, unit] of desired) {
         if (existing.has(unitId)) {
@@ -1109,7 +1119,6 @@ export class SqliteHandoffIndex implements SessionService {
          VALUES (?, ?, ?, ?)`,
       ),
       deleteUnit: db.prepare("DELETE FROM retrieval_units WHERE id = ?"),
-      deleteUnitFts: db.prepare("DELETE FROM retrieval_units_fts WHERE unit_id = ?"),
     };
     return this.stmts;
   }
@@ -1582,6 +1591,20 @@ function createSchema(db: DatabaseHandle): void {
   `);
 }
 
+/**
+ * How much of a window's text the search paths load.
+ *
+ * They use it for one thing: a 240-character preview, produced by collapsing
+ * whitespace and slicing. Selecting the whole column meant every search read
+ * the entire vectorised corpus into memory — 1,770 windows measured at 22.6MB
+ * on a modest index, growing linearly, paid on every query, in a process
+ * spawned per agent session.
+ *
+ * Four times the preview so whitespace collapsing cannot leave it short, and
+ * still a small fraction of a window, which holds eight messages.
+ */
+const PREVIEW_SOURCE_CHARS = 960;
+
 function retrievalUnitSelect(): string {
   return `SELECT u.id AS unit_id,
                 u.session_ref,
@@ -1590,7 +1613,7 @@ function retrievalUnitSelect(): string {
                 u.message_end_index,
                 u.started_at,
                 u.ended_at,
-                u.content,
+                substr(u.content, 1, ${PREVIEW_SOURCE_CHARS}) AS content,
                 u.content_hash,
                 s.started_at AS session_started_at,
                 s.last_activity_at AS session_last_activity_at,
