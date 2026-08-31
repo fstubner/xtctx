@@ -3,7 +3,7 @@
 All notable changes to this project are documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
-This file is maintained automatically by Release Please.
+Entries are written by the `release` workflow when a release is cut by hand.
 
 ## [0.21.8](https://github.com/fstubner/xtctx/compare/xtctx-v0.21.7...xtctx-v0.21.8) (2026-08-31)
 
