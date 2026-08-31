@@ -40,7 +40,11 @@ export async function runDisconnect(options: DisconnectCliOptions = {}): Promise
     homeDir: options.homeDir,
   });
   printDisconnectResult(result);
-  printLeftovers(result.projectRoot);
+  // Nothing was disconnected, so there is no `.xtctx` to describe and no
+  // removals to summarise; saying otherwise reports work that did not happen.
+  if (result.configured) {
+    printLeftovers(result.projectRoot);
+  }
 }
 
 /**

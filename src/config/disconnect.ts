@@ -33,6 +33,12 @@ export interface DisconnectOptions {
 export interface DisconnectResult {
   projectRoot: string;
   tools: ToolId[];
+  /**
+   * False when the project carried no xtctx footprint, so nothing was
+   * disconnected. Callers use this to avoid reporting removals that did not
+   * happen; see the guard in `disconnectProject`.
+   */
+  configured: boolean;
   writes: Array<{
     path: string;
     kind: string;
@@ -96,6 +102,32 @@ export async function disconnectProject(options: DisconnectOptions = {}): Promis
   const warnings: string[] = [];
   const writes: DisconnectResult["writes"] = [];
   const configPath = join(projectRoot, ".xtctx", "config.yaml");
+
+  // Refuse to do anything to a project that was never set up.
+  //
+  // Disconnect is project-scoped except for one machine-wide effect:
+  // Antigravity keeps its MCP config at app level, so removing xtctx from it
+  // removes it for every project. That is correct when this project was
+  // configured, and it is warned about. Running in a directory that never had
+  // xtctx — a `cd` to the wrong place — emptied the user's global Antigravity
+  // config anyway, for a project with nothing to disconnect.
+  //
+  // The global config holds no per-project entry, so it cannot say which
+  // project configured it. The project's own footprint is the only signal
+  // available, which is what makes the destructive path conditional on there
+  // being something to destroy.
+  if (!(await hasXtctxFootprint(projectRoot))) {
+    return {
+      projectRoot,
+      tools,
+      configured: false,
+      writes: [],
+      warnings: [
+        `${projectRoot} is not configured for xtctx — nothing to disconnect. ` +
+          "No project or global config was changed.",
+      ],
+    };
+  }
 
   writes.push({
     path: configPath,
@@ -201,7 +233,7 @@ export async function disconnectProject(options: DisconnectOptions = {}): Promis
     await pruneEmptyParents(dirname(path), projectRoot);
   }
 
-  return { projectRoot, tools, writes, warnings };
+  return { projectRoot, tools, configured: true, writes, warnings };
 }
 
 export function printDisconnectResult(result: DisconnectResult): void {
@@ -426,6 +458,43 @@ async function removeIfPresent(path: string): Promise<boolean> {
  * files stops it immediately.
  */
 /** Strictly below the project root — the root itself is never a candidate. */
+
+/**
+ * Cheap check for any sign that setup ran here.
+ *
+ * Deliberately broader than `.xtctx/config.yaml`: a user who deleted that
+ * directory but still has managed blocks in their memory files needs
+ * disconnect to keep working, so any one signal is enough. What it refuses is
+ * the genuinely empty directory.
+ */
+async function hasXtctxFootprint(projectRoot: string): Promise<boolean> {
+  if (await pathExists(join(projectRoot, ".xtctx", "config.yaml"))) {
+    return true;
+  }
+
+  const candidates = new Set<string>();
+  for (const tool of SUPPORTED_TOOLS) {
+    for (const target of tool.memoryTargets) {
+      candidates.add(join(projectRoot, target));
+    }
+  }
+  candidates.add(join(projectRoot, ".mcp.json"));
+  candidates.add(join(projectRoot, ".cursor", "mcp.json"));
+
+  for (const path of candidates) {
+    const content = await readFile(path, "utf-8").catch(() => null);
+    if (content && content.includes("xtctx")) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  return stat(path).then(() => true).catch(() => false);
+}
+
 function isInsideProject(candidate: string, projectRoot: string): boolean {
   const relative = relativePath(projectRoot, candidate);
   return relative.length > 0 && !relative.startsWith("..") && !isAbsolute(relative);

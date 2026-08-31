@@ -9,29 +9,47 @@ content through xtctx without any manual export.
 
 ## Steps
 
-1. **Wire the project once.** `npx -y xtctx setup` in the project root.
-   Interactive runs show the full write plan and ask; `--yes` applies it
-   non-interactively. Setup writes the MCP entry for each detected tool,
-   managed instruction blocks (CLAUDE.md / AGENTS.md / GEMINI.md / rules),
-   synced skills, and the Claude Code SessionStart hook in
-   `.claude/settings.json`. Re-running is idempotent.
-2. **Check the wiring.** `xtctx status` shows config, index counts,
-   per-tool detection, last scrape errors (if any), and skill-sync drift,
-   ending with a concrete "Next" hint.
-3. **Work normally.** No daemon runs; nothing happens until an agent asks.
-4. **Hand off.** In the next tool, the agent calls `xtctx_recent_sessions`
-   → picks a `session_ref` → `xtctx_session_detail` for raw messages, or
-   `xtctx_search_sessions` for keyword/semantic search. Indexing happens
-   lazily inside these calls. Orchestrators use `xtctx_handoff_manifest`
-   for stable refs.
+1. **Install xtctx.** The client then shows `xtctx` among its MCP servers and
+   `xtctx-handoff` among its skills. Two routes register exactly that:
+   - *Plugin — no project setup:* `claude plugin marketplace add
+     fstubner/xtctx && claude plugin install xtctx@xtctx`. The project
+     directory is untouched; `git status` shows nothing new.
+   - *Setup — adds automatic delivery:* `npx -y xtctx setup` in the project
+     root, which additionally writes one line per file: an MCP entry per
+     detected tool, managed blocks in CLAUDE.md / AGENTS.md / GEMINI.md /
+     rules, synced skills, and the SessionStart hook in
+     `.claude/settings.json`. Interactive runs show the whole write plan and
+     ask; `--yes` applies it. A second run reads `ok` on every line rather
+     than `updated`, which is what idempotent looks like here.
+2. **Check the wiring.** `xtctx status` shows config path, index counts,
+   per-tool detection, any last scrape error, skill-sync drift, and a final
+   `Next` line. On a plugin-only project `Config` reads
+   `missing (run xtctx setup)` while the tools still work — that line
+   describes the managed blocks, not the MCP surface.
+3. **Work normally.** Nothing appears in the process list and `.xtctx/state/`
+   timestamps do not move: no daemon runs, and nothing happens until an agent
+   asks.
+4. **Hand off.** Ask the next tool what you were working on and it returns the
+   other tool's work rather than asking you. With setup run the agent answers
+   straight from the managed block; otherwise it calls
+   `xtctx_recent_sessions`, which returns the *other* tool's sessions with
+   timestamps and branches. `xtctx_session_detail` on one of those
+   `session_ref`s returns the raw messages; `xtctx_search_sessions` returns
+   keyword or semantic matches. Indexing happens lazily inside these calls, so
+   the first on a large history returns partial results and later ones return
+   more — a thin first answer means the index is still filling, not that the
+   history is empty. Orchestrators use `xtctx_handoff_manifest` for stable
+   refs.
 5. **Leave cleanly.** `xtctx disconnect <tool>` (or `--all`) shows its plan,
-   asks (or `--yes`), removes MCP entries, managed blocks, synced skills,
-   and hooks — transcript data and user content stay. Mostly project-scoped,
+   asks (or `--yes`), and returns one line per removal — MCP entries, managed
+   blocks, synced skills and hooks go; transcript data and user content stay.
+   It then names the project's own `.xtctx/` directory, which holds the index
+   built from transcript content, as left in place. Mostly project-scoped,
    with one exception it warns about up front: Antigravity keeps its MCP
-   config at app level, so disconnecting it removes xtctx from Antigravity
-   for every project on the machine. The project's own `.xtctx/` directory,
-   including the local index built from transcript content, is left in place
-   and named in the output.
+   config at app level, so disconnecting it removes xtctx from Antigravity for
+   every project on the machine. In a directory that was never set up it
+   instead reads `not configured for xtctx — nothing to disconnect` and
+   changes nothing, that global config included.
 
 ## States
 
