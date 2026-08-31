@@ -39,6 +39,12 @@ export interface ToolSourceDefinition {
     storePath: string,
     stateDir: string,
     projectRoot?: string,
+    /**
+     * The project's store directory as stated by the tool itself, when it told
+     * us. Only Claude Code does today, via the `transcript_path` its hooks
+     * receive; the others ignore it and reconstruct as before.
+     */
+    projectStoreDir?: string,
   ) => ConversationScraper;
   memoryTargets: string[];
   hookMode: HookMode;
@@ -50,8 +56,8 @@ export const SUPPORTED_TOOLS: ToolSourceDefinition[] = [
     id: "claude-code",
     label: "Claude Code",
     defaultStorePath: defaultClaudeProjectsDir,
-    createScraper: (storePath, stateDir, projectRoot) =>
-      new ClaudeCodeScraper(storePath, stateDir, projectRoot),
+    createScraper: (storePath, stateDir, projectRoot, projectStoreDir) =>
+      new ClaudeCodeScraper(storePath, stateDir, projectRoot, projectStoreDir),
     memoryTargets: ["CLAUDE.md"],
     hookMode: "executable",
     skillSync: {
@@ -145,9 +151,16 @@ export function createDefaultScrapers(
   stateDir: string,
   overrides: Record<string, string | undefined> = {},
   projectRoot?: string,
+  /** Per-tool store directories the tool itself named; see `createScraper`. */
+  storeDirs: Record<string, string | undefined> = {},
 ): ConversationScraper[] {
   return SUPPORTED_TOOLS.map((tool) =>
-    tool.createScraper(overrides[tool.id] ?? tool.defaultStorePath(), stateDir, projectRoot),
+    tool.createScraper(
+      overrides[tool.id] ?? tool.defaultStorePath(),
+      stateDir,
+      projectRoot,
+      storeDirs[tool.id],
+    ),
   );
 }
 
