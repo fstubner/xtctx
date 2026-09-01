@@ -8,6 +8,18 @@ import { createDefaultScrapers } from "../tools/sources.js";
 export interface ProjectConfig {
   tools: Record<string, { enabled?: boolean; storePath?: string }>;
   /**
+   * Whether `.xtctx/config.yaml` exists — whether anyone opted this directory
+   * in.
+   *
+   * Two clients wire xtctx machine-globally (Antigravity always, Copilot CLI
+   * under `--global-mcp`), so the server is reachable from every directory on
+   * this machine. Without this flag it could not tell "set up, nothing
+   * indexed yet" from "nobody asked for this here", and answered both with
+   * silence — after scanning every transcript store on the machine and
+   * writing an index into a project nobody had opted in.
+   */
+  present: boolean;
+  /**
    * Why the config on disk could not be read, when it exists but is broken.
    * Nothing is scanned while this is set: the file is the only place a user
    * says which transcript stores may be read, and guessing at that is not a
@@ -102,7 +114,9 @@ export async function createProjectServices(
     projectRoot,
     scrapers.map((scraper) => ({ tool: scraper.tool, scraper })),
     {
-      createIfMissing: options.createIfMissing,
+      // An unconfigured project gets no index written into it. Reads run
+      // against an in-memory database and report zeros, which is the truth.
+      createIfMissing: options.createIfMissing ?? config.present,
       redirectedTools: redirectedTools(config, options.homeDir),
     },
   );
@@ -123,17 +137,19 @@ export async function loadProjectConfig(configPath: string): Promise<ProjectConf
   try {
     raw = await readFile(configPath, "utf-8");
   } catch {
-    // Missing config is valid: setup owns writing it, MCP can still run.
-    return { tools: {} };
+    // Missing config is valid — `status` still diagnoses, and the MCP server
+    // still starts. What it must not do is behave as though the project were
+    // configured; see `present`.
+    return { tools: {}, present: false };
   }
 
   try {
     const parsed = parseYaml(raw);
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       const root = parsed as Record<string, unknown>;
-      return { tools: normalizeTools(root.tools) };
+      return { tools: normalizeTools(root.tools), present: true };
     }
-    return { tools: {}, error: "expected a mapping at the top level" };
+    return { tools: {}, present: true, error: "expected a mapping at the top level" };
   } catch (err) {
     // A config that exists but will not parse is not the same as no config.
     // `enabled: false` is the only control a user has over which transcript
@@ -143,7 +159,7 @@ export async function loadProjectConfig(configPath: string): Promise<ProjectConf
     // Reported rather than thrown: `status` has to keep working, since
     // explaining a broken config is exactly what a diagnostic is for. What
     // does change is that nothing is scanned until it is fixed.
-    return { tools: {}, error: err instanceof Error ? err.message : String(err) };
+    return { tools: {}, present: true, error: err instanceof Error ? err.message : String(err) };
   }
 }
 

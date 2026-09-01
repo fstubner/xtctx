@@ -16,6 +16,7 @@ import {
 } from "./tools/sessions.js";
 import { errorMessage, sanitizeErrorMessage } from "../utils/errors.js";
 import { readXtctxPackage } from "../utils/package-info.js";
+import { inlineSafe } from "../utils/untrusted-text.js";
 
 const { version: SERVER_VERSION } = readXtctxPackage(import.meta.url);
 
@@ -24,6 +25,18 @@ type ToolHandler = (params: ToolParams) => Promise<unknown>;
 
 export interface McpToolDependencies {
   sessions?: SessionService;
+  /**
+   * Set when this directory has no `.xtctx/config.yaml` — nobody opted it in.
+   *
+   * Two clients wire xtctx machine-globally, so the server is reachable from
+   * every directory on the machine. Answering an unconfigured one with an
+   * ordinary empty result made it indistinguishable from a configured project
+   * with no history, and quietly spent a full scan of every transcript store
+   * to say nothing. Naming it is what turns that global reach into
+   * discovery: the agent that gets this answer is the one that can offer
+   * setup to the person.
+   */
+  unconfiguredProjectRoot?: string;
 }
 
 export function buildToolDefinitions(): Tool[] {
@@ -165,6 +178,14 @@ export function createToolHandlers(
 ): Map<string, ToolHandler> {
   const handlers = new Map<string, ToolHandler>();
 
+  if (dependencies.unconfiguredProjectRoot) {
+    const notice = notConfigured(dependencies.unconfiguredProjectRoot);
+    for (const name of TOOL_NAMES) {
+      handlers.set(name, notice);
+    }
+    return handlers;
+  }
+
   if (dependencies.sessions) {
     handlers.set("xtctx_recent_sessions", createRecentSessionsHandler(dependencies.sessions));
     handlers.set("xtctx_session_detail", createSessionDetailHandler(dependencies.sessions));
@@ -253,6 +274,37 @@ function asToolParams(value: unknown): ToolParams {
   }
 
   return {};
+}
+
+/** Every tool an agent can reach, so a blanket answer cannot miss one. */
+const TOOL_NAMES = [
+  "xtctx_recent_sessions",
+  "xtctx_session_detail",
+  "xtctx_search_sessions",
+  "xtctx_continuity_status",
+  "xtctx_handoff_manifest",
+] as const;
+
+/**
+ * Returned rather than thrown. This is not a failure — it is the answer, and
+ * an `isError` response is something an agent reports as broken rather than
+ * acts on.
+ */
+function notConfigured(projectRoot: string): ToolHandler {
+  return async () =>
+    [
+      `This project is not configured for xtctx: ${inlineSafe(projectRoot)}`,
+      "",
+      "Transcripts from other AI coding tools may already exist for it, but",
+      "nothing is indexed and nothing has been written here.",
+      "",
+      "To enable cross-tool handoff, run in the project root:",
+      "",
+      "    npx -y xtctx setup",
+      "",
+      "Offer that to the user rather than running it unprompted — setup writes",
+      "configuration into the repository and into one machine-global file.",
+    ].join("\n");
 }
 
 function missingDependency(dependency: string): ToolHandler {
