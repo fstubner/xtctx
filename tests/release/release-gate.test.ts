@@ -85,6 +85,19 @@ describe("release gate", () => {
     expect(release).toMatch(/github\.ref[^\n]*refs\/heads\/main/);
   });
 
+  it("publishes the commit it just tagged, not the one it started from", async () => {
+    // A reusable workflow checks out its *caller's* commit by default, and
+    // release.yml calls publish.yml after bumping and committing — so without
+    // an explicit ref the publish job checks out the pre-bump commit, whose
+    // version is not the tagged one. `publish.yml`'s "is this commit tagged
+    // for its version" step then fails by construction and nothing publishes.
+    const release = await readWorkflow("release.yml");
+    const publish = await readWorkflow("publish.yml");
+
+    expect(release).toMatch(/ref:\s*\$\{\{\s*needs\.cut\.outputs\.tag\s*\}\}/);
+    expect(publish).toMatch(/ref:\s*\$\{\{\s*inputs\.ref\s*\}\}/);
+  });
+
   it("has no workflow that creates a release or tag on an automatic trigger", async () => {
     // The broadest form of the guarantee: it does not matter what a future
     // workflow is called, only that nothing reaches `gh release create`,
@@ -106,6 +119,27 @@ describe("release gate", () => {
     }
 
     expect(offenders, "workflows that release on an automatic trigger").toEqual([]);
+  });
+
+  it("documents the release process that exists", async () => {
+    // The runbook described release-please, an `auto-merge-release-pr`
+    // workflow and a `RELEASE_PLEASE_TOKEN` secret for a day after all three
+    // were deleted, while README described the current process — so the two
+    // contradicted each other and an operator following RELEASE.md waited for
+    // a release PR that never comes. Asserting against the workflow directory
+    // rather than a word list, so this fails whenever the docs name machinery
+    // that is not there.
+    const runbook = await readFile(join(process.cwd(), "RELEASE.md"), "utf-8");
+    const workflows = (await readdir(WORKFLOW_DIR)).map((file) => file.replace(/\.ya?ml$/, ""));
+
+    for (const named of runbook.matchAll(/`([a-z][a-z0-9-]*)\.ya?ml`|`([a-z][a-z0-9-]+)` workflow/g)) {
+      const workflow = (named[1] ?? named[2]).replace(/\.ya?ml$/, "");
+      expect(workflows, `RELEASE.md names a workflow that does not exist: ${workflow}`).toContain(
+        workflow,
+      );
+    }
+
+    expect(runbook).not.toMatch(/RELEASE_PLEASE_TOKEN/);
   });
 
   it("no longer carries the release-please config whose draft flag caused the loop", async () => {

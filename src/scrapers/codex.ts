@@ -253,6 +253,14 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
             }
             const match = this.matchesProject(payload.cwd);
             if (match === false) {
+              // Distrust, then stop. The byte offset advanced at the top of
+              // this loop, before the record was classified, and the cursor is
+              // written from whatever these variables hold when the loop
+              // exits — so breaking while `projectMatched` still held the
+              // previous turn's `true` recorded "resume after the mismatch,
+              // and trust what follows". The next scan then served the rest of
+              // another project's session as this one's.
+              projectMatched = false;
               break;
             }
             projectMatched = match ?? projectMatched;
@@ -266,6 +274,14 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
           if (isRecord(payload)) {
             const match = this.matchesProject(payload.cwd);
             if (match === false) {
+              // Distrust, then stop. The byte offset advanced at the top of
+              // this loop, before the record was classified, and the cursor is
+              // written from whatever these variables hold when the loop
+              // exits — so breaking while `projectMatched` still held the
+              // previous turn's `true` recorded "resume after the mismatch,
+              // and trust what follows". The next scan then served the rest of
+              // another project's session as this one's.
+              projectMatched = false;
               break;
             }
             projectMatched = match ?? projectMatched;

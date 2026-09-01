@@ -32,6 +32,8 @@
     "prepack": "npm run build",
     "smoke:cli": "node dist/src/cli/index.js --help",
     "verify:release": "npm run lint && npm run typecheck && npm test && npm run test:security && npm run security:checklist && npm audit --omit=dev && npm --prefix landing audit && npm run test:drift && npm run test:integration && npm run test:smoke && npm run test:eval && npm run build && npm pack --dry-run && npm run demo:public && npm run landing:build && npm run smoke:cli",
+    "sync:version": "node scripts/sync-version.mjs",
+    "version": "node scripts/sync-version.mjs",
     "test:eval": "vitest run tests/eval",
     "test:smoke": "vitest run tests/smoke",
     "capture:formats": "node scripts/capture-format-fingerprint.mjs",

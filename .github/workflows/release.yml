@@ -172,7 +172,10 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add package.json package-lock.json CHANGELOG.md
+          # Every file the bump touched. `npm version` writes the first two;
+          # the `version` lifecycle script writes the rest, and omitting them
+          # here is what tagged a commit that failed its own test suite.
+          git add package.json package-lock.json CHANGELOG.md             plugin .claude-plugin landing/src/data/site.ts
           git commit -m "chore(release): ${VERSION}"
           git tag "$TAG"
           git push origin "HEAD:${GITHUB_REF_NAME}"
@@ -203,3 +206,7 @@ jobs:
       id-token: write
     with:
       confirm: publish
+      # The tag this run just created. Without it the publish job checks out
+      # the caller's commit — the one from before the bump — whose version is
+      # not the tagged one, so its tag check fails and nothing publishes.
+      ref: ${{ needs.cut.outputs.tag }}

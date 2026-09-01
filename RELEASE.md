@@ -2,45 +2,57 @@
 
 ## Forward path
 
-1. Merge conventional-commit PRs into `main`.
-2. `release-please` opens/updates a release PR (requires the
-   `RELEASE_PLEASE_TOKEN` secret — the workflow fails loudly without it).
-3. `auto-merge-release-pr` enables auto-merge on that PR; it merges once the
-   required checks pass. Branch protection on `main` must list the `ci`
-   workflow as a required check — auto-merge is only as safe as that setting.
-4. Merging tags the version and creates a GitHub Release. The release is
-   published, not drafted, so release-please can find it next time.
-5. Nothing has reached npm at this point. Run the `publish` workflow by hand,
-   against the release tag, typing `publish` to confirm: it verifies the
-   commit is tagged for the version in `package.json`, runs `verify:release`,
-   then `npm publish --provenance` (OIDC trusted publishing, no long-lived
-   token). A `post-publish-smoke` job then installs the published version
-   from the registry and runs `--help`/`--version` against it.
+Nothing is released by merging. One workflow does the whole thing, and only
+when someone runs it.
+
+1. Merge work to `main` and leave it there. There is no release PR to wait
+   for and no version bump on merge.
+2. When you actually want a release, dispatch the `release` workflow
+   **against `main`**, choosing `patch`/`minor`/`major` and typing `release`
+   to confirm. It refuses any other branch: a tag on an unreviewed commit
+   would satisfy `publish`'s own tag check, which exists to prevent exactly
+   that.
+3. It runs `verify:release` *before* writing anything, bumps the version
+   across every file that carries it (`npm version` triggers the `version`
+   script, which syncs the plugin manifests, the marketplace entry and the
+   landing site), writes the CHANGELOG entry from GitHub's generated notes,
+   then commits, tags and creates the GitHub Release.
+4. With `publish_npm` left on, it then reuses the `publish` workflow against
+   the tag it just created: tag check, `verify:release`, then
+   `npm publish --provenance` over OIDC trusted publishing — no long-lived
+   token. A `post-publish-smoke` job installs the published version from the
+   registry and runs `--help`/`--version` against it.
+
+To publish a version that was tagged earlier but never reached npm, dispatch
+`publish` on its own against that tag, typing `publish` to confirm. That is
+not hypothetical: this repo once sat nine versions tagged-but-unpublished.
 
 A release is **not done** until `post-publish-smoke` is green.
 
-### Why step 5 is manual, and why it is not a draft
+### Why this is manual
 
-Steps 1-4 are fully automatic, so every merge to `main` once reached npm on
-its own: four versions on 2026-08-28, two on 2026-08-27, none of them because
-anyone decided to release.
+It used to be automatic, and the automation is what went wrong — twice.
 
-The first fix for that drafted the release and left `publish` triggering on
+Release Please opened a release PR on every conventional-commit merge and a
+second workflow auto-merged it within seconds, so merging any change *was* a
+release: four versions on 2026-08-28, two on 2026-08-27, five between 09:34
+and 16:58 on 2026-08-30, none because anyone decided to release.
+
+The first attempted fix drafted the release and left `publish` triggering on
 `release: published`, so a draft published nothing. It worked, and it broke
-the release process. GitHub's `releases/latest` endpoint hides drafts, and
-release-please reads it to find the last release, so it saw the last
-pre-draft version forever. It proposed a release covering the entire history,
+the release process outright. GitHub's `releases/latest` endpoint hides
+drafts, Release Please read it to find the last release, so it saw the last
+pre-draft version forever, proposed a release covering the entire history,
 auto-merge landed it, and the resulting draft was invisible again. That loop
-cut 54 versions in an hour, each with a full-history changelog, before it was
-noticed.
+cut 54 versions in an hour before anyone noticed.
 
-So the release stays published and the brake sits on the npm step instead.
-`publish` has no event trigger at all now — only `workflow_dispatch` with a
-typed confirmation — which is why it cannot fire on its own.
+A per-day ceiling was tried after that and was the wrong shape: capping
+unwanted releases still leaves them unwanted. The automatic path was removed
+instead. Release Please, its config and the auto-merge workflow are all gone.
 
-Do not add an event trigger back to `.github/workflows/publish.yml`, and do
-not set `draft` in `.release-please-config.json`. `tests/release/release-gate.test.ts`
-fails on either.
+Do not add an event trigger to `.github/workflows/publish.yml` or
+`release.yml`, and do not reintroduce Release Please.
+`tests/release/release-gate.test.ts` fails on any of those.
 
 ## Rollback
 
@@ -68,8 +80,8 @@ the transcript index, which is derived data).
 - [ ] `post-publish-smoke` job is green on the publish run
 - [ ] `npx -y xtctx@latest --version` prints the new version
 - [ ] `npm run demo:public` passes against the released build
-- [ ] Landing site footer shows the new version (synced by release-please;
-      see `landing/src/data/site.ts`)
+- [ ] Landing site footer shows the new version (synced by the `version`
+      script; see `landing/src/data/site.ts` and `scripts/sync-version.mjs`)
 
 ## Watching for upstream format drift
 
