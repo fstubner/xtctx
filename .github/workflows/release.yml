@@ -56,6 +56,22 @@ jobs:
       version: ${{ steps.bump.outputs.version }}
       tag: ${{ steps.bump.outputs.tag }}
     steps:
+      # `workflow_dispatch` lets whoever starts the run choose the ref, and
+      # typing the confirm word was the only gate. A release cut from a branch
+      # tags a commit that never went through review on main — and that tag
+      # then satisfies the "is this commit tagged for its version" check in
+      # `publish.yml`, whose whole purpose is to stop an arbitrary branch tip
+      # reaching npm. The gate answered itself.
+      #
+      # A failing step rather than a job-level `if`, because a skipped job
+      # reads as "nothing happened" and this needs to say why.
+      - name: Refuse to release from anywhere but main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "Releases are cut from main. This run is on ${GITHUB_REF}." >&2
+          echo "Merge the work first, then dispatch this workflow against main." >&2
+          exit 1
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

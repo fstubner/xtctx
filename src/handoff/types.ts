@@ -53,6 +53,17 @@ export interface HandoffStatus {
   /** Last semantic-search failure, or null. Non-null means hybrid search is
    *  silently answering from keyword only. */
   embedding_error: string | null;
+  /**
+   * Enabled tools whose transcript store this project's `.xtctx/config.yaml`
+   * points outside the home directory.
+   *
+   * That file is committable, so a cloned repository can carry one — and a
+   * redirected store means the transcripts served as this project's context
+   * came from somewhere else. Tool names only: the paths themselves carry the
+   * machine's home-directory layout and are redacted from model-facing
+   * surfaces.
+   */
+  redirected_tools: string[];
   tools: Array<{
     tool: string;
     detected: boolean;

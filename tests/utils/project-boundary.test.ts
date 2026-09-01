@@ -29,6 +29,16 @@ describe("pathMatchesProject traversal", () => {
     ).toBe(false);
   });
 
+  it("does not match the parent directory reached through a trailing ..", () => {
+    // The escape a mid-path test cannot see. Traversal resolution was skipped
+    // unless the path contained the substring `./`, and `<root>/..` does not:
+    // its only dot run is preceded by a slash and followed by nothing. So it
+    // went through unresolved, and `<root>/..` starts with `<root>/` — the
+    // parent of the project matched as inside it.
+    expect(pathMatchesProject("H:/projects/app/..", "H:/projects/app")).toBe(false);
+    expect(pathMatchesProject("H:/projects/app/src/../..", "H:/projects/app")).toBe(false);
+  });
+
   it("still matches a real child that merely contains .. mid-path", () => {
     // `src/../src/a.ts` resolves back inside the project, so it must match:
     // resolving traversal has to mean resolving, not rejecting.
