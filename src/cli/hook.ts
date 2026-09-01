@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { readFile } from "node:fs/promises";
 import { writeFileAtomic } from "../utils/atomic-file.js";
 import { inlineSafe } from "../utils/untrusted-text.js";
+import { pathMatchesProject } from "../utils/project-scope.js";
 
 export interface HookOptions {
   projectPath?: string;
@@ -41,11 +42,21 @@ export async function runHook(options: HookOptions = {}): Promise<void> {
     const payload = await readHookPayload();
     services = await createProjectServices(options.projectPath ?? payload.cwd);
 
+    // Only trust the payload's store location if the payload is describing
+    // *this* project. `transcript_path` is taken verbatim, and pointing it at
+    // another project's store redirected scraping there — this project's own
+    // sessions then vanished from every result with no warning, which reads
+    // as "nothing indexed yet" rather than as a redirect.
+    const payloadIsForThisProject =
+      payload.cwd === undefined || pathMatchesProject(payload.cwd, services.projectRoot);
+
     // Record it rather than only using it here. This hook deliberately does a
     // no-scan read of the existing index — scraping happens later, in the MCP
     // server, a different process that never receives a hook payload. Writing
     // it down is what carries the tool's own answer across that gap.
-    await rememberStoreDirs(services.projectRoot, payload.storeDirs);
+    if (payloadIsForThisProject) {
+      await rememberStoreDirs(services.projectRoot, payload.storeDirs);
+    }
     const status = await services.sessions.getStatus();
     const tool = options.tool ?? "unknown";
 

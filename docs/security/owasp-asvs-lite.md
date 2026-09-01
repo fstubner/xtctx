@@ -47,6 +47,7 @@ right place for them precisely because no test can hold them.
 
 - [x] MCP handlers validate required parameters. <!-- verified-by: tests/mcp/hardening.test.ts, tests/mcp/manifest.test.ts -->
 - [x] Session detail responses return raw local transcript messages rather than generated claims.
+- [x] Transcript-derived `source_path` and `source_pointer` are neutralised before reaching an agent-facing surface. Both print outside the fence, so fencing the message body does not contain them. <!-- verified-by: tests/mcp/source-field-safety.test.ts -->
 - [x] Setup repairs generated managed blocks while preserving user-authored text outside fences. <!-- verified-by: tests/config/managed-block.test.ts -->
 - [x] Stale generated references to removed tools are detected by tests. <!-- verified-by: tests/security/surface.test.ts -->
 
@@ -55,7 +56,7 @@ right place for them precisely because no test can hold them.
 - [x] Setup writes only known project/user integration files. <!-- verified-by: tests/utils/atomic-file.test.ts, tests/config/setup.test.ts -->
 - [x] Existing MCP config keys outside xtctx-owned server entries are preserved. <!-- verified-by: tests/config/mcp-config.test.ts, tests/config/toml-comments.test.ts -->
 - [x] Generated state paths are excluded from commit guidance.
-- [x] Index reads are scoped to the project root the rows were recorded against, so an index that outlives its project does not serve the old path's conversations. Defence in depth only: a row mis-attributed on the way in carries this project's root. <!-- verified-by: tests/handoff/project-root-scoping.test.ts -->
+- [x] Every index read path — both list paths, lookup by ref, message detail, keyword search, vector search — and the status counts are scoped to the project root the rows were recorded against. The first version of this control was written while both search queries were still unscoped: it named the property and not the paths, and the paths were where it was false. Defence in depth regardless — a row mis-attributed on the way in carries this project's root and is not caught here. <!-- verified-by: tests/handoff/project-root-scoping.test.ts -->
 - [x] A `storePath` naming a workspace database directly is scoped like one found by walking, so a committed config cannot nominate another project's store. <!-- verified-by: tests/scrapers/attribution-boundaries.test.ts -->
 - [x] Path mentions used for attribution are bounded on both sides, so a foreign path ending with this project's path does not match. <!-- verified-by: tests/scrapers/attribution-boundaries.test.ts, tests/utils/project-boundary.test.ts -->
 - [x] A resumed scan cannot inherit a boundary decision made before a refused record. <!-- verified-by: tests/scrapers/codex-boundary-resume.test.ts -->

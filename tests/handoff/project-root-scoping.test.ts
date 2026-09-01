@@ -63,6 +63,23 @@ class OneMessageScraper implements ConversationScraper {
   async saveScrapedPosition(): Promise<void> {}
 }
 
+/**
+ * Deterministic vectors, so the `vector` search mode is genuinely exercised.
+ * The real provider is disabled across the suite (a 100MB ONNX model per
+ * worker exhausts memory), and without a stand-in the vector query — one of
+ * the two that were unscoped — would go untested.
+ */
+const stubEmbeddings = {
+  model: "stub",
+  isReady: () => true,
+  async embed(): Promise<Float32Array> {
+    return new Float32Array([1, 0, 0]);
+  },
+  async embedBatch(texts: string[]): Promise<Float32Array[]> {
+    return texts.map(() => new Float32Array([1, 0, 0]));
+  },
+};
+
 describe("reads are scoped to the project the index belongs to", () => {
   let dir = "";
 
@@ -75,9 +92,12 @@ describe("reads are scoped to the project the index belongs to", () => {
   });
 
   async function indexFor(projectRoot: string): Promise<SqliteHandoffIndex> {
-    return new SqliteHandoffIndex(join(dir, "xtctx.db"), projectRoot, [
-      { tool: "codex", scraper: new OneMessageScraper("belongs to the first project") },
-    ]);
+    return new SqliteHandoffIndex(
+      join(dir, "xtctx.db"),
+      projectRoot,
+      [{ tool: "codex", scraper: new OneMessageScraper("belongs to the first project") }],
+      { embeddingProvider: stubEmbeddings },
+    );
   }
 
   it("does not serve rows recorded against a different project root", async () => {
@@ -110,6 +130,39 @@ describe("reads are scoped to the project the index belongs to", () => {
       expect(await second.getSessionDetail(session.session_ref, 0, 10)).toEqual([]);
     } finally {
       await second.close();
+    }
+  });
+
+  it("does not serve another project's rows through search", async () => {
+    // The read paths are six, not four. `listRecentSessions`,
+    // `listIndexedSessions`, `getSessionByRef` and `getSessionDetail` were
+    // scoped; `semanticSearch` and `queryKeywordUnits` were not, and both
+    // already join `sessions`, so the column was in hand and unused. Search
+    // returns message text and previews, so this is the read path that leaks
+    // the most per call.
+    const first = await indexFor("H:/projects/first");
+    expect(await first.listRecentSessions(10)).toHaveLength(1);
+    await first.close();
+
+    const second = new SqliteHandoffIndex(join(dir, "xtctx.db"), "H:/projects/second", [], {
+      embeddingProvider: stubEmbeddings,
+    });
+    try {
+      for (const mode of ["keyword", "hybrid", "vector"] as const) {
+        expect(await second.searchSessions("belongs", 10, undefined, mode), mode).toEqual([]);
+      }
+    } finally {
+      await second.close();
+    }
+  });
+
+  it("still finds its own rows through search", async () => {
+    const first = await indexFor("H:/projects/first");
+    try {
+      const hits = await first.searchSessions("belongs", 10, undefined, "keyword");
+      expect(hits).toHaveLength(1);
+    } finally {
+      await first.close();
     }
   });
 
