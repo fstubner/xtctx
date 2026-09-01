@@ -200,7 +200,10 @@ function formatRecentSessionsMarkdown(
 
   const lines = [heading, ""];
   for (const [index, session] of sessions.entries()) {
-    lines.push(`### ${index + 1}. ${session.session_ref}`);
+    // `${tool}:${sessionId}`, and `sessionId` is transcript text. This is the
+    // heading of every entry on the surface an agent reads first, and there is
+    // no fence on it — a newline here forges a whole session entry.
+    lines.push(`### ${index + 1}. ${inlineSafe(session.session_ref)}`);
     lines.push(`- Tool: ${session.tool}`);
     lines.push(`- Started: ${session.started_at}`);
     lines.push(`- Last activity: ${session.last_activity_at}`);
@@ -208,7 +211,11 @@ function formatRecentSessionsMarkdown(
     if (session.git_branch) {
       // The branch the session ran on, from the transcript — not from the
       // working tree now, which is very often a different branch.
-      const commit = session.git_commit ? ` @ ${session.git_commit.slice(0, 8)}` : "";
+      // Scrubbed, not just shortened. A length cap is not a neutraliser:
+      // eight characters is a newline and seven more.
+      const commit = session.git_commit
+        ? ` @ ${inlineSafe(session.git_commit).slice(0, 8)}`
+        : "";
       lines.push(`- Branch: ${inlineSafe(session.git_branch)}${commit}`);
     }
     if (typeof session.score === "number") {
