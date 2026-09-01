@@ -373,7 +373,12 @@ export class SqliteHandoffIndex implements SessionService {
     const normalizedLimit = normalizeLimit(limit, DEFAULT_LIMIT);
     const filters = normalizeToolFilter(toolFilter);
     const branches = normalizeToolFilter(branchFilter);
-    const clauses: string[] = [];
+    // Always first, and not optional. `project_root` was written on every
+    // insert and read by nothing, so an index that outlived its project —
+    // a renamed directory, a copied `.xtctx/`, a worktree made from a
+    // checkout that already had one — served the old path's conversations as
+    // this project's. Defence in depth behind the scrapers' own attribution.
+    const clauses: string[] = ["project_root = ?"];
     if (filters.length > 0) {
       clauses.push(`tool IN (${placeholders(filters.length)})`);
     }
@@ -382,7 +387,7 @@ export class SqliteHandoffIndex implements SessionService {
       // requested one, so it is excluded rather than assumed in.
       clauses.push(`git_branch IN (${placeholders(branches.length)})`);
     }
-    const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+    const where = `WHERE ${clauses.join(" AND ")}`;
     const rows = db
       .prepare(
         `SELECT session_ref, tool, started_at, last_activity_at, message_count, preview, source_path,
@@ -392,7 +397,7 @@ export class SqliteHandoffIndex implements SessionService {
          ORDER BY last_activity_at DESC
          LIMIT ?`,
       )
-      .all(...filters, ...branches, normalizedLimit) as SessionRow[];
+      .all(this.projectRoot, ...filters, ...branches, normalizedLimit) as SessionRow[];
 
     return rows.map(formatSessionRow);
   }
@@ -413,10 +418,11 @@ export class SqliteHandoffIndex implements SessionService {
         `SELECT session_ref, tool, started_at, last_activity_at, message_count, preview, source_path,
                 git_branch, git_commit
          FROM sessions
+         WHERE project_root = ?
          ORDER BY last_activity_at DESC
          LIMIT ?`,
       )
-      .all(normalizeLimit(limit, DEFAULT_LIMIT)) as SessionRow[];
+      .all(this.projectRoot, normalizeLimit(limit, DEFAULT_LIMIT)) as SessionRow[];
 
     return rows.map(formatSessionRow);
   }
@@ -428,9 +434,9 @@ export class SqliteHandoffIndex implements SessionService {
         `SELECT session_ref, tool, started_at, last_activity_at, message_count, preview, source_path,
                 git_branch, git_commit
          FROM sessions
-         WHERE session_ref = ?`,
+         WHERE session_ref = ? AND project_root = ?`,
       )
-      .get(sessionRef) as SessionRow | undefined;
+      .get(sessionRef, this.projectRoot) as SessionRow | undefined;
 
     return row ? formatSessionRow(row) : null;
   }
@@ -449,10 +455,11 @@ export class SqliteHandoffIndex implements SessionService {
         `SELECT id, timestamp, role, content, message_index, source_pointer
          FROM messages
          WHERE session_ref = ?
+           AND session_ref IN (SELECT session_ref FROM sessions WHERE project_root = ?)
          ORDER BY timestamp ASC, message_index ASC, id ASC
          LIMIT ? OFFSET ?`,
       )
-      .all(sessionRef, normalizedLimit, normalizedOffset) as MessageRow[];
+      .all(sessionRef, this.projectRoot, normalizedLimit, normalizedOffset) as MessageRow[];
 
     return rows.map((row) => ({
       timestamp: row.timestamp,
