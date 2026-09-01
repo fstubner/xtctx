@@ -55,7 +55,16 @@ function normalizeProjectPath(value: string): string {
  * so a path can never escape upward into a prefix that matches something else.
  */
 function resolveTraversal(path: string): string {
-  if (!path.includes("./")) {
+  // A `.` or `..` segment is one that starts the path or follows a slash, so
+  // that is what the fast path has to test for. It used to look for the
+  // substring `./`, which a *trailing* traversal does not contain: `<root>/..`
+  // went through unresolved and then matched `<root>/` by prefix, making the
+  // project's parent directory read as inside it.
+  //
+  // `/a/b.txt` still short-circuits — its dot does not follow a slash — so the
+  // common case is unchanged. `/a/.config/b` now parses and comes back
+  // identical, which costs a split and is the price of being right.
+  if (!path.startsWith(".") && !path.includes("/.")) {
     return path;
   }
 

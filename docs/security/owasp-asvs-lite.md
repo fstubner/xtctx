@@ -55,11 +55,15 @@ right place for them precisely because no test can hold them.
 - [x] Setup writes only known project/user integration files. <!-- verified-by: tests/utils/atomic-file.test.ts, tests/config/setup.test.ts -->
 - [x] Existing MCP config keys outside xtctx-owned server entries are preserved. <!-- verified-by: tests/config/mcp-config.test.ts, tests/config/toml-comments.test.ts -->
 - [x] Generated state paths are excluded from commit guidance.
+- [x] State writes under `.xtctx/` go through the atomic helper, so no write lands at a predictable temp path. <!-- verified-by: tests/scrapers/state-write-safety.test.ts, tests/utils/atomic-file.test.ts -->
+- [x] A `storePath` redirecting transcript reads outside the home directory is reported rather than silent. Accepted risk, not eliminated: `.xtctx/config.yaml` is committable by design, so a cloned repo can carry one, and the redirect still takes effect — what changed is that status names the affected tools. <!-- verified-by: tests/handoff/store-redirect.test.ts -->
+- [x] Whether a checkout's own build is configured to run is decided by what this process is already executing, not by that checkout's `package.json`. <!-- verified-by: tests/config/self-hosted-setup.test.ts -->
 
 ## Supply Chain and Release Security
 
 - [x] CI validates lint, tests, builds, packaging, drift checks, and security checks.
 - [x] Root production dependency audit is part of the release verification path.
 - [x] Release publishing uses GitHub OIDC trusted publishing. <!-- verified-by: tests/release/release-gate.test.ts -->
+- [x] Releases are cut only from `main`, so a tag cannot be created on an unreviewed branch and then satisfy the publish workflow's tag check. <!-- verified-by: tests/release/release-gate.test.ts -->
 - [x] npm publish includes provenance.
 - [x] Package contents are allowlisted via `files`. <!-- verified-by: tests/release/plugin-package.test.ts -->

@@ -57,6 +57,11 @@ export interface ProjectServicesOptions {
    * reconstruct their locations as before.
    */
   storeDirs?: Record<string, string | undefined>;
+  /**
+   * Home directory to judge store-path redirects against. Tests pass one;
+   * everything else uses the real environment.
+   */
+  homeDir?: string;
 }
 
 export async function createProjectServices(
@@ -96,7 +101,10 @@ export async function createProjectServices(
     dbPath,
     projectRoot,
     scrapers.map((scraper) => ({ tool: scraper.tool, scraper })),
-    { createIfMissing: options.createIfMissing },
+    {
+      createIfMissing: options.createIfMissing,
+      redirectedTools: redirectedTools(config, options.homeDir),
+    },
   );
 
   return {
@@ -162,6 +170,48 @@ function normalizeTools(input: unknown): ProjectConfig["tools"] {
   }
 
   return tools;
+}
+
+/**
+ * Enabled tools whose transcript store this project's config redirects out of
+ * the home directory.
+ *
+ * `.xtctx/config.yaml` is committable — which tools a project uses belongs in
+ * the repo — and it can also set `storePath`, the directory transcripts are
+ * read from. That path is resolved with no containment, so a config carried by
+ * a cloned repository can point xtctx at another project's store and have
+ * those conversations served back as this project's context.
+ *
+ * Nothing writes `storePath` any more, so one that is present came from the
+ * operator or from a clone, and the transcripts that come back look the same
+ * either way. Reporting it is the mitigation: the reading still happens, but
+ * it stops being silent.
+ *
+ * Home is the boundary because every tool keeps its store under it by default.
+ * A path elsewhere is unusual enough to be worth a line and common enough
+ * inside home that warning there would only teach people to ignore it.
+ */
+function redirectedTools(config: ProjectConfig, homeDir?: string): string[] {
+  const home = homeDir ?? process.env.USERPROFILE ?? process.env.HOME ?? "";
+  if (!home) {
+    return [];
+  }
+
+  return Object.entries(config.tools)
+    .filter(([, value]) => value.enabled !== false && value.storePath)
+    .filter(([, value]) => !isInsideDir(value.storePath as string, home))
+    .map(([tool]) => tool)
+    .sort();
+}
+
+function isInsideDir(candidate: string, root: string): boolean {
+  const c = normalizeForCompare(candidate);
+  const r = normalizeForCompare(root);
+  return c === r || c.startsWith(`${r}/`);
+}
+
+function normalizeForCompare(value: string): string {
+  return value.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
 }
 
 /**

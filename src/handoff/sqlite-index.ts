@@ -68,6 +68,12 @@ interface SqliteHandoffIndexOptions {
    */
   createIfMissing?: boolean;
   /**
+   * Enabled tools whose store this project's config redirects outside the
+   * home directory. Reported in status; see `redirectedTools` in
+   * `runtime/services.ts` for why it is worth saying.
+   */
+  redirectedTools?: string[];
+  /**
    * Stop searches from vectorizing anything they find unvectorized.
    *
    * For measuring how retrieval behaves at a given fraction of the corpus
@@ -321,6 +327,7 @@ export class SqliteHandoffIndex implements SessionService {
   private readonly vectorBudgetMs: number;
   private scanStartedMs = 0;
   private readonly createIfMissing: boolean;
+  private readonly redirectedTools: string[];
   private readonly freezeVectors: boolean;
   /** Windows still waiting to be vectorized after the last search gave up its budget. */
   private vectorBacklog = 0;
@@ -347,6 +354,7 @@ export class SqliteHandoffIndex implements SessionService {
     );
     this.vectorBudgetMs = Math.max(0, options.vectorBudgetMs ?? DEFAULT_VECTOR_BUDGET_MS);
     this.createIfMissing = options.createIfMissing ?? true;
+    this.redirectedTools = options.redirectedTools ?? [];
     this.freezeVectors = options.freezeVectors ?? false;
     this.initialized = this.initialize();
     // Attach a no-op handler so a failed open cannot become an unhandled
@@ -566,6 +574,7 @@ export class SqliteHandoffIndex implements SessionService {
       vector_ms_per_unit: numericSetting("vector_ms_per_unit"),
       vector_model: this.embeddingProvider.model,
       embedding_error: getSetting(db, "last_error:embeddings"),
+      redirected_tools: this.redirectedTools,
       tools,
     };
   }

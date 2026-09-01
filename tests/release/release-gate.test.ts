@@ -73,6 +73,18 @@ describe("release gate", () => {
     expect(release).toMatch(/confirm/);
   });
 
+  it("cuts a release only from main", async () => {
+    // `workflow_dispatch` lets the operator pick any ref, and confirming the
+    // word "release" was the only gate — so a release could be cut from a
+    // branch, tagging a commit that never went through review on main. The
+    // tag then satisfies `publish.yml`'s "is this commit tagged" check, which
+    // exists to stop publishing an arbitrary branch tip and would have been
+    // answered by the tag this very run had just created.
+    const release = await readWorkflow("release.yml");
+
+    expect(release).toMatch(/github\.ref[^\n]*refs\/heads\/main/);
+  });
+
   it("has no workflow that creates a release or tag on an automatic trigger", async () => {
     // The broadest form of the guarantee: it does not matter what a future
     // workflow is called, only that nothing reaches `gh release create`,
