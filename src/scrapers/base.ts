@@ -1,6 +1,7 @@
-import { mkdir, open, readFile, rename, writeFile } from "node:fs/promises";
+import { open, readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
+import { writeFileAtomic } from "../utils/atomic-file.js";
 import type {
   ConversationChunk,
   ConversationScraper,
@@ -30,13 +31,12 @@ export class ScraperStateManager {
   }
 
   async save(tool: string, state: ScraperState): Promise<void> {
-    const path = this.statePath(tool);
-    const tmpPath = `${path}.tmp`;
-    await mkdir(dirname(path), { recursive: true });
-    // Write to a temp file first, then atomically rename it over the target
-    // so a mid-write crash never leaves a corrupt state file (M3).
-    await writeFile(tmpPath, JSON.stringify(state, null, 2), "utf-8");
-    await rename(tmpPath, path);
+    // Was a hand-rolled tmp-then-rename through `<path>.tmp`. The rename half
+    // was right — a mid-write crash must not leave a corrupt state file (M3) —
+    // but the temp name was fully predictable and the write plain, so anything
+    // pre-planted there was written through. `writeFileAtomic` is the same
+    // pattern with a random suffix and `wx`, which is why it exists.
+    await writeFileAtomic(this.statePath(tool), JSON.stringify(state, null, 2));
   }
 
   private statePath(tool: string): string {

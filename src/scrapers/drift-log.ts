@@ -1,5 +1,6 @@
-import { mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
+import { writeFileAtomic } from "../utils/atomic-file.js";
 
 /**
  * Drift reporting, collected per scan and reported once per kind of surprise.
@@ -356,14 +357,12 @@ async function persist(
     surprises: kept,
   };
 
-  const path = driftLogPath(stateDir, tool);
-  // Unique per process: a shared fixed tmp name is one file two writers can be
-  // inside at once, which is the corruption the rename is supposed to prevent.
-  const tmpPath = `${path}.${process.pid}.tmp`;
   // Same tmp-then-rename as scraper state: a crash mid-write must not leave a
-  // corrupt log behind.
-  await writeFile(tmpPath, JSON.stringify(log, null, 2), "utf-8");
-  await rename(tmpPath, path);
+  // corrupt log behind. The temp name used to be `<path>.<pid>.tmp`, which is
+  // unique against other *writers* but not against an attacker — a pid is
+  // guessable, and the write was plain, so a file already sitting at that name
+  // was written through. `writeFileAtomic` randomises it and opens with `wx`.
+  await writeFileAtomic(driftLogPath(stateDir, tool), JSON.stringify(log, null, 2));
 }
 
 class DriftLog {
