@@ -1,5 +1,6 @@
 import type { SessionService, SessionSummary } from "../../handoff/types.js";
 import { indexingPayload, validatedFilter } from "./sessions.js";
+import { inlineSafe } from "../../utils/untrusted-text.js";
 
 interface HandoffManifestParams {
   session_refs?: string[];
@@ -102,22 +103,26 @@ function formatManifestMarkdown(manifest: {
 }): string {
   const lines = ["## xtctx Handoff Manifest", ""];
   if (manifest.correlation_id) {
-    lines.push(`- Correlation ID: ${manifest.correlation_id}`);
+    // Supplied by whatever called the tool and only trimmed. It prints
+    // outside any fence, so the same rule applies as to transcript text.
+    lines.push(`- Correlation ID: ${inlineSafe(manifest.correlation_id)}`);
   }
   lines.push(`- Project: ${manifest.project.root}`);
   lines.push(`- Last scan: ${manifest.freshness.last_scan_at ?? "never"}`);
   lines.push(`- Indexed sessions: ${manifest.freshness.indexed_sessions}`, "");
 
   for (const session of manifest.sessions) {
-    lines.push(`### ${session.handoff_id}`);
+    // The session ref again, under another name. A fix applied only in
+    // sessions.ts leaves this surface forgeable.
+    lines.push(`### ${inlineSafe(session.handoff_id)}`);
     lines.push(`- Tool: ${session.tool}`);
     lines.push(`- Last activity: ${session.last_activity_at}`);
     lines.push(`- Messages: ${session.message_count}`);
-    lines.push(`- Retrieve: xtctx_session_detail(session_ref=${session.session_ref})`, "");
+    lines.push(`- Retrieve: xtctx_session_detail(session_ref=${inlineSafe(session.session_ref)})`, "");
   }
 
   if (manifest.missing_session_refs.length > 0) {
-    lines.push(`Missing sessions: ${manifest.missing_session_refs.join(", ")}`);
+    lines.push(`Missing sessions: ${manifest.missing_session_refs.map(inlineSafe).join(", ")}`);
   }
 
   return lines.join("\n").trim();

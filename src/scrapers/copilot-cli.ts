@@ -319,9 +319,13 @@ export class CopilotCliScraper extends AbstractScraper<CopilotCliChunk> {
         continue;
       }
 
-      if (this.projectRoot && projectMatch === null) {
-        // Fail closed: without session.start context this session cannot be
-        // attributed to a project, so scoped indexing must not include it.
+      if (this.projectRoot && projectMatch !== true) {
+        // Fail closed on anything that is not an explicit match. This used to
+        // test `=== null`, which is every state a *fresh* pass can be in —
+        // a rejected `session.start` returns before reaching here. A resumed
+        // pass can restore `false` from the cursor, and that has to refuse
+        // too, or the cursor becomes a way to smuggle a decision past the
+        // check that exists to make it.
         warnDrift(
           filePath,
           "session has no session.start context; cannot attribute to a project — skipped under project scoping",
@@ -368,10 +372,16 @@ export class CopilotCliScraper extends AbstractScraper<CopilotCliChunk> {
         context: {
           sessionId,
           messageIndex,
-          // `false` only when scoping actually rejected this file; an
-          // undecided `null` means no session.start was seen, and the
-          // unscoped default is to accept.
-          projectMatched: projectMatch ?? true,
+          // Undecided is not the same as trusted. A pass that saw no
+          // `session.start` and no content never reached the fail-closed
+          // guard above, so it ends with `null` — and recording that as
+          // `true` told the next scan to resume here and trust everything
+          // appended since. Content that nothing attributed was then indexed,
+          // and the index's own `project_root` filter cannot catch it: the
+          // rows carry this project's root because the scraper said so.
+          //
+          // `codex.ts` uses the same shape. This is the path that missed it.
+          projectMatched: projectMatch ?? (this.projectRoot ? false : true),
           gitBranch,
           gitCommit,
         },
