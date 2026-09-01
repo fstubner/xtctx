@@ -30,12 +30,17 @@ import { sandboxEnv } from "./helpers.js";
 const CLI = resolve(process.cwd(), "dist", "src", "cli", "index.js");
 
 describe("session-start hook payload trust", () => {
+  let parentDir = "";
   let projectRoot = "";
   let homeDir = "";
   let foreignStore = "";
 
   beforeEach(async () => {
-    projectRoot = await mkdtemp(join(tmpdir(), "xtctx-hookpay-"));
+    // The project sits inside a directory we own, so the ancestor case below
+    // can be asserted without touching the shared temp root.
+    parentDir = await mkdtemp(join(tmpdir(), "xtctx-hookpay-parent-"));
+    projectRoot = join(parentDir, "project");
+    await mkdir(projectRoot, { recursive: true });
     homeDir = await mkdtemp(join(tmpdir(), "xtctx-hookpay-home-"));
     foreignStore = await mkdtemp(join(tmpdir(), "xtctx-hookpay-foreign-"));
     await mkdir(join(projectRoot, ".xtctx", "state"), { recursive: true });
@@ -47,7 +52,7 @@ describe("session-start hook payload trust", () => {
   });
 
   afterEach(async () => {
-    for (const dir of [projectRoot, homeDir, foreignStore]) {
+    for (const dir of [parentDir, homeDir, foreignStore]) {
       await rm(dir, { recursive: true, force: true });
     }
   });
@@ -128,6 +133,28 @@ describe("session-start hook payload trust", () => {
     ).toBe(0);
 
     expect(existsSync(join(foreignStore, ".xtctx"))).toBe(false);
+    expect(await recordedStoreDirs()).toBeNull();
+  });
+
+  it("does not let a payload move the hook onto an ancestor directory", async () => {
+    // The hole the sibling case above does not reach. The guard accepted the
+    // payload when *either* path contained the other, and "the payload names
+    // a parent" is the branch that matters: a home directory, a monorepo
+    // root, or `/` all contain the project. Accepting one creates an
+    // unrequested index in a directory nobody set up and records an
+    // attacker-named transcript store against it.
+    //
+    // The subdirectory case this was meant to allow is hypothetical — hosts
+    // run the hook with cwd at the project root — so the payload does not get
+    // to name the project at all now.
+    expect(
+      await runHook({
+        cwd: parentDir,
+        transcript_path: join(foreignStore, "store", "session.jsonl"),
+      }),
+    ).toBe(0);
+
+    expect(existsSync(join(parentDir, ".xtctx"))).toBe(false);
     expect(await recordedStoreDirs()).toBeNull();
   });
 

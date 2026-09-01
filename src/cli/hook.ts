@@ -46,34 +46,32 @@ export async function runHook(options: HookOptions = {}): Promise<void> {
     // payload's claim, and it is the only independent witness available here.
     const hostRoot = options.projectPath ?? process.cwd();
 
-    // The payload may name the project only when it agrees with that witness
-    // — same directory, or one containing it, which is what a host invoking
-    // the hook from a subdirectory looks like.
+    // The payload never chooses the project. It used to, and every version of
+    // the guard around that was wrong in a different way: first it compared
+    // `payload.cwd` against a root derived from `payload.cwd` (a value
+    // compared with itself, which cannot reject), then it accepted any path
+    // that *contained* the host's — so naming a parent still relocated the
+    // hook, to a home directory or a monorepo root, creating an unrequested
+    // index there.
     //
-    // The first version of this guard compared `payload.cwd` against
-    // `services.projectRoot`, which is *derived from* `payload.cwd` when no
-    // `--project` is passed. The hook is registered without one, so in
-    // production that compared a value with itself and could never reject.
-    // An absent `cwd` was accepted too — the easier of the two to send, since
-    // it means omitting a field rather than forging one.
-    //
-    // Rejecting means falling back to the host's own cwd, not failing: the
-    // payload is an accuracy improvement over re-deriving the store path, and
-    // never something the hook depends on.
-    // Both sides resolved before comparing. `process.cwd()` is reported
-    // canonically by the OS while the payload carries whatever the host
-    // wrote, and on macOS a temp or home directory is routinely a symlink
-    // (`/var` -> `/private/var`) — so a lexical comparison rejected the
-    // legitimate payload it exists to accept. The guard was wrong in both
-    // directions; this is the other one.
-    const payloadRoot = payload.cwd === undefined ? undefined : await canonical(payload.cwd);
-    const canonicalHostRoot = await canonical(hostRoot);
-    const payloadIsForThisProject =
-      payloadRoot !== undefined &&
-      (pathMatchesProject(canonicalHostRoot, payloadRoot) ||
-        pathMatchesProject(payloadRoot, canonicalHostRoot));
+    // The subdirectory case that branch existed for is hypothetical: hosts run
+    // the hook with cwd at the project root. So the host's cwd decides, full
+    // stop, and the payload is used for one thing only — see below.
+    services = await createProjectServices(hostRoot);
 
-    services = await createProjectServices(payloadIsForThisProject ? payload.cwd : hostRoot);
+    // What the payload is still good for: `transcript_path` is the tool's own
+    // answer for where its transcripts live, which beats re-deriving a lossy
+    // path encoding. It is trusted only when the payload is describing this
+    // project or something inside it.
+    //
+    // Both sides resolved first. `process.cwd()` is reported canonically by
+    // the OS while the payload carries whatever the host wrote, and on macOS a
+    // temp or home directory is routinely a symlink (`/var` -> `/private/var`)
+    // — so comparing them lexically rejected the legitimate payload this
+    // exists to accept. An absent `cwd` fails closed.
+    const payloadRoot = payload.cwd === undefined ? undefined : await canonical(payload.cwd);
+    const payloadIsForThisProject =
+      payloadRoot !== undefined && pathMatchesProject(payloadRoot, await canonical(hostRoot));
 
     // Record it rather than only using it here. This hook deliberately does a
     // no-scan read of the existing index — scraping happens later, in the MCP

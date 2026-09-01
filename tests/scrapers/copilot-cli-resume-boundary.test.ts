@@ -111,13 +111,26 @@ describe("copilot-cli resume cannot inherit an undecided boundary", () => {
     expect(await scrape()).toEqual(["ours, appended later"]);
   });
 
-  it("indexes everything when there is no project to scope to", async () => {
-    await writeFile(events, [turn("unscoped")].join("\n") + "\n");
+  it("records a trusting cursor only when there is no project to scope to", async () => {
+    // The unscoped branch of the default, asserted on the cursor rather than
+    // on the chunks. The first version of this test did a single pass and
+    // never resumed, so it never read the value it appeared to guard —
+    // dropping the unscoped branch entirely left it green.
+    await writeFile(events, turn("unscoped") + "\n");
 
     const out: CopilotCliChunk[] = [];
     const scraper = new CopilotCliScraper(rootDir, stateDir);
     for await (const chunk of scraper.scrape(new Date(0))) out.push(chunk);
-
     expect(out.map((c) => c.content)).toEqual(["unscoped"]);
+
+    const raw = await readFile(join(stateDir, "copilot-cli-state.json"), "utf-8").catch(() => "{}");
+    const saved = (
+      JSON.parse(raw) as { files?: Record<string, { context?: { projectMatched?: boolean } }> }
+    ).files?.[events];
+
+    // Unscoped use has no boundary to fail closed on, so the cursor must say
+    // so — otherwise a later scoped scan of the same store would inherit a
+    // refusal nothing decided.
+    expect(saved?.context?.projectMatched).toBe(true);
   });
 });
