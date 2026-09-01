@@ -21,7 +21,7 @@
  */
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -85,6 +85,31 @@ describe("session-start hook payload trust", () => {
     expect(
       await runHook({ cwd: projectRoot, transcript_path: join(ours, "session.jsonl") }),
     ).toBe(0);
+
+    expect(await recordedStoreDirs()).toMatchObject({ "claude-code": ours });
+  });
+
+  it("accepts a payload naming the same directory by a different path", async () => {
+    // The other direction of the same guard, and the one that reached CI
+    // rather than this machine: `process.cwd()` is reported canonically by the
+    // OS while the payload carries whatever the host wrote. On macOS the temp
+    // directory is a symlink, so those two spellings differ on every run and a
+    // lexical comparison rejected the legitimate payload the guard exists to
+    // accept — silently, since the hook fails open.
+    //
+    // Forced here on every platform rather than left to whichever OS happens
+    // to symlink its temp directory.
+    const ours = join(homeDir, ".claude", "projects", "encoded-root");
+    await mkdir(ours, { recursive: true });
+
+    const link = join(homeDir, "link-to-project");
+    try {
+      await symlink(projectRoot, link, "dir");
+    } catch {
+      await symlink(projectRoot, link, "junction");
+    }
+
+    expect(await runHook({ cwd: link, transcript_path: join(ours, "session.jsonl") })).toBe(0);
 
     expect(await recordedStoreDirs()).toMatchObject({ "claude-code": ours });
   });

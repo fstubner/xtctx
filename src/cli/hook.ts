@@ -1,7 +1,7 @@
 import { createProjectServices } from "../runtime/services.js";
 import type { SessionSummary } from "../handoff/types.js";
 import { dirname, join } from "node:path";
-import { readFile } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 import { writeFileAtomic } from "../utils/atomic-file.js";
 import { inlineSafe } from "../utils/untrusted-text.js";
 import { pathMatchesProject } from "../utils/project-scope.js";
@@ -60,9 +60,18 @@ export async function runHook(options: HookOptions = {}): Promise<void> {
     // Rejecting means falling back to the host's own cwd, not failing: the
     // payload is an accuracy improvement over re-deriving the store path, and
     // never something the hook depends on.
+    // Both sides resolved before comparing. `process.cwd()` is reported
+    // canonically by the OS while the payload carries whatever the host
+    // wrote, and on macOS a temp or home directory is routinely a symlink
+    // (`/var` -> `/private/var`) — so a lexical comparison rejected the
+    // legitimate payload it exists to accept. The guard was wrong in both
+    // directions; this is the other one.
+    const payloadRoot = payload.cwd === undefined ? undefined : await canonical(payload.cwd);
+    const canonicalHostRoot = await canonical(hostRoot);
     const payloadIsForThisProject =
-      payload.cwd !== undefined &&
-      (pathMatchesProject(hostRoot, payload.cwd) || pathMatchesProject(payload.cwd, hostRoot));
+      payloadRoot !== undefined &&
+      (pathMatchesProject(canonicalHostRoot, payloadRoot) ||
+        pathMatchesProject(payloadRoot, canonicalHostRoot));
 
     services = await createProjectServices(payloadIsForThisProject ? payload.cwd : hostRoot);
 
@@ -154,6 +163,20 @@ function activeFrame(session: SessionSummary): string[] {
   return lines;
 }
 
+
+/**
+ * Resolve through symlinks, falling back to the path as given.
+ *
+ * Comparing a resolved path with an unresolved one is the bug this exists to
+ * prevent: it reads as a mismatch between two names for one directory.
+ */
+async function canonical(path: string): Promise<string> {
+  try {
+    return await realpath(path);
+  } catch {
+    return path;
+  }
+}
 
 /** What a host tool tells its hook about the session it is starting. */
 interface HookPayload {
