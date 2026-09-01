@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { mkdir, readdir, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import Database from "better-sqlite3";
@@ -307,6 +307,45 @@ const MIN_CONFIDENT_COSINE = 0.36;
 const TIE_BREAK_WEIGHT = 0.005;
 const SOURCE_CURSOR_OVERLAP_MS = 1_000;
 
+/**
+ * SQL that reduces a stored `project_root` to a comparable form, and the JS
+ * that does the same to the value compared against it.
+ *
+ * Raw string equality was too strict, and the way it failed is the dangerous
+ * direction: rows silently stop being returned. One directory has several
+ * legitimate spellings — `/var/...` and `/private/var/...` for a macOS temp
+ * dir, `H:\` and `H:/` separators on Windows, and case differences on both — and
+ * rows written under one spelling are read under another whenever the writer
+ * canonicalised and the reader did not, or vice versa. Any row written before
+ * the root was canonicalised at all would have vanished from every read.
+ */
+const PROJECT_ROOT_SQL = `rtrim(replace(lower(project_root), '\\', '/'), '/')`;
+
+function normalizeRootForCompare(value: string): string {
+  return value.replace(/\\/g, "/").replace(/[/]+$/, "").toLowerCase();
+}
+
+/**
+ * The project root as the filesystem reports it, so writes and reads agree.
+ *
+ * Resolving at both ends is what makes the comparison work at all. One
+ * directory has two names whenever a symlink is involved — a macOS temp
+ * directory is `/var/...` and `/private/var/...`, and `createProjectServices`
+ * already resolves it while a directly-constructed index did not. Rows
+ * written under one name were then invisible under the other, which reads as
+ * an empty project rather than as a bug.
+ *
+ * Falls back to the given path when it is not on disk, which is the case for
+ * diagnostics and for a project that has moved.
+ */
+function canonicalRoot(projectRoot: string): string {
+  try {
+    return realpathSync(projectRoot);
+  } catch {
+    return projectRoot;
+  }
+}
+
 export class SqliteHandoffIndex implements SessionService {
   private db: DatabaseHandle | null = null;
   private stmts: PreparedStatements | null = null;
@@ -327,6 +366,8 @@ export class SqliteHandoffIndex implements SessionService {
   private readonly vectorBudgetMs: number;
   private scanStartedMs = 0;
   private readonly createIfMissing: boolean;
+  /** Canonical, and compared normalized; see `canonicalRoot`. */
+  private readonly scopedRoot: string;
   private readonly redirectedTools: string[];
   private readonly freezeVectors: boolean;
   /** Windows still waiting to be vectorized after the last search gave up its budget. */
@@ -354,6 +395,7 @@ export class SqliteHandoffIndex implements SessionService {
     );
     this.vectorBudgetMs = Math.max(0, options.vectorBudgetMs ?? DEFAULT_VECTOR_BUDGET_MS);
     this.createIfMissing = options.createIfMissing ?? true;
+    this.scopedRoot = normalizeRootForCompare(canonicalRoot(projectRoot));
     this.redirectedTools = options.redirectedTools ?? [];
     this.freezeVectors = options.freezeVectors ?? false;
     this.initialized = this.initialize();
@@ -378,7 +420,7 @@ export class SqliteHandoffIndex implements SessionService {
     // a renamed directory, a copied `.xtctx/`, a worktree made from a
     // checkout that already had one — served the old path's conversations as
     // this project's. Defence in depth behind the scrapers' own attribution.
-    const clauses: string[] = ["project_root = ?"];
+    const clauses: string[] = [`${PROJECT_ROOT_SQL} = ?`];
     if (filters.length > 0) {
       clauses.push(`tool IN (${placeholders(filters.length)})`);
     }
@@ -397,7 +439,7 @@ export class SqliteHandoffIndex implements SessionService {
          ORDER BY last_activity_at DESC
          LIMIT ?`,
       )
-      .all(this.projectRoot, ...filters, ...branches, normalizedLimit) as SessionRow[];
+      .all(this.scopedRoot, ...filters, ...branches, normalizedLimit) as SessionRow[];
 
     return rows.map(formatSessionRow);
   }
@@ -418,11 +460,11 @@ export class SqliteHandoffIndex implements SessionService {
         `SELECT session_ref, tool, started_at, last_activity_at, message_count, preview, source_path,
                 git_branch, git_commit
          FROM sessions
-         WHERE project_root = ?
+         WHERE ${PROJECT_ROOT_SQL} = ?
          ORDER BY last_activity_at DESC
          LIMIT ?`,
       )
-      .all(this.projectRoot, normalizeLimit(limit, DEFAULT_LIMIT)) as SessionRow[];
+      .all(this.scopedRoot, normalizeLimit(limit, DEFAULT_LIMIT)) as SessionRow[];
 
     return rows.map(formatSessionRow);
   }
@@ -434,9 +476,10 @@ export class SqliteHandoffIndex implements SessionService {
         `SELECT session_ref, tool, started_at, last_activity_at, message_count, preview, source_path,
                 git_branch, git_commit
          FROM sessions
-         WHERE session_ref = ? AND project_root = ?`,
+         WHERE session_ref = ?
+           AND ${PROJECT_ROOT_SQL} = ?`,
       )
-      .get(sessionRef, this.projectRoot) as SessionRow | undefined;
+      .get(sessionRef, this.scopedRoot) as SessionRow | undefined;
 
     return row ? formatSessionRow(row) : null;
   }
@@ -455,11 +498,14 @@ export class SqliteHandoffIndex implements SessionService {
         `SELECT id, timestamp, role, content, message_index, source_pointer
          FROM messages
          WHERE session_ref = ?
-           AND session_ref IN (SELECT session_ref FROM sessions WHERE project_root = ?)
+           AND session_ref IN (
+                 SELECT session_ref FROM sessions
+                 WHERE ${PROJECT_ROOT_SQL} = ?
+               )
          ORDER BY timestamp ASC, message_index ASC, id ASC
          LIMIT ? OFFSET ?`,
       )
-      .all(sessionRef, this.projectRoot, normalizedLimit, normalizedOffset) as MessageRow[];
+      .all(sessionRef, this.scopedRoot, normalizedLimit, normalizedOffset) as MessageRow[];
 
     return rows.map((row) => ({
       timestamp: row.timestamp,
@@ -570,6 +616,9 @@ export class SqliteHandoffIndex implements SessionService {
     );
 
     return {
+      // The root as given, not `scopedRoot`. That one is lowercased and
+      // separator-folded for comparison; showing it to a person or an agent
+      // would report a path that is not how their project is spelled.
       project_root: this.projectRoot,
       db_path: this.dbPath,
       last_scan_at: lastScan,
@@ -877,7 +926,10 @@ export class SqliteHandoffIndex implements SessionService {
         sessionRef,
         chunk.tool,
         chunk.sessionId,
-        this.projectRoot,
+        // Canonical and normalized, matching what the read filter compares
+        // against. Writing the raw root here is what made rows invisible when
+        // the reader resolved a symlink and the writer had not.
+        this.scopedRoot,
         chunk.metadata?.gitBranch ?? null,
         chunk.metadata?.gitCommit ?? null,
         timestamp,

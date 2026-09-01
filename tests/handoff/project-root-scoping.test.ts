@@ -16,7 +16,7 @@
  * project's root and is not caught here. It is the cheap second check for the
  * case where the *database* is the thing that moved.
  */
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, realpath, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -110,6 +110,35 @@ describe("reads are scoped to the project the index belongs to", () => {
       expect(await second.getSessionDetail(session.session_ref, 0, 10)).toEqual([]);
     } finally {
       await second.close();
+    }
+  });
+
+  it("still serves rows written under another spelling of the same directory", async () => {
+    // The dangerous direction. One directory has several legitimate
+    // spellings — a symlinked path and its target, separators and case — and
+    // rows written under one were read under another the moment the writer
+    // canonicalised and the reader did not. Exact string equality made those
+    // rows silently disappear, which looks like an empty project rather than
+    // like a bug. macOS reaches this every run: its temp directory is a
+    // symlink, so `/var/...` is written and `/private/var/...` is read.
+    const link = join(dir, "link-to-project");
+    try {
+      await symlink(dir, link, "dir");
+    } catch {
+      await symlink(dir, link, "junction");
+    }
+
+    const viaLink = new SqliteHandoffIndex(join(dir, "xtctx.db"), link, [
+      { tool: "codex", scraper: new OneMessageScraper("written through a symlink") },
+    ]);
+    expect(await viaLink.listRecentSessions(10)).toHaveLength(1);
+    await viaLink.close();
+
+    const viaReal = new SqliteHandoffIndex(join(dir, "xtctx.db"), await realpath(link), []);
+    try {
+      expect(await viaReal.listRecentSessions(10)).toHaveLength(1);
+    } finally {
+      await viaReal.close();
     }
   });
 
