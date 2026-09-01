@@ -219,7 +219,11 @@ function formatRecentSessionsMarkdown(
       lines.push(`- Similarity: ${session.score.toFixed(3)} (${session.retrieval ?? "hybrid"})`);
     }
     if (session.source_path) {
-      lines.push(`- Source: ${session.source_path}`);
+      // Transcript-derived like everything else on these lines, and printed
+      // outside the fence, so a newline here forges a line at the start of a
+      // line. The Antigravity reader lifts this from `absoluteUri` in another
+      // agent's conversation.
+      lines.push(`- Source: ${inlineSafe(session.source_path)}`);
     }
     if (session.preview) {
       lines.push(`- Preview: ${inlineSafe(session.preview)}`);
@@ -255,7 +259,10 @@ function formatSessionDetailMarkdown(
   for (const message of messages) {
     lines.push(`### ${message.role} @ ${message.timestamp}`);
     if (message.source_pointer) {
-      lines.push(`Source: ${message.source_pointer}`);
+      // Immediately after the `### role @ timestamp` heading and before the
+      // fence — the one position where a forged heading is indistinguishable
+      // from a real one.
+      lines.push(`Source: ${inlineSafe(message.source_pointer)}`);
     }
     const fence = fenceFor(message.content);
     lines.push(fence);

@@ -173,7 +173,12 @@ interface ToolCountRow {
  * version mismatch (older or newer) triggers a full rebuild rather than a
  * migration — the transcript stores remain authoritative.
  */
-const SCHEMA_VERSION = 2;
+// 3: `project_root` is stored canonicalised and normalized, and every read
+// filters on it. An index written by version 2 holds raw roots, which mostly
+// still compare equal — but not where `realpath` differs, and there the rows
+// go quiet rather than wrong. The scraper cursors would not re-add them, so
+// the rebuild has to be forced rather than waited for.
+const SCHEMA_VERSION = 3;
 
 const DEFAULT_LIMIT = 5;
 const MAX_LIMIT = 100;
@@ -570,10 +575,27 @@ export class SqliteHandoffIndex implements SessionService {
   async getStatus(): Promise<HandoffStatus> {
     await this.refresh({ statusOnly: true });
     const db = this.getDb();
-    const sessionCount = count(db, "sessions");
-    const messageCount = count(db, "messages");
-    const retrievalUnitCount = count(db, "retrieval_units");
-    const vectorizedUnitCount = count(db, "retrieval_unit_vectors");
+    // Scoped like the read paths. Unscoped counts disagreed with what the
+    // retrieval tools return, and a status saying "3 sessions" for a project
+    // whose searches return one is the report that makes a scoping bug look
+    // like a search bug.
+    const scoped = `WHERE session_ref IN (
+      SELECT session_ref FROM sessions WHERE ${PROJECT_ROOT_SQL} = ?
+    )`;
+    const sessionCount = countWhere(
+      db,
+      "sessions",
+      `WHERE ${PROJECT_ROOT_SQL} = ?`,
+      this.scopedRoot,
+    );
+    const messageCount = countWhere(db, "messages", scoped, this.scopedRoot);
+    const retrievalUnitCount = countWhere(db, "retrieval_units", scoped, this.scopedRoot);
+    const vectorizedUnitCount = countWhere(
+      db,
+      "retrieval_unit_vectors",
+      `WHERE unit_id IN (SELECT id FROM retrieval_units ${scoped})`,
+      this.scopedRoot,
+    );
     const lastScan = getSetting(db, "last_scan_at");
     // Settings are text; a value written by an older version, or by hand, must
     // not turn a status report into NaN.
@@ -593,9 +615,10 @@ export class SqliteHandoffIndex implements SessionService {
                     MAX(m.indexed_at) AS last_indexed_at
              FROM sessions s
              LEFT JOIN messages m ON m.session_ref = s.session_ref
+             WHERE ${PROJECT_ROOT_SQL.replace("project_root", "s.project_root")} = ?
              GROUP BY s.tool`,
           )
-          .all() as ToolCountRow[]
+          .all(this.scopedRoot) as ToolCountRow[]
       ).map((row) => [row.tool, row]),
     );
 
@@ -1261,9 +1284,15 @@ export class SqliteHandoffIndex implements SessionService {
          FROM retrieval_units u
          JOIN retrieval_unit_vectors v ON v.unit_id = u.id
          JOIN sessions s ON s.session_ref = u.session_ref
-         WHERE v.model = ? ${toolWhere} ${branchWhere}`,
+         WHERE v.model = ? AND ${PROJECT_ROOT_SQL.replace("project_root", "s.project_root")} = ?
+               ${toolWhere} ${branchWhere}`,
       )
-      .all(this.embeddingProvider.model, ...filters, ...branches) as VectorUnitRow[];
+      .all(
+        this.embeddingProvider.model,
+        this.scopedRoot,
+        ...filters,
+        ...branches,
+      ) as VectorUnitRow[];
 
     const keywordRows =
       mode === "hybrid" ? this.queryKeywordUnits(query, limit, toolFilter, branchFilter) : [];
@@ -1408,11 +1437,19 @@ export class SqliteHandoffIndex implements SessionService {
          FROM retrieval_units_fts f
          JOIN retrieval_units u ON u.id = f.unit_id
          JOIN sessions s ON s.session_ref = u.session_ref
-         WHERE retrieval_units_fts MATCH ? ${toolWhere} ${branchWhere}
+         WHERE retrieval_units_fts MATCH ?
+               AND ${PROJECT_ROOT_SQL.replace("project_root", "s.project_root")} = ?
+               ${toolWhere} ${branchWhere}
          ORDER BY bm25(retrieval_units_fts), u.ended_at DESC
          LIMIT ?`,
       )
-      .all(ftsQuery, ...filters, ...branches, normalizedLimit * MAX_MATCHES_PER_SESSION) as RetrievalUnitRow[];
+      .all(
+        ftsQuery,
+        this.scopedRoot,
+        ...filters,
+        ...branches,
+        normalizedLimit * MAX_MATCHES_PER_SESSION,
+      ) as RetrievalUnitRow[];
   }
 
   private async ensureVectors(toolFilter?: string[]): Promise<void> {
@@ -2082,12 +2119,23 @@ function placeholders(countValue: number): string {
   return Array.from({ length: countValue }, () => "?").join(", ");
 }
 
-function count(
+/**
+ * A row count restricted to this project. The `where` clause is built from
+ * literals in this module and the value is bound, never interpolated.
+ *
+ * There is no unscoped variant: the one that existed reported totals that
+ * disagreed with what every retrieval path returned.
+ */
+function countWhere(
   db: DatabaseHandle,
   table: "sessions" | "messages" | "retrieval_units" | "retrieval_unit_vectors",
+  where: string,
+  scopedRoot: string,
 ): number {
-  const row = db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as CountRow;
-  return row.count;
+  const row = db.prepare(`SELECT COUNT(*) AS count FROM ${table} ${where}`).get(scopedRoot) as
+    | CountRow
+    | undefined;
+  return row?.count ?? 0;
 }
 
 function getSetting(db: DatabaseHandle, key: string): string | null {
