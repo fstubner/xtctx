@@ -63,6 +63,9 @@ right place for them precisely because no test can hold them.
 - [x] Setup repairs generated managed blocks while preserving user-authored text outside fences. <!-- verified-by: tests/config/managed-block.test.ts -->
 - [x] Stale generated references to removed tools are detected by tests. <!-- verified-by: tests/security/surface.test.ts -->
 
+- [x] A project re-adopts its own indexed history after its directory is renamed or moved, rather than filtering it out permanently. The reverse direction of the scoping rule, and the one no test covered: the existing case was a symlink, where both spellings resolve to one directory and the stored root already matches. <!-- verified-by: tests/handoff/project-root-scoping.test.ts -->
+- [x] The session-start hook will not let its stdin payload choose which project it acts on; the host's own working directory decides, and the payload's store location is used only when it agrees. Checked by spawning the built binary, because the defect was in the wiring rather than in the comparison — a unit test of the check itself passed while it compared a value with itself. <!-- verified-by: tests/smoke/hook-payload.smoke.test.ts -->
+
 ## File Safety
 
 - [x] Setup writes only known project/user integration files. <!-- verified-by: tests/utils/atomic-file.test.ts, tests/config/setup.test.ts -->

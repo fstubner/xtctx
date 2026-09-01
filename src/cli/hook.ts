@@ -40,15 +40,31 @@ export async function runHook(options: HookOptions = {}): Promise<void> {
   let services: Awaited<ReturnType<typeof createProjectServices>> | undefined;
   try {
     const payload = await readHookPayload();
-    services = await createProjectServices(options.projectPath ?? payload.cwd);
 
-    // Only trust the payload's store location if the payload is describing
-    // *this* project. `transcript_path` is taken verbatim, and pointing it at
-    // another project's store redirected scraping there — this project's own
-    // sessions then vanished from every result with no warning, which reads
-    // as "nothing indexed yet" rather than as a redirect.
+    // Where the host actually started us. Claude Code runs hooks with cwd set
+    // to the project root, so this is the OS's answer rather than the
+    // payload's claim, and it is the only independent witness available here.
+    const hostRoot = options.projectPath ?? process.cwd();
+
+    // The payload may name the project only when it agrees with that witness
+    // — same directory, or one containing it, which is what a host invoking
+    // the hook from a subdirectory looks like.
+    //
+    // The first version of this guard compared `payload.cwd` against
+    // `services.projectRoot`, which is *derived from* `payload.cwd` when no
+    // `--project` is passed. The hook is registered without one, so in
+    // production that compared a value with itself and could never reject.
+    // An absent `cwd` was accepted too — the easier of the two to send, since
+    // it means omitting a field rather than forging one.
+    //
+    // Rejecting means falling back to the host's own cwd, not failing: the
+    // payload is an accuracy improvement over re-deriving the store path, and
+    // never something the hook depends on.
     const payloadIsForThisProject =
-      payload.cwd === undefined || pathMatchesProject(payload.cwd, services.projectRoot);
+      payload.cwd !== undefined &&
+      (pathMatchesProject(hostRoot, payload.cwd) || pathMatchesProject(payload.cwd, hostRoot));
+
+    services = await createProjectServices(payloadIsForThisProject ? payload.cwd : hostRoot);
 
     // Record it rather than only using it here. This hook deliberately does a
     // no-scan read of the existing index — scraping happens later, in the MCP

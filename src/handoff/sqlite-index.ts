@@ -1135,6 +1135,13 @@ export class SqliteHandoffIndex implements SessionService {
          git_branch = COALESCE(git_branch, excluded.git_branch),
          git_commit = COALESCE(git_commit, excluded.git_commit),
          source_path = COALESCE(source_path, excluded.source_path),
+         -- Overwritten, not preserved. A row was pinned forever to whatever
+         -- root it was first written under, so renaming or moving a project
+         -- directory left its whole history filtered out of every read while
+         -- the rows sat intact in the table. This upsert only runs because a
+         -- scraper just attributed this session to *this* project, so taking
+         -- the new root is the same decision the insert would make.
+         project_root = excluded.project_root,
          updated_at = excluded.updated_at`,
     );
     const insertMessage = db.prepare(
@@ -1572,9 +1579,18 @@ export class SqliteHandoffIndex implements SessionService {
     // wiped by hand: an empty index cannot honour a scraper cursor, because
     // the cursor would skip straight past history still sitting on disk.
     // On a genuine first run there are no cursor files, so this is a no-op.
-    const sessionCount = (
-      this.db.prepare("SELECT COUNT(*) AS count FROM sessions").get() as CountRow
-    ).count;
+    // Counted for *this* project, not for the file. An index shared with a
+    // path this project no longer has — after a rename, a move, or a copied
+    // `.xtctx/` — is empty as far as this project is concerned, and the
+    // unscoped count made it look populated. The cursors were then honoured,
+    // so the scan skipped the history that would have re-attributed those
+    // sessions and the project stayed dark permanently.
+    const sessionCount = countWhere(
+      this.db,
+      "sessions",
+      `WHERE ${PROJECT_ROOT_SQL} = ?`,
+      this.scopedRoot,
+    );
     if (sessionCount === 0) {
       await this.clearScraperCursors();
     }

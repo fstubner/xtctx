@@ -16,7 +16,7 @@
  * project's root and is not caught here. It is the cheap second check for the
  * case where the *database* is the thing that moved.
  */
-import { mkdtemp, realpath, rm, symlink } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rename, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -163,6 +163,64 @@ describe("reads are scoped to the project the index belongs to", () => {
       expect(hits).toHaveLength(1);
     } finally {
       await first.close();
+    }
+  });
+
+  it("re-adopts its own history after the project directory is renamed", async () => {
+    // The case the symlink test below does NOT reach. There both spellings
+    // resolve to one directory, so the stored root already matches. A rename
+    // genuinely changes the root: the rows are pinned to a path that no
+    // longer exists, every read filters them out, and the scraper cursors are
+    // still honoured so nothing re-adds them.
+    //
+    // The direction matters. This is not another project leaking in — it is
+    // the user's own history going dark, reported as zero sessions with the
+    // rows sitting intact in the table, recoverable only by deleting the
+    // index by hand.
+    const before = join(dir, "before");
+    const after = join(dir, "after");
+    await mkdir(before, { recursive: true });
+
+    const first = new SqliteHandoffIndex(join(dir, "xtctx.db"), before, [
+      { tool: "codex", scraper: new OneMessageScraper("history worth keeping") },
+    ]);
+    expect(await first.listRecentSessions(10)).toHaveLength(1);
+    await first.close();
+
+    await rename(before, after);
+
+    const moved = new SqliteHandoffIndex(join(dir, "xtctx.db"), after, [
+      { tool: "codex", scraper: new OneMessageScraper("history worth keeping") },
+    ]);
+    try {
+      expect(await moved.listRecentSessions(10)).toHaveLength(1);
+      const status = await moved.getStatus();
+      expect(status.sessions).toBe(1);
+      expect(status.messages).toBeGreaterThan(0);
+    } finally {
+      await moved.close();
+    }
+  });
+
+  it("does not resurrect a renamed project's rows for an unrelated project", async () => {
+    // Re-adoption must be tied to the scraper attributing the session here
+    // now, not to the row simply being present. Otherwise the fix for a
+    // rename becomes a way to inherit any database you are handed.
+    const before = join(dir, "before2");
+    await mkdir(before, { recursive: true });
+
+    const first = new SqliteHandoffIndex(join(dir, "xtctx.db"), before, [
+      { tool: "codex", scraper: new OneMessageScraper("theirs") },
+    ]);
+    expect(await first.listRecentSessions(10)).toHaveLength(1);
+    await first.close();
+
+    // A different project, no scrapers, so nothing re-attributes anything.
+    const other = new SqliteHandoffIndex(join(dir, "xtctx.db"), join(dir, "unrelated"), []);
+    try {
+      expect(await other.listRecentSessions(10)).toEqual([]);
+    } finally {
+      await other.close();
     }
   });
 
