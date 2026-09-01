@@ -1,6 +1,7 @@
 import type { SessionService } from "../../handoff/types.js";
 import { estimateVectorBacklog, formatDuration } from "../../utils/duration.js";
 import { sanitizeErrorMessage } from "../../utils/errors.js";
+import { inlineSafe } from "../../utils/untrusted-text.js";
 import { isAbsolute, relative, sep } from "node:path";
 
 interface ContinuityStatusParams {
@@ -37,7 +38,7 @@ export function createContinuityStatusHandler(service: SessionService) {
     const lines = [
       "## xtctx Continuity Status",
       "",
-      `- Project root: ${status.project_root}`,
+      `- Project root: ${inlineSafe(status.project_root)}`,
       // Relative to the project root, which is on the line above. Absolute it
       // carried the home-directory layout that `store_paths` is redacted for
       // two branches up, while adding nothing the root does not already say.
@@ -61,9 +62,9 @@ export function createContinuityStatusHandler(service: SessionService) {
             `${backlog.eta ? ` (about ${backlog.eta})` : ""}`,
         ];
       })(),
-      `- Vector model: ${status.vector_model}`,
+      `- Vector model: ${inlineSafe(status.vector_model)}`,
       ...(status.embedding_error
-        ? [`- Semantic search unavailable (keyword only): ${status.embedding_error}`]
+        ? [`- Semantic search unavailable (keyword only): ${inlineSafe(status.embedding_error)}`]
         : []),
       // Named, not pathed: `store_paths` is redacted from this surface two
       // branches up because it carries the machine's home-directory layout,
@@ -83,10 +84,10 @@ export function createContinuityStatusHandler(service: SessionService) {
     for (const tool of status.tools) {
       const detected = tool.detected ? "detected" : "not detected";
       const error = tool.last_error
-        ? `, last scrape error: ${sanitizeErrorMessage(tool.last_error)}`
+        ? `, last scrape error: ${inlineSafe(sanitizeErrorMessage(tool.last_error))}`
         : "";
       lines.push(
-        `- ${tool.tool}: ${detected}, ${tool.indexed_sessions} sessions, ` +
+        `- ${inlineSafe(tool.tool)}: ${detected}, ${tool.indexed_sessions} sessions, ` +
           `${tool.indexed_messages} messages${error}`,
       );
     }

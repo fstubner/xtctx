@@ -16,7 +16,8 @@
  * project's root and is not caught here. It is the cheap second check for the
  * case where the *database* is the thing that moved.
  */
-import { mkdir, mkdtemp, realpath, rename, rm, symlink } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -166,17 +167,21 @@ describe("reads are scoped to the project the index belongs to", () => {
     }
   });
 
-  it("re-adopts its own history after the project directory is renamed", async () => {
-    // The case the symlink test below does NOT reach. There both spellings
-    // resolve to one directory, so the stored root already matches. A rename
-    // genuinely changes the root: the rows are pinned to a path that no
-    // longer exists, every read filters them out, and the scraper cursors are
-    // still honoured so nothing re-adds them.
+  it("re-adopts rows when the root's spelling changes", async () => {
+    // What this covers, precisely: the stored root and the current one differ,
+    // and a scraper still attributes the session here — so the row is
+    // re-adopted rather than filtered out forever.
     //
-    // The direction matters. This is not another project leaking in — it is
-    // the user's own history going dark, reported as zero sessions with the
-    // rows sitting intact in the table, recoverable only by deleting the
-    // index by hand.
+    // What it does NOT cover, and what an earlier version of this test was
+    // wrongly named for: a literal directory rename. The database half works
+    // there too, but nothing re-attributes — the transcripts still record the
+    // old path and every scraper keys off that — so a rename does not recover
+    // history, and no test here should suggest it does. The stub scraper
+    // below attributes unconditionally, which is exactly why it cannot tell
+    // the two cases apart.
+    //
+    // The direction still matters: this is not another project leaking in, it
+    // is the user's own rows going dark with the data intact in the table.
     const before = join(dir, "before");
     const after = join(dir, "after");
     await mkdir(before, { recursive: true });
@@ -202,12 +207,19 @@ describe("reads are scoped to the project the index belongs to", () => {
     }
   });
 
-  it("does not resurrect a renamed project's rows for an unrelated project", async () => {
-    // Re-adoption must be tied to the scraper attributing the session here
-    // now, not to the row simply being present. Otherwise the fix for a
-    // rename becomes a way to inherit any database you are handed.
-    const before = join(dir, "before2");
+  it("clears scraper cursors when the index holds nothing for this project", async () => {
+    // The other half of the rename fix, and the half nothing covered: the
+    // repair that rebuilds is gated on a row count, and that count used to
+    // ignore which project it was counting. A database full of another root's
+    // rows looked populated, so the cursors were kept and the scan skipped
+    // the history that would have re-attributed those sessions.
+    //
+    // Asserted on the cursor file, because that is the observable effect —
+    // the stub scraper in the tests above writes none, which is exactly why
+    // this was invisible.
+    const before = join(dir, "cursors-before");
     await mkdir(before, { recursive: true });
+    const cursorFile = join(dir, "codex-state.json");
 
     const first = new SqliteHandoffIndex(join(dir, "xtctx.db"), before, [
       { tool: "codex", scraper: new OneMessageScraper("theirs") },
@@ -215,13 +227,45 @@ describe("reads are scoped to the project the index belongs to", () => {
     expect(await first.listRecentSessions(10)).toHaveLength(1);
     await first.close();
 
-    // A different project, no scrapers, so nothing re-attributes anything.
-    const other = new SqliteHandoffIndex(join(dir, "xtctx.db"), join(dir, "unrelated"), []);
+    // A cursor of the kind a real scraper leaves behind, next to the index.
+    await writeFile(cursorFile, JSON.stringify({ lastTimestamp: new Date().toISOString() }), "utf-8");
+
+    // Opened as a project the index holds nothing for.
+    const other = new SqliteHandoffIndex(join(dir, "xtctx.db"), join(dir, "cursors-after"), []);
     try {
-      expect(await other.listRecentSessions(10)).toEqual([]);
+      await other.listRecentSessions(10);
     } finally {
       await other.close();
     }
+
+    expect(existsSync(cursorFile)).toBe(false);
+  });
+
+  it("keeps scraper cursors when the index does hold this project's rows", async () => {
+    // The boundary: clearing on every open would make each MCP server start
+    // re-read every transcript store on the machine.
+    const root = join(dir, "kept");
+    await mkdir(root, { recursive: true });
+    const cursorFile = join(dir, "codex-state.json");
+
+    const index = new SqliteHandoffIndex(join(dir, "xtctx.db"), root, [
+      { tool: "codex", scraper: new OneMessageScraper("ours") },
+    ]);
+    expect(await index.listRecentSessions(10)).toHaveLength(1);
+    await index.close();
+
+    await writeFile(cursorFile, JSON.stringify({ lastTimestamp: new Date().toISOString() }), "utf-8");
+
+    const again = new SqliteHandoffIndex(join(dir, "xtctx.db"), root, [
+      { tool: "codex", scraper: new OneMessageScraper("ours") },
+    ]);
+    try {
+      await again.listRecentSessions(10);
+    } finally {
+      await again.close();
+    }
+
+    expect(existsSync(cursorFile)).toBe(true);
   });
 
   it("still serves rows written under another spelling of the same directory", async () => {

@@ -107,7 +107,7 @@ function formatManifestMarkdown(manifest: {
     // outside any fence, so the same rule applies as to transcript text.
     lines.push(`- Correlation ID: ${inlineSafe(manifest.correlation_id)}`);
   }
-  lines.push(`- Project: ${manifest.project.root}`);
+  lines.push(`- Project: ${inlineSafe(manifest.project.root)}`);
   lines.push(`- Last scan: ${manifest.freshness.last_scan_at ?? "never"}`);
   lines.push(`- Indexed sessions: ${manifest.freshness.indexed_sessions}`, "");
 
