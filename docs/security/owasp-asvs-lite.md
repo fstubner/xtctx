@@ -55,6 +55,10 @@ right place for them precisely because no test can hold them.
 - [x] Setup writes only known project/user integration files. <!-- verified-by: tests/utils/atomic-file.test.ts, tests/config/setup.test.ts -->
 - [x] Existing MCP config keys outside xtctx-owned server entries are preserved. <!-- verified-by: tests/config/mcp-config.test.ts, tests/config/toml-comments.test.ts -->
 - [x] Generated state paths are excluded from commit guidance.
+- [x] Index reads are scoped to the project root the rows were recorded against, so an index that outlives its project does not serve the old path's conversations. Defence in depth only: a row mis-attributed on the way in carries this project's root. <!-- verified-by: tests/handoff/project-root-scoping.test.ts -->
+- [x] A `storePath` naming a workspace database directly is scoped like one found by walking, so a committed config cannot nominate another project's store. <!-- verified-by: tests/scrapers/attribution-boundaries.test.ts -->
+- [x] Path mentions used for attribution are bounded on both sides, so a foreign path ending with this project's path does not match. <!-- verified-by: tests/scrapers/attribution-boundaries.test.ts, tests/utils/project-boundary.test.ts -->
+- [x] A resumed scan cannot inherit a boundary decision made before a refused record. <!-- verified-by: tests/scrapers/codex-boundary-resume.test.ts -->
 - [x] State writes under `.xtctx/` go through the atomic helper, so no write lands at a predictable temp path. <!-- verified-by: tests/scrapers/state-write-safety.test.ts, tests/utils/atomic-file.test.ts -->
 - [x] A `storePath` redirecting transcript reads outside the home directory is reported rather than silent. Accepted risk, not eliminated: `.xtctx/config.yaml` is committable by design, so a cloned repo can carry one, and the redirect still takes effect — what changed is that status names the affected tools. <!-- verified-by: tests/handoff/store-redirect.test.ts -->
 - [x] Whether a checkout's own build is configured to run is decided by what this process is already executing, not by that checkout's `package.json`. <!-- verified-by: tests/config/self-hosted-setup.test.ts -->

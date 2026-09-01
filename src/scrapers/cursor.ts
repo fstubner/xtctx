@@ -515,7 +515,17 @@ export class CursorScraper extends AbstractScraper<CursorChunk> {
     try {
       const target = await stat(this.cursorStorePath);
       if (target.isFile()) {
-        return [this.cursorStorePath];
+        // Scoped like any database found by walking. This branch used to
+        // return the path unchecked, and it is the branch a `storePath`
+        // override reaches — a committable `.xtctx/config.yaml` naming any
+        // `state.vscdb` on the machine, whose every composer was then read as
+        // this project's.
+        if (!this.projectRoot) {
+          return [this.cursorStorePath];
+        }
+        return (await workspaceMatchesProject(this.cursorStorePath, this.projectRoot))
+          ? [this.cursorStorePath]
+          : [];
       }
 
       if (!target.isDirectory()) {

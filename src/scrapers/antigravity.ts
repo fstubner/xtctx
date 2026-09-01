@@ -1765,6 +1765,22 @@ function mentionsPathWithBoundary(text: string, path: string): boolean {
   // as a continuation and rejected.
   const DELIMITERS = new Set([" ", "\t", "\n", "\r", '"', "'", "`", ")", "]", "}", ">", ",", ";", "|"]);
 
+  // What may sit immediately *before* a path. Without this only the right-hand
+  // side was bounded, so any foreign path ending with ours matched — a backup
+  // under `/mnt/backup/<root>`, a container mount, a copy under another name —
+  // and admitted the whole conversation that mentioned it.
+  //
+  // `:` is here because `normalizeSearchText` collapses `file:///x` to
+  // `file:/x`, so a POSIX path is routinely preceded by the scheme's colon.
+  const OPENERS = new Set([
+    " ", "\t", "\n", "\r", '"', "'", "`", "(", "[", "{", "<", ",", ";", "|", ":", "=",
+  ]);
+
+  // A `/` before a POSIX absolute path means it is a *suffix* of a longer
+  // path, which is the escape. A Windows path starts with its drive letter, so
+  // there the same `/` is the legitimate one from `file:/h:/...`.
+  const absolutePosix = path.startsWith("/");
+
   let from = 0;
   for (;;) {
     const at = text.indexOf(path, from);
@@ -1772,7 +1788,20 @@ function mentionsPathWithBoundary(text: string, path: string): boolean {
       return false;
     }
     const next = text[at + path.length];
-    if (next === undefined || next === "/" || DELIMITERS.has(next)) {
+    const prev = at === 0 ? undefined : text[at - 1];
+    const rightBounded = next === undefined || next === "/" || DELIMITERS.has(next);
+    // A Windows path starts at its drive letter, so the `/` of `file:/h:/…`
+    // sits immediately before it and is legitimate. `/mnt/backup/h:/…` looks
+    // identical one character back, so the slash itself has to be bounded
+    // too: what precedes it must open a path rather than continue one.
+    const beforeSlash = at >= 2 ? text[at - 2] : undefined;
+    const leftBounded =
+      prev === undefined ||
+      OPENERS.has(prev) ||
+      (!absolutePosix &&
+        prev === "/" &&
+        (beforeSlash === undefined || OPENERS.has(beforeSlash)));
+    if (rightBounded && leftBounded) {
       return true;
     }
     from = at + 1;
