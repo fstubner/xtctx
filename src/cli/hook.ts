@@ -1,7 +1,7 @@
 import { createProjectServices } from "../runtime/services.js";
 import type { SessionSummary } from "../handoff/types.js";
 import { dirname, join } from "node:path";
-import { readFile } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 import { writeFileAtomic } from "../utils/atomic-file.js";
 import { inlineSafe } from "../utils/untrusted-text.js";
 import { pathMatchesProject } from "../utils/project-scope.js";
@@ -40,15 +40,40 @@ export async function runHook(options: HookOptions = {}): Promise<void> {
   let services: Awaited<ReturnType<typeof createProjectServices>> | undefined;
   try {
     const payload = await readHookPayload();
-    services = await createProjectServices(options.projectPath ?? payload.cwd);
 
-    // Only trust the payload's store location if the payload is describing
-    // *this* project. `transcript_path` is taken verbatim, and pointing it at
-    // another project's store redirected scraping there — this project's own
-    // sessions then vanished from every result with no warning, which reads
-    // as "nothing indexed yet" rather than as a redirect.
+    // Where the host actually started us. Claude Code runs hooks with cwd set
+    // to the project root, so this is the OS's answer rather than the
+    // payload's claim, and it is the only independent witness available here.
+    const hostRoot = options.projectPath ?? process.cwd();
+
+    // The payload may name the project only when it agrees with that witness
+    // — same directory, or one containing it, which is what a host invoking
+    // the hook from a subdirectory looks like.
+    //
+    // The first version of this guard compared `payload.cwd` against
+    // `services.projectRoot`, which is *derived from* `payload.cwd` when no
+    // `--project` is passed. The hook is registered without one, so in
+    // production that compared a value with itself and could never reject.
+    // An absent `cwd` was accepted too — the easier of the two to send, since
+    // it means omitting a field rather than forging one.
+    //
+    // Rejecting means falling back to the host's own cwd, not failing: the
+    // payload is an accuracy improvement over re-deriving the store path, and
+    // never something the hook depends on.
+    // Both sides resolved before comparing. `process.cwd()` is reported
+    // canonically by the OS while the payload carries whatever the host
+    // wrote, and on macOS a temp or home directory is routinely a symlink
+    // (`/var` -> `/private/var`) — so a lexical comparison rejected the
+    // legitimate payload it exists to accept. The guard was wrong in both
+    // directions; this is the other one.
+    const payloadRoot = payload.cwd === undefined ? undefined : await canonical(payload.cwd);
+    const canonicalHostRoot = await canonical(hostRoot);
     const payloadIsForThisProject =
-      payload.cwd === undefined || pathMatchesProject(payload.cwd, services.projectRoot);
+      payloadRoot !== undefined &&
+      (pathMatchesProject(canonicalHostRoot, payloadRoot) ||
+        pathMatchesProject(payloadRoot, canonicalHostRoot));
+
+    services = await createProjectServices(payloadIsForThisProject ? payload.cwd : hostRoot);
 
     // Record it rather than only using it here. This hook deliberately does a
     // no-scan read of the existing index — scraping happens later, in the MCP
@@ -138,6 +163,20 @@ function activeFrame(session: SessionSummary): string[] {
   return lines;
 }
 
+
+/**
+ * Resolve through symlinks, falling back to the path as given.
+ *
+ * Comparing a resolved path with an unresolved one is the bug this exists to
+ * prevent: it reads as a mismatch between two names for one directory.
+ */
+async function canonical(path: string): Promise<string> {
+  try {
+    return await realpath(path);
+  } catch {
+    return path;
+  }
+}
 
 /** What a host tool tells its hook about the session it is starting. */
 interface HookPayload {
