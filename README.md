@@ -127,9 +127,15 @@ blocks where that tool owns them, removes supported startup hooks, and marks the
 tool disabled in `.xtctx/config.yaml`. It removes generated skill adapters for
 that tool. It does not delete transcript sources, canonical project skills, or
 the local SQLite cache. Use `xtctx disconnect --all` to remove xtctx from every
-supported tool. Antigravity stores MCP config at app level, so
-`xtctx disconnect antigravity` removes the xtctx entry from Antigravity for the
-current user account.
+supported tool. Antigravity and Copilot CLI keep one MCP config for every
+project on the machine, so a project disconnect leaves those two files alone;
+pass `--global-mcp` (as with `setup`) to remove xtctx from them as well.
+
+`xtctx scan` reads every enabled transcript store into the project's index and
+exits. The Claude Code session-start hook launches it in the background when
+the index has never been scanned or the last scan is more than five minutes
+old, so the session after another tool's work starts with that work already
+indexed. `XTCTX_NO_HOOK_SCAN=1` switches that launch off.
 
 Generated MCP clients should use:
 

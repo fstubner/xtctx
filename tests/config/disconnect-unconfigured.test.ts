@@ -78,11 +78,12 @@ describe("disconnect on a project that was never configured", () => {
 
   it("still disconnects a project that WAS configured", async () => {
     // The guard must not break the real path — this is the case the global
-    // Antigravity removal is legitimately for.
+    // Antigravity removal is legitimately for. That removal now also needs
+    // --global-mcp, which is a separate decision (disconnect-global.test.ts).
     await setupProject({ projectPath: projectRoot, homeDir });
     expect(await readAntigravity(homeDir)).toContain("xtctx");
 
-    const result = await disconnectProject({ projectPath: projectRoot, all: true, homeDir });
+    const result = await disconnectProject({ projectPath: projectRoot, all: true, globalMcp: true, homeDir });
 
     expect(result.writes.some((w) => w.changed)).toBe(true);
     const after = JSON.parse((await readAntigravity(homeDir)) || "{}") as {

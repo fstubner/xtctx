@@ -27,8 +27,28 @@ export interface DisconnectOptions {
   projectPath?: string;
   tool?: string;
   all?: boolean;
+  /**
+   * Also remove xtctx from the Antigravity and Copilot CLI configs.
+   *
+   * Those two files are machine-global: they hold one xtctx entry for every
+   * project on the machine, not one per project, so there is nothing
+   * project-scoped in them to remove. A project disconnect used to empty them
+   * anyway — observed live, both went to `{"mcpServers": {}}` after
+   * disconnecting a throwaway repo, and every other project lost xtctx in
+   * those clients. Now it takes this flag, the mirror of the one `setup`
+   * writes them under.
+   */
+  globalMcp?: boolean;
   homeDir?: string;
 }
+
+/** Tools whose MCP config is one file for the whole user account. */
+const GLOBAL_MCP_TOOLS: ReadonlySet<ToolId> = new Set<ToolId>(["antigravity", "copilot-cli"]);
+
+const GLOBAL_MCP_LEFT_IN_PLACE =
+  "Antigravity and Copilot CLI read one MCP config for every project on this machine, " +
+  "so their xtctx entries were left in place. Run `xtctx disconnect --all --global-mcp` " +
+  "to remove xtctx from those clients too.";
 
 export interface DisconnectResult {
   projectRoot: string;
@@ -73,7 +93,9 @@ export function describeDisconnectPlan(options: DisconnectOptions = {}): {
     const definition = getToolDefinition(tool);
     if (!definition) continue;
 
-    writes.push(...plannedMcpWrites(projectRoot, tool, options.homeDir));
+    if (!GLOBAL_MCP_TOOLS.has(tool) || options.globalMcp) {
+      writes.push(...plannedMcpWrites(projectRoot, tool, options.homeDir));
+    }
 
     if (tool === "claude-code") {
       writes.push({ path: join(projectRoot, ".claude", "settings.json"), kind: "hook:claude-code" });
@@ -82,20 +104,21 @@ export function describeDisconnectPlan(options: DisconnectOptions = {}): {
 
     writes.push(...plannedSkillWrites(projectRoot, tool));
 
-    if (tool === "antigravity") {
+    if (options.globalMcp && tool === "antigravity") {
       warnings.push(
-        "Antigravity stores MCP config at app level, so disconnect removes xtctx from Antigravity globally.",
+        "Antigravity stores MCP config at app level, so --global-mcp removes xtctx from Antigravity for every project on this machine.",
       );
     }
 
-    // Copilot CLI's config is equally machine-wide, and setup only writes it
-    // under --global-mcp — so disconnect can remove an entry it never added,
-    // for every project, and said nothing while doing it.
-    if (tool === "copilot-cli") {
+    if (options.globalMcp && tool === "copilot-cli") {
       warnings.push(
-        "Copilot CLI stores MCP config at user level, so disconnect removes xtctx from Copilot CLI for every project on this machine.",
+        "Copilot CLI stores MCP config at user level, so --global-mcp removes xtctx from Copilot CLI for every project on this machine.",
       );
     }
+  }
+
+  if (!options.globalMcp && tools.some((tool) => GLOBAL_MCP_TOOLS.has(tool))) {
+    warnings.push(GLOBAL_MCP_LEFT_IN_PLACE);
   }
 
   for (const path of memoryPathsToDisconnect(projectRoot, tools, options.all === true)) {
@@ -147,7 +170,8 @@ export async function disconnectProject(options: DisconnectOptions = {}): Promis
     changed: await disableToolsInProjectConfig(configPath, tools, projectRoot),
   });
 
-  const mcpSummary = await removeMcpServerConfigs(projectRoot, "xtctx", tools, options.homeDir ? { homeDir: options.homeDir } : {});
+  const mcpTools = options.globalMcp ? tools : tools.filter((tool) => !GLOBAL_MCP_TOOLS.has(tool));
+  const mcpSummary = await removeMcpServerConfigs(projectRoot, "xtctx", mcpTools, options.homeDir ? { homeDir: options.homeDir } : {});
   for (const result of mcpSummary.results) {
     writes.push({
       path: result.path,
@@ -220,9 +244,11 @@ export async function disconnectProject(options: DisconnectOptions = {}): Promis
     });
   }
 
-  if (tools.includes("antigravity")) {
+  if (tools.some((tool) => GLOBAL_MCP_TOOLS.has(tool))) {
     warnings.push(
-      "Antigravity MCP config is app-level; xtctx was removed from the Antigravity config for this user account.",
+      options.globalMcp
+        ? "Antigravity and Copilot CLI MCP configs are machine-global; xtctx was removed from them for this user account."
+        : GLOBAL_MCP_LEFT_IN_PLACE,
     );
   }
 

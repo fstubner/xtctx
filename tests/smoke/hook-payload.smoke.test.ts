@@ -63,7 +63,13 @@ describe("session-start hook payload trust", () => {
       const child = spawn(
         process.execPath,
         [CLI, "--hook", "session-start", "--tool", "claude-code"],
-        { cwd: projectRoot, env: sandboxEnv(homeDir), stdio: ["pipe", "pipe", "pipe"] },
+        {
+          cwd: projectRoot,
+          // These pin payload trust, not the scan the hook now launches; a
+          // detached scan writing into a temp dir being deleted is a flake.
+          env: { ...sandboxEnv(homeDir), XTCTX_NO_HOOK_SCAN: "1" },
+          stdio: ["pipe", "pipe", "pipe"],
+        },
       );
       child.on("error", reject);
       child.stdout.resume();

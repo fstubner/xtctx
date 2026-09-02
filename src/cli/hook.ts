@@ -1,7 +1,10 @@
 import { createProjectServices } from "../runtime/services.js";
+import type { ProjectConfig } from "../runtime/services.js";
 import type { SessionSummary } from "../handoff/types.js";
+import { spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 import { readFile, realpath } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { writeFileAtomic } from "../utils/atomic-file.js";
 import { inlineSafe } from "../utils/untrusted-text.js";
 import { pathMatchesProject } from "../utils/project-scope.js";
@@ -10,7 +13,29 @@ export interface HookOptions {
   projectPath?: string;
   tool?: string;
   event?: string;
+  /**
+   * How a background scan is started. Tests pass a recorder; everything else
+   * forks the CLI's `scan` command detached, see `launchDetachedScan`.
+   */
+  launchScan?: (projectRoot: string) => void;
 }
+
+/**
+ * How recently a scan must have finished for the hook not to start another.
+ *
+ * The hook reads without scanning, so the index it reads is only as fresh as
+ * the last MCP call — and the first session after another tool's work has
+ * had none. Measured live: Codex left a decision in its transcript, Claude
+ * Code opened next, and the hook printed "Last scan: never" and nothing else.
+ * One call later the same hook named the Codex session and the agent read it
+ * unprompted. A scan started here, in the background, turns the first case
+ * into the second for the session after this one.
+ *
+ * Not every start, though: a scan walks every transcript store on the machine
+ * (about 20s against a 19GB Codex store, measured), and one that finished a
+ * minute ago has nothing new to find.
+ */
+export const HOOK_SCAN_MIN_INTERVAL_MS = 5 * 60 * 1000;
 
 /**
  * How recent a session has to be to count as active context.
@@ -83,6 +108,14 @@ export async function runHook(options: HookOptions = {}): Promise<void> {
     const status = await services.sessions.getStatus();
     const tool = options.tool ?? "unknown";
 
+    // Started, not awaited: this must not add the scan to the host's startup.
+    // Gated on the project having opted in, exactly as the MCP server gates
+    // its own scan — two clients wire xtctx machine-globally, so this hook
+    // can run in any directory, and a scan writes an index.
+    if (shouldLaunchScan(services.config, status.last_scan_at)) {
+      (options.launchScan ?? launchDetachedScan)(services.projectRoot);
+    }
+
     // Deliberately the no-scan read. This runs before the user's first turn,
     // and `listRecentSessions` would start a scan of every transcript store on
     // the machine and wait seconds for it — on every agent startup.
@@ -114,6 +147,45 @@ export async function runHook(options: HookOptions = {}): Promise<void> {
   } finally {
     await services?.sessions.close().catch(() => {});
   }
+}
+
+function shouldLaunchScan(config: ProjectConfig, lastScanAt: string | null): boolean {
+  if (!config.present || config.error) {
+    return false;
+  }
+  if (lastScanAt === null) {
+    return true;
+  }
+  const finished = Date.parse(lastScanAt);
+  return !Number.isFinite(finished) || Date.now() - finished > HOOK_SCAN_MIN_INTERVAL_MS;
+}
+
+/**
+ * Fork `xtctx scan --project <root>` and let go of it.
+ *
+ * Detached with no stdio, so the hook's own exit — which the host is waiting
+ * on — does not wait for the scan, and the scan does not die with the hook.
+ * The entry point is resolved from this module rather than `process.argv[1]`:
+ * the hook is also run in-process, where argv names the test runner.
+ *
+ * `XTCTX_NO_HOOK_SCAN=1` switches it off. That exists for the smoke tests
+ * that run the built hook in a temp directory they then delete — a detached
+ * scan still writing there is a flake, not a finding.
+ */
+function launchDetachedScan(projectRoot: string): void {
+  if (process.env.XTCTX_NO_HOOK_SCAN === "1") {
+    return;
+  }
+  const entry = fileURLToPath(new URL("./index.js", import.meta.url));
+  const child = spawn(process.execPath, [entry, "scan", "--project", projectRoot], {
+    detached: true,
+    stdio: "ignore",
+    windowsHide: true,
+  });
+  // A launch that fails must not fail the hook, and an 'error' with no
+  // listener would take the process down.
+  child.on("error", () => {});
+  child.unref();
 }
 
 function isActive(session: SessionSummary): boolean {
