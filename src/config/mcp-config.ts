@@ -271,7 +271,7 @@ export async function syncToolMcpConfigs(
   projectRoot: string,
   servers: McpServerDefinition[],
   enabledTools: string[],
-  options: { homeDir?: string } = {},
+  options: { homeDir?: string; globalServers?: McpServerDefinition[] } = {},
 ): Promise<McpSyncSummary> {
   if (servers.length === 0) {
     return { results: [], servers_loaded: 0 };
@@ -315,12 +315,16 @@ export async function syncToolMcpConfigs(
     // (Antigravity, Copilot CLI, global Codex) by the home directory they were
     // built from. Containing a global write by the project root would refuse a
     // perfectly legitimate write.
+    // A machine-global config is not about this project, so it must not carry
+    // a path into this project. Callers pass the published form for global
+    // scope; without it a self-hosted checkout wrote its own `dist/` into a
+    // file that applies to every directory for this user account.
     const result = await writeMcpConfig(
       tool,
       configPath,
       scope,
       renderer,
-      servers,
+      scope === "global" ? (options.globalServers ?? servers) : servers,
       scope === "project" ? projectRoot : home,
     );
     results.push(result);
