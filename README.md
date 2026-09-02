@@ -132,10 +132,10 @@ project on the machine, so a project disconnect leaves those two files alone;
 pass `--global-mcp` (as with `setup`) to remove xtctx from them as well.
 
 `xtctx scan` reads every enabled transcript store into the project's index and
-exits. The MCP server does the same thing on its own when it starts, if the
-index has never been scanned or the last scan is more than five minutes old,
-so the session after another tool's work starts with that work already
-indexed.
+exits. The MCP server does the same thing on its own every time it starts, so
+the session after another tool's work starts with that work already indexed.
+The scan is incremental and runs in the background; against a 19 GB Codex
+store it measured under ten seconds.
 
 Generated MCP clients should use:
 

@@ -6,7 +6,6 @@ import { runScan } from "./scan.js";
 import { runSetup } from "./setup.js";
 import { runStatus } from "./status.js";
 import { createProjectServices } from "../runtime/services.js";
-import { indexNeedsScan } from "../runtime/index-freshness.js";
 import { startMcpServer } from "../mcp/server.js";
 import type { SessionService } from "../handoff/types.js";
 import { readXtctxPackage } from "../utils/package-info.js";
@@ -74,7 +73,17 @@ export async function main(argv = process.argv): Promise<void> {
     // begun here is finished by the time the next session's hook reads the
     // index — which is what turns "Last scan: never" into a pointer at the
     // other tool's work. Not awaited, and never for an unconfigured project:
-    // the scan writes an index. See `index-freshness.ts` for the gate.
+    // the scan writes an index.
+    //
+    // Every start, with no freshness gate. There was one — skip if a scan
+    // finished in the last five minutes — and it failed the case this exists
+    // for: Codex starts this server too, so its own session start stamped the
+    // index a few seconds in, before Codex had written anything, and the
+    // Claude Code session that followed trusted the stamp and skipped. Two
+    // sessions in a row saw the stale stamp and no Codex session. A finish
+    // time says nothing about what another tool wrote afterwards. The
+    // incremental scan this costs measured 9.7s in the background against a
+    // 19GB Codex store, and the cursor design keeps it from re-reading.
     if (!unconfiguredProjectRoot && !services.config.error) {
       void warmIndex(services.sessions);
     }
@@ -189,7 +198,7 @@ export async function main(argv = process.argv): Promise<void> {
 }
 
 /**
- * Start a scan if the index is cold or stale, and let it run.
+ * Start a scan and let it run.
  *
  * `listRecentSessions` is the read that starts a scan; its result is not
  * wanted here, and the budget it waits on is short. A failure is not the
@@ -198,10 +207,7 @@ export async function main(argv = process.argv): Promise<void> {
  */
 async function warmIndex(sessions: SessionService): Promise<void> {
   try {
-    const status = await sessions.getStatus();
-    if (indexNeedsScan(status.last_scan_at)) {
-      await sessions.listRecentSessions(1);
-    }
+    await sessions.listRecentSessions(1);
   } catch {
     // Deliberately silent; see above.
   }
