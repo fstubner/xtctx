@@ -99,6 +99,44 @@ describe("self-hosted project detection", () => {
     expect((await xtctxServerDefinition(root)).command).toBe("npx");
   });
 
+  it("keeps machine-global configs on the published package, not the dev build", async () => {
+    // Self-hosting is a fact about *this project*: run the working tree's
+    // build here, because npx would rebuild the package mid-session and
+    // delete the file the config points at.
+    //
+    // Antigravity and Copilot CLI have no project-scoped config — they are
+    // machine-global, applying to every directory for this user account. So
+    // writing the dev path there points every project on the machine at one
+    // checkout's `dist/`, which is missing for the seconds of every rebuild
+    // and gone entirely if the repo moves. Observed: two global configs on
+    // this machine pointing into a working tree.
+    await beSelfHosted();
+    await mkdir(join(root, ".xtctx"), { recursive: true });
+
+    await setupProject({ projectPath: root, homeDir: home, yes: true, includeGlobalMcp: true });
+
+    // Project scope: the working tree's build.
+    const projectMcp = JSON.parse(await readFile(join(root, ".mcp.json"), "utf-8")) as {
+      mcpServers: Record<string, { command: string; args: string[] }>;
+    };
+    expect(projectMcp.mcpServers.xtctx.command).toBe("node");
+    expect(projectMcp.mcpServers.xtctx.args[0]).toContain("dist");
+
+    // Global scope: the published package.
+    for (const relative of [
+      join(".gemini", "antigravity", "mcp_config.json"),
+      join(".copilot", "mcp-config.json"),
+    ]) {
+      const raw = await readFile(join(home, relative), "utf-8");
+      const config = JSON.parse(raw) as {
+        mcpServers: Record<string, { command: string; args: string[] }>;
+      };
+      expect(config.mcpServers.xtctx.command, relative).toBe("npx");
+      expect(config.mcpServers.xtctx.args, relative).toEqual(["-y", "xtctx"]);
+      expect(raw, relative).not.toContain("dist");
+    }
+  });
+
   it("uses npx everywhere else", async () => {
     await writeFile(
       join(root, "package.json"),

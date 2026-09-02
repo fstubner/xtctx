@@ -108,11 +108,20 @@ export async function setupProject(options: SetupOptions = {}): Promise<SetupRes
   });
 
   const serverDefinition = await xtctxServerDefinition(projectRoot);
+  // Antigravity and Copilot CLI have no project-scoped config: what gets
+  // written there applies to every directory for this user account. Pointing
+  // that at a checkout's `dist/` breaks for the seconds of every rebuild and
+  // permanently if the repo moves — so global scope always names the
+  // published package, even when this project is xtctx itself.
+  const globalServerDefinition = publishedServerDefinition();
   const mcpSummary = await syncToolMcpConfigs(
     projectRoot,
     [serverDefinition],
     supportedMcpTools(options.includeGlobalMcp),
-    options.homeDir ? { homeDir: options.homeDir } : {},
+    {
+      ...(options.homeDir ? { homeDir: options.homeDir } : {}),
+      globalServers: [globalServerDefinition],
+    },
   );
 
   for (const file of mcpSummary.results) {
@@ -353,6 +362,11 @@ export async function xtctxServerDefinition(projectRoot?: string): Promise<McpSe
     };
   }
 
+  return publishedServerDefinition();
+}
+
+/** The package as everyone else runs it. */
+export function publishedServerDefinition(): McpServerDefinition {
   return {
     name: "xtctx",
     command: "npx",

@@ -13,6 +13,10 @@ const { version: CLI_VERSION } = readXtctxPackage(import.meta.url);
 export async function main(argv = process.argv): Promise<void> {
   if (shouldStartMcp(argv)) {
     const services = await createProjectServices(process.cwd());
+    // Nobody opted this directory in. Say so instead of scanning every
+    // transcript store on the machine to return an empty result that reads
+    // like a configured project with no history.
+    const unconfiguredProjectRoot = services.config.present ? undefined : services.projectRoot;
     let closed = false;
     const shutdown = (exit: boolean) => {
       if (closed) return;
@@ -57,7 +61,10 @@ export async function main(argv = process.argv): Promise<void> {
     // A tool call still in flight when stdin closes may go unanswered — the
     // grace window above is enough for ordinary calls, not for one waiting on
     // a scan. The client has closed its side by then, so nothing is listening.
-    await startMcpServer({ sessions: services.sessions }, () => shutdown(true));
+    await startMcpServer(
+      { sessions: services.sessions, unconfiguredProjectRoot },
+      () => shutdown(true),
+    );
     return;
   }
 
