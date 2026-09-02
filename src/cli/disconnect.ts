@@ -11,16 +11,18 @@ export interface DisconnectCliOptions {
   projectPath?: string;
   tool?: string;
   all?: boolean;
+  /** Also remove the machine-global Antigravity and Copilot CLI entries. */
+  globalMcp?: boolean;
   yes?: boolean;
   homeDir?: string;
 }
 
 export async function runDisconnect(options: DisconnectCliOptions = {}): Promise<void> {
   if (options.yes) {
-    // `--yes` skips the prompt, not the disclosure. Antigravity keeps its MCP
-    // config at app level, so disconnecting here removes xtctx from
-    // Antigravity for every project on the machine — which was previously
-    // only mentioned once the files had been written.
+    // `--yes` skips the prompt, not the disclosure. Under --global-mcp this
+    // removes xtctx from Antigravity and Copilot CLI for every project on the
+    // machine — which was previously only mentioned once the files had been
+    // written.
     const plan = describeDisconnectPlan(options);
     for (const warning of plan.warnings) {
       process.stdout.write(`  warning ${warning}\n`);
@@ -37,6 +39,7 @@ export async function runDisconnect(options: DisconnectCliOptions = {}): Promise
     projectPath: options.projectPath,
     tool: options.tool,
     all: options.all,
+    globalMcp: options.globalMcp,
     homeDir: options.homeDir,
   });
   printDisconnectResult(result);

@@ -79,10 +79,12 @@ describe("disconnectProject", () => {
   it("disconnects Antigravity by removing MCP, managed GEMINI.md, and disabling the tool", async () => {
     await setupProject({ projectPath: projectRoot, homeDir, yes: true });
 
+    // The global file only goes under --global-mcp; see disconnect-global.test.ts.
     const result = await disconnectProject({
       projectPath: projectRoot,
       homeDir,
       tool: "antigravity",
+      globalMcp: true,
     });
 
     expect(result.writes).toEqual(

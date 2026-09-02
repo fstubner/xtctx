@@ -42,10 +42,10 @@ describe("runDisconnect --yes", () => {
   });
 
   it("warns that Antigravity is machine-wide before it writes anything", async () => {
-    await runDisconnect({ projectPath: projectRoot, homeDir, all: true, yes: true });
+    await runDisconnect({ projectPath: projectRoot, homeDir, all: true, globalMcp: true, yes: true });
 
     const output = written.join("");
-    const warningAt = output.indexOf("globally");
+    const warningAt = output.indexOf("every project on this machine");
     const appliedAt = output.indexOf("disconnect complete");
 
     expect(warningAt).toBeGreaterThanOrEqual(0);

@@ -2,6 +2,7 @@
 import { Command } from "commander";
 import { runDisconnect } from "./disconnect.js";
 import { runHook } from "./hook.js";
+import { runScan } from "./scan.js";
 import { runSetup } from "./setup.js";
 import { runStatus } from "./status.js";
 import { createProjectServices } from "../runtime/services.js";
@@ -117,21 +118,36 @@ export async function main(argv = process.argv): Promise<void> {
     });
 
   program
+    .command("scan")
+    .option("-p, --project <path>", "Project root (defaults to cwd)")
+    .description("Scan the enabled transcript stores into this project's index, then exit")
+    .action(async (options: { project?: string }) => {
+      const globalOptions = program.opts<{ project?: string }>();
+      await runScan({ projectPath: options.project ?? globalOptions.project });
+    });
+
+  program
     .command("disconnect")
     .argument("[tool]", "Tool to stop managing for this project")
     .option("--all", "Disconnect xtctx from all supported tools", false)
+    .option(
+      "--global-mcp",
+      "Also remove xtctx from the machine-global Antigravity and Copilot CLI MCP configs",
+      false,
+    )
     .option("-p, --project <path>", "Project root")
     .option("-y, --yes", "Apply disconnect without prompting", false)
     .description("Remove xtctx management from a tool without deleting transcript data")
     .action(
       async (
         tool: string | undefined,
-        options: { all: boolean; project?: string; yes: boolean },
+        options: { all: boolean; globalMcp: boolean; project?: string; yes: boolean },
       ) => {
         const globalOptions = program.opts<{ project?: string }>();
         await runDisconnect({
           tool,
           all: options.all,
+          globalMcp: options.globalMcp,
           projectPath: options.project ?? globalOptions.project,
           yes: options.yes,
         });
