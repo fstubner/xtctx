@@ -136,6 +136,15 @@ export interface IndexProgress {
   vectorBacklog: number;
   /** The embedding model is still loading, so this answer is keyword-only. */
   embeddingWarming: boolean;
+  /**
+   * Tools whose transcript store has not been read yet in this process.
+   *
+   * Named individually because "still scanning" does not tell a caller
+   * whether the tool it is asking about is among those already read — an
+   * answer missing a whole tool looks exactly like an answer with nothing to
+   * report.
+   */
+  unreadTools: string[];
 }
 
 export type SessionSearchMode = "hybrid" | "keyword" | "vector";

@@ -175,7 +175,18 @@ function progressNote(service: SessionService): string {
   }
 
   const notes: string[] = [];
-  if (progress.scanning) {
+  // First, and named. "Still scanning" tells a caller that something is
+  // incomplete; it does not tell them that the tool they are asking about is
+  // the incomplete part. A cross-tool question answered from a list missing a
+  // whole tool reads as "no cross-tool history exists".
+  const unread = progress.unreadTools ?? [];
+  if (unread.length > 0) {
+    notes.push(
+      `${unread.map(inlineSafe).join(", ")} not yet read — sessions from ${
+        unread.length === 1 ? "it" : "them"
+      } are missing from this answer`,
+    );
+  } else if (progress.scanning) {
     notes.push("still scanning transcript stores");
   }
   if (progress.embeddingWarming) {

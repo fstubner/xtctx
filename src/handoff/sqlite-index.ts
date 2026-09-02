@@ -373,6 +373,21 @@ export class SqliteHandoffIndex implements SessionService {
   private readonly createIfMissing: boolean;
   /** Canonical, and compared normalized; see `canonicalRoot`. */
   private readonly scopedRoot: string;
+  /**
+   * Tools whose store this process has finished reading at least once.
+   *
+   * The answer budget stops the *caller* waiting, not the scan — so a first
+   * call routinely returns before every store has been read, and used to
+   * report only that indexing was "in progress". An agent asking whether
+   * another tool had history here saw a plausible list with no sign that the
+   * tool it cared about had not been looked at, and concluded there was
+   * nothing to find. Naming the outstanding tools is what makes a partial
+   * answer legible as partial.
+   *
+   * Per process, not persisted: it answers "have I read this yet, now", which
+   * a previous run cannot vouch for.
+   */
+  private readonly scannedTools = new Set<string>();
   private readonly redirectedTools: string[];
   private readonly freezeVectors: boolean;
   /** Windows still waiting to be vectorized after the last search gave up its budget. */
@@ -740,6 +755,9 @@ export class SqliteHandoffIndex implements SessionService {
   getIndexProgress(): IndexProgress {
     return {
       scanning: this.isScanning(),
+      unreadTools: this.tools
+        .map(({ tool }) => tool)
+        .filter((tool) => !this.scannedTools.has(tool)),
       vectorBacklog: this.countUnvectorizedUnits(),
       // Asked, not remembered. The flag was only ever written by a search, so
       // the scan-time warm left it reading false while the model was loading —
@@ -797,6 +815,9 @@ export class SqliteHandoffIndex implements SessionService {
 
     for (const { scraper } of this.tools) {
       if (!(await safeDetect(scraper))) {
+        // Not installed here, so there is nothing to wait for — read, rather
+        // than outstanding forever.
+        this.scannedTools.add(scraper.tool);
         continue;
       }
 
@@ -828,6 +849,12 @@ export class SqliteHandoffIndex implements SessionService {
         // the failure may sort after content in files never reached, and
         // advancing would skip that content permanently. Re-scraping the
         // same window is safe (message ids are deterministic hashes).
+      } finally {
+        // Read, whether or not it succeeded: a tool whose scrape failed has
+        // an error recorded against it and is not something the caller should
+        // be told to wait for. "Outstanding" here means "not looked at yet in
+        // this process", nothing more.
+        this.scannedTools.add(scraper.tool);
       }
     }
 
