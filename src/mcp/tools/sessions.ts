@@ -42,14 +42,9 @@ const MAX_MESSAGE_CHARS = 16_000;
  * direction to fail in: they asked for less and got more.
  *
  * Checked here rather than in the index, because this is the boundary the
- * untrusted argument arrives at.
- */
-/**
- * Exported so every tool taking a filter enforces the same rule. The manifest
- * handler carried no validation at all, so `tool_filter: "cursor"` — a bare
- * string where an array belongs — was passed through and silently ignored,
- * returning every tool. They asked for less and got more, which is the exact
- * failure the docstring above describes.
+ * untrusted argument arrives at. Exported so every tool taking a filter
+ * enforces the same rule: the manifest handler once carried no validation
+ * and passed the bare string through to the same silent widening.
  */
 export function validatedFilter(value: unknown, field: string): string[] | undefined {
   if (value === undefined || value === null) {
