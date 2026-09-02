@@ -26,14 +26,20 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { setupProject } from "@xtctx/config/setup";
 import { disconnectProject } from "@xtctx/config/disconnect";
 
-/** The tools an agent can call, namespaced as Claude Code addresses them. */
+/**
+ * The tools an agent can call, namespaced as Claude Code addresses them —
+ * under both names the same server can carry: the project `.mcp.json` entry
+ * and the plugin. Seen live: with the plugin installed the agent used the
+ * plugin's copy after setup, which an allowlist naming only `mcp__xtctx__`
+ * would not have covered.
+ */
 const EXPECTED = [
-  "mcp__xtctx__xtctx_recent_sessions",
-  "mcp__xtctx__xtctx_session_detail",
-  "mcp__xtctx__xtctx_search_sessions",
-  "mcp__xtctx__xtctx_continuity_status",
-  "mcp__xtctx__xtctx_handoff_manifest",
-];
+  "xtctx_recent_sessions",
+  "xtctx_session_detail",
+  "xtctx_search_sessions",
+  "xtctx_continuity_status",
+  "xtctx_handoff_manifest",
+].flatMap((tool) => [`mcp__xtctx__${tool}`, `mcp__plugin_xtctx_xtctx__${tool}`]);
 
 interface ClaudeSettings {
   hooks?: { SessionStart?: unknown[] };

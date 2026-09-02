@@ -15,9 +15,10 @@ exposes them over MCP so the next tool you open can find recent sessions and
 read the raw messages. It does not run a daemon, host an API, generate
 summaries, or maintain durable project memory.
 
-Retrieval needs no per-project setup: point any tool at the MCP server and it
-resolves the project from the working directory. `xtctx setup` is the upgrade
-that puts the context in front of the agent whether it asks or not.
+Each project opts in once with `xtctx setup`. The MCP server resolves the
+project from the working directory, and in a project that has not opted in it
+says so and names the command, so an agent can offer it. Setup is also what
+puts the context in front of the agent whether it asks or not.
 
 The intended user is a solo developer who switches between local coding agents
 and wants the next agent to recover recent context without a pasted recap.
@@ -164,9 +165,14 @@ When invoked in a normal terminal, it shows the human CLI.
   session handoff IDs and pointers to raw-detail retrieval. A caller can attach
   a correlation ID; xtctx echoes it but does not persist task state.
 
-The MCP tools scan transcript stores lazily and update `.xtctx/state/xtctx.db`
-on demand. The database is a rebuildable cache; the source transcripts remain
-authoritative.
+The server scans transcript stores when it starts and on each call, updating
+`.xtctx/state/xtctx.db` as it goes. The database is a rebuildable cache; the
+source transcripts remain authoritative.
+
+With the plugin installed, a project that has also run `setup` reaches the
+same server under two names in Claude Code (`xtctx` from `.mcp.json` and
+`plugin:xtctx:xtctx` from the plugin). Setup grants the tools under both, so
+whichever copy the agent picks needs no prompt.
 
 Semantic search embeds sliding windows of raw transcript turns, not generated
 summaries. Window text includes role, timestamp, and message order so retrieval

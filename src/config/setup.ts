@@ -550,13 +550,27 @@ async function claudeHookCommand(projectRoot: string): Promise<string> {
  * read-only — the MCP layer has no write path at all — which is what makes
  * pre-granting them reasonable at all.
  */
-export const CLAUDE_TOOL_PERMISSIONS = [
-  "mcp__xtctx__xtctx_recent_sessions",
-  "mcp__xtctx__xtctx_session_detail",
-  "mcp__xtctx__xtctx_search_sessions",
-  "mcp__xtctx__xtctx_continuity_status",
-  "mcp__xtctx__xtctx_handoff_manifest",
+const XTCTX_TOOL_NAMES = [
+  "xtctx_recent_sessions",
+  "xtctx_session_detail",
+  "xtctx_search_sessions",
+  "xtctx_continuity_status",
+  "xtctx_handoff_manifest",
 ] as const;
+
+/**
+ * Claude Code addresses an MCP tool as `mcp__<server>__<tool>`, and the same
+ * xtctx server reaches a project under two names: `xtctx` when `.mcp.json`
+ * registers it, and `plugin:xtctx:xtctx` (written `plugin_xtctx_xtctx`) when
+ * the plugin does. Both are granted. Observed live: with the plugin installed
+ * the agent called the plugin's copy of the tools after setup, and an
+ * allowlist naming only the project server's copy would have left every one
+ * of those calls to a prompt — or, non-interactively, to a silent refusal.
+ */
+export const CLAUDE_TOOL_PERMISSIONS = XTCTX_TOOL_NAMES.flatMap((tool) => [
+  `mcp__xtctx__${tool}`,
+  `mcp__plugin_xtctx_xtctx__${tool}`,
+]);
 
 async function installClaudeHook(projectRoot: string): Promise<boolean> {
   // Claude Code reads hooks from .claude/settings.json (matcher-group shape).
