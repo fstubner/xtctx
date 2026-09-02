@@ -138,7 +138,13 @@ describe("setupProject", () => {
       permissions: { allow: string[] };
       hooks: { SessionStart: Array<{ hooks: Array<{ command: string }> }> };
     };
-    expect(settings.permissions.allow).toEqual(["Bash(ls:*)"]);
+    // The user's own rule survives, and setup's tool grants sit alongside it
+    // rather than replacing it. Asserted as "still there" rather than as an
+    // exact list: this test is about not trampling user settings, and
+    // pinning the full array made it fail the moment setup started
+    // granting the xtctx tools — which is the point of that change.
+    expect(settings.permissions.allow).toContain("Bash(ls:*)");
+    expect(settings.permissions.allow).toContain("mcp__xtctx__xtctx_recent_sessions");
     const commands = settings.hooks.SessionStart.flatMap((group) =>
       group.hooks.map((hook) => hook.command),
     );
