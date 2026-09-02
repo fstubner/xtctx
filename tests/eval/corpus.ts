@@ -199,7 +199,16 @@ export function generateCorpus(options: CorpusOptions = {}): GeneratedCorpus {
   // instead of 5. The corpus is generated, so the cost is eval runtime, not
   // maintenance.
   const sessionsPerTool = options.sessionsPerTool ?? 12;
-  const turnsPerSession = options.turnsPerSession ?? 6;
+  // Sixteen, not six. At six turns every session fitted inside a single
+  // retrieval window (size 8), so the eval measured ranking in a world where
+  // no session ever has two windows — and the whole session-level aggregation
+  // path, which decides the order the caller actually sees, was unreachable
+  // by it. Real sessions are nothing like that: the one that produced this
+  // change ran to several thousand messages.
+  //
+  // Sixteen turns at stride 4 gives four windows a session, so a session can
+  // match in more than one place and corroboration means something.
+  const turnsPerSession = options.turnsPerSession ?? 16;
   const random = mulberry32(seed);
   const pick = <T>(items: readonly T[]): T => items[Math.floor(random() * items.length)];
 

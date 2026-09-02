@@ -1,27 +1,27 @@
 {
   "hybrid": {
     "queries": 60,
-    "mrr": 0.598,
-    "recallAt5": 0.85,
-    "top1": 0.45,
+    "mrr": 0.333,
+    "recallAt5": 0.533,
+    "top1": 0.183,
     "falsePositiveRate": 0,
     "gibberishFalsePositiveRate": 0,
     "relatedTopicHitRate": 1
   },
   "vector": {
     "queries": 60,
-    "mrr": 0.297,
-    "recallAt5": 0.383,
-    "top1": 0.217,
+    "mrr": 0.246,
+    "recallAt5": 0.35,
+    "top1": 0.183,
     "falsePositiveRate": 0,
     "gibberishFalsePositiveRate": 0,
-    "relatedTopicHitRate": 0.3
+    "relatedTopicHitRate": 0.1
   },
   "keyword": {
     "queries": 60,
-    "mrr": 0.532,
-    "recallAt5": 0.85,
-    "top1": 0.333,
+    "mrr": 0.228,
+    "recallAt5": 0.35,
+    "top1": 0.133,
     "falsePositiveRate": 0,
     "gibberishFalsePositiveRate": 0,
     "relatedTopicHitRate": 1

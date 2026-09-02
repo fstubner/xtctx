@@ -102,6 +102,8 @@ interface SqliteHandoffIndexOptions {
  * call sees more, and the call after that sees all of it.
  */
 const DEFAULT_REFRESH_BUDGET_MS = 4_000;
+/** How much a corroborating window adds; swept against the eval below. */
+const CORROBORATION_WEIGHT = 0.5;
 
 /**
  * How long one search spends building vectors before answering.
@@ -239,6 +241,19 @@ const EMBEDDING_WARM_POLL_MS = 100;
 const DEFAULT_WINDOW_SIZE = 8;
 const DEFAULT_WINDOW_STRIDE = 4;
 const MAX_MATCHES_PER_SESSION = 3;
+/**
+ * Candidate windows fetched per requested session.
+ *
+ * Not the same number as the matches shown. The keyword pass fetches windows,
+ * and the ranker groups them into sessions afterwards — so a corpus where
+ * sessions have many windows can spend the whole candidate budget on a
+ * handful of them and cut the answering session before ranking ever sees it.
+ * At `limit * 3` on sessions of four windows, fifteen candidates could not
+ * reliably span five distinct sessions.
+ *
+ * Swept against the eval; see the table on `blendScores`.
+ */
+const CANDIDATE_WINDOWS_PER_SESSION = 12;
 /**
  * Minimum raw cosine similarity for a retrieval window to count as a semantic
  * match.
@@ -1482,7 +1497,7 @@ export class SqliteHandoffIndex implements SessionService {
         this.scopedRoot,
         ...filters,
         ...branches,
-        normalizedLimit * MAX_MATCHES_PER_SESSION,
+        normalizedLimit * CANDIDATE_WINDOWS_PER_SESSION,
       ) as RetrievalUnitRow[];
   }
 
@@ -1909,10 +1924,16 @@ function groupScoredUnits(
   // can each be the right thing.
   const ranks = new Map<string, number>();
   const sessions = new Map<string, SessionSummary>();
+  /** Every window score per session, so corroboration can be measured. */
+  const windowScores = new Map<string, number[]>();
 
   for (const item of scored) {
     const existing = sessions.get(item.row.session_ref);
     const match = formatMatch(item);
+    windowScores.set(item.row.session_ref, [
+      ...(windowScores.get(item.row.session_ref) ?? []),
+      item.score,
+    ]);
 
     if (existing) {
       if ((existing.matches?.length ?? 0) < MAX_MATCHES_PER_SESSION) {
@@ -1922,11 +1943,9 @@ function groupScoredUnits(
         item.relevance === undefined
           ? existing.score
           : Math.max(existing.score ?? 0, item.relevance);
-      ranks.set(item.row.session_ref, Math.max(ranks.get(item.row.session_ref) ?? 0, item.score));
       continue;
     }
 
-    ranks.set(item.row.session_ref, item.score);
     sessions.set(item.row.session_ref, {
       session_ref: item.row.session_ref,
       tool: item.row.tool,
@@ -1940,14 +1959,25 @@ function groupScoredUnits(
       matches: [match],
     });
 
-    if (sessions.size >= limit) {
-      break;
-    }
   }
 
-  return [...sessions.values()].sort(
-    (left, right) => (ranks.get(right.session_ref) ?? 0) - (ranks.get(left.session_ref) ?? 0),
-  );
+  // Score each session from all of its matching windows, not just its best.
+  //
+  // `Math.max` alone treats one lucky window the same as three corroborating
+  // ones, and recall@5 (0.85) sitting far above top-1 (0.45) says the right
+  // session is usually in the candidate set and merely not first — an
+  // ordering problem, which is where corroboration should help.
+  //
+  // Best window still dominates: the extra terms are damped so they can
+  // separate sessions of similar peak strength without letting a pile of weak
+  // mentions outrank one strong answer.
+  for (const [sessionRef, scores] of windowScores) {
+    ranks.set(sessionRef, corroboratedScore(scores));
+  }
+
+  return [...sessions.values()]
+    .sort((left, right) => (ranks.get(right.session_ref) ?? 0) - (ranks.get(left.session_ref) ?? 0))
+    .slice(0, limit);
 }
 
 function formatMatch(item: {
@@ -2060,6 +2090,28 @@ function blendScores(
   // decided by the candidate filter above, not by how the survivors are
   // ordered. That needs its own change.
   return 0.6 * semanticScore + 0.4 * keywordScore + tieBreak;
+}
+
+/**
+ * A session's rank from every window that matched it.
+ *
+ * The best window carries the score; each further window adds a damped share,
+ * so a session that answers the query in three places outranks one that
+ * mentions it once — without letting many weak mentions beat a single strong
+ * answer, which is the failure mode of summing.
+ *
+ * Harmonic damping (1/2, 1/3, …) rather than a flat bonus: the second
+ * corroborating window is worth much more than the fifth, and the series
+ * converges, so a very long session cannot accumulate its way to the top.
+ */
+function corroboratedScore(scores: number[]): number {
+  if (scores.length === 0) return 0;
+  const ordered = [...scores].sort((left, right) => right - left);
+  let total = ordered[0];
+  for (let index = 1; index < ordered.length; index++) {
+    total += CORROBORATION_WEIGHT * (ordered[index] / (index + 1));
+  }
+  return total;
 }
 
 function scoreContinuity(messageEndIndex: number, messageCount: number): number {
