@@ -132,10 +132,10 @@ project on the machine, so a project disconnect leaves those two files alone;
 pass `--global-mcp` (as with `setup`) to remove xtctx from them as well.
 
 `xtctx scan` reads every enabled transcript store into the project's index and
-exits. The Claude Code session-start hook launches it in the background when
-the index has never been scanned or the last scan is more than five minutes
-old, so the session after another tool's work starts with that work already
-indexed. `XTCTX_NO_HOOK_SCAN=1` switches that launch off.
+exits. The MCP server does the same thing on its own when it starts, if the
+index has never been scanned or the last scan is more than five minutes old,
+so the session after another tool's work starts with that work already
+indexed.
 
 Generated MCP clients should use:
 

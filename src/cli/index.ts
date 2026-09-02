@@ -6,7 +6,9 @@ import { runScan } from "./scan.js";
 import { runSetup } from "./setup.js";
 import { runStatus } from "./status.js";
 import { createProjectServices } from "../runtime/services.js";
+import { indexNeedsScan } from "../runtime/index-freshness.js";
 import { startMcpServer } from "../mcp/server.js";
+import type { SessionService } from "../handoff/types.js";
 import { readXtctxPackage } from "../utils/package-info.js";
 
 const { version: CLI_VERSION } = readXtctxPackage(import.meta.url);
@@ -66,6 +68,16 @@ export async function main(argv = process.argv): Promise<void> {
       { sessions: services.sessions, unconfiguredProjectRoot },
       () => shutdown(true),
     );
+
+    // Warm the index now rather than on the first tool call. The host starts
+    // this process at session start and keeps it for the session, so a scan
+    // begun here is finished by the time the next session's hook reads the
+    // index — which is what turns "Last scan: never" into a pointer at the
+    // other tool's work. Not awaited, and never for an unconfigured project:
+    // the scan writes an index. See `index-freshness.ts` for the gate.
+    if (!unconfiguredProjectRoot && !services.config.error) {
+      void warmIndex(services.sessions);
+    }
     return;
   }
 
@@ -174,6 +186,25 @@ export async function main(argv = process.argv): Promise<void> {
   });
 
   await program.parseAsync(argv);
+}
+
+/**
+ * Start a scan if the index is cold or stale, and let it run.
+ *
+ * `listRecentSessions` is the read that starts a scan; its result is not
+ * wanted here, and the budget it waits on is short. A failure is not the
+ * server's problem to report at startup: the same scan runs again on the
+ * first call, where its error is recorded against the tool.
+ */
+async function warmIndex(sessions: SessionService): Promise<void> {
+  try {
+    const status = await sessions.getStatus();
+    if (indexNeedsScan(status.last_scan_at)) {
+      await sessions.listRecentSessions(1);
+    }
+  } catch {
+    // Deliberately silent; see above.
+  }
 }
 
 function shouldStartMcp(argv: string[]): boolean {
