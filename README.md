@@ -27,11 +27,12 @@ and wants the next agent to recover recent context without a pasted recap.
 Two routes, and they answer different questions.
 
 The **plugin** is the smaller commitment: it registers the MCP server and the
-handoff skill, and writes nothing into your project. Retrieval works
-immediately — the tools resolve the project from the working directory, so an
-unconfigured project still returns its sessions and their raw messages. What
-you are relying on is the agent choosing to call a tool, which the skill
-prompts it to do.
+handoff skill machine-wide, and writes nothing into your project. The tools
+resolve the project from the working directory. In a project that has been
+set up they answer; in one that has not, every tool says so and names
+`xtctx setup`, so the agent can offer it — nothing is scanned or written
+into a directory nobody opted in. What you are relying on is the agent
+choosing to call a tool, which the skill prompts it to do.
 
 **`setup`** writes managed blocks into the instruction files each tool already
 reads (`CLAUDE.md`, `AGENTS.md`, Cursor rules, and so on), so the next agent
@@ -43,14 +44,15 @@ into each tool's native format.
 |---|---|---|
 | MCP tools | yes | yes |
 | Handoff skill | yes | yes |
-| Retrieval in an unconfigured project | yes | yes |
+| Reachable from every project | yes | no |
+| Retrieval in an unconfigured project | no (offers `setup`) | no |
 | Context without the agent asking | no | yes |
 | SessionStart hook (Claude Code) | no | yes |
 | Writes into your project | no | yes |
 | Tool coverage | six with a plugin format | every supported tool |
 
-Start with the plugin. Add `setup` in projects where you want the handoff to
-be automatic rather than opt-in; the two compose, and running both is the
+Start with the plugin so the tools are reachable everywhere, then run `setup`
+in each project you want handoff in; the two compose, and running both is the
 normal end state.
 
 ```bash
@@ -88,15 +90,14 @@ has no plugin format yet, so `setup` is the only route there.
 
 Either route registers the same MCP server (`npx -y xtctx`) and the same
 handoff skill. Because the plugin writes no project config, `xtctx status`
-reports a plugin-only project as `Config missing (run xtctx setup)` — that
-line describes the managed blocks and hooks, not the MCP tools, which work
-regardless.
+reports a plugin-only project as `Config missing (run xtctx setup)`, and the
+tools answer the same way until `setup` has been run there.
 
-One thing to expect on the plugin route: the first call in a project with a
-large transcript history builds the index from scratch and can run for
-minutes. Calls return within a refresh budget with whatever has landed so
-far, and the scan keeps going in the background, so the counts fill in over
-the first few calls rather than all at once.
+One thing to expect in a project with a large transcript history: the first
+scan builds the index from scratch and can run for minutes. The server starts
+it as soon as it starts, calls return within a refresh budget with whatever
+has landed so far, and each answer names the tools it has not read yet, so
+the counts fill in over the first few calls rather than all at once.
 
 ## Workflow
 
