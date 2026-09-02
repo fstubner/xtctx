@@ -7,6 +7,7 @@ import { runSetup } from "./setup.js";
 import { runStatus } from "./status.js";
 import { createProjectServices } from "../runtime/services.js";
 import { startMcpServer } from "../mcp/server.js";
+import type { SessionService } from "../handoff/types.js";
 import { readXtctxPackage } from "../utils/package-info.js";
 
 const { version: CLI_VERSION } = readXtctxPackage(import.meta.url);
@@ -66,6 +67,26 @@ export async function main(argv = process.argv): Promise<void> {
       { sessions: services.sessions, unconfiguredProjectRoot },
       () => shutdown(true),
     );
+
+    // Warm the index now rather than on the first tool call. The host starts
+    // this process at session start and keeps it for the session, so a scan
+    // begun here is finished by the time the next session's hook reads the
+    // index — which is what turns "Last scan: never" into a pointer at the
+    // other tool's work. Not awaited, and never for an unconfigured project:
+    // the scan writes an index.
+    //
+    // Every start, with no freshness gate. There was one — skip if a scan
+    // finished in the last five minutes — and it failed the case this exists
+    // for: Codex starts this server too, so its own session start stamped the
+    // index a few seconds in, before Codex had written anything, and the
+    // Claude Code session that followed trusted the stamp and skipped. Two
+    // sessions in a row saw the stale stamp and no Codex session. A finish
+    // time says nothing about what another tool wrote afterwards. The
+    // incremental scan this costs measured 9.7s in the background against a
+    // 19GB Codex store, and the cursor design keeps it from re-reading.
+    if (!unconfiguredProjectRoot && !services.config.error) {
+      void warmIndex(services.sessions);
+    }
     return;
   }
 
@@ -174,6 +195,22 @@ export async function main(argv = process.argv): Promise<void> {
   });
 
   await program.parseAsync(argv);
+}
+
+/**
+ * Start a scan and let it run.
+ *
+ * `listRecentSessions` is the read that starts a scan; its result is not
+ * wanted here, and the budget it waits on is short. A failure is not the
+ * server's problem to report at startup: the same scan runs again on the
+ * first call, where its error is recorded against the tool.
+ */
+async function warmIndex(sessions: SessionService): Promise<void> {
+  try {
+    await sessions.listRecentSessions(1);
+  } catch {
+    // Deliberately silent; see above.
+  }
 }
 
 function shouldStartMcp(argv: string[]): boolean {

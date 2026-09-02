@@ -236,6 +236,13 @@ function embeddingWarmBudgetFromEnv(): number | undefined {
   return Number.isFinite(raw) && raw >= 0 ? raw : undefined;
 }
 
+/**
+ * How often a session still streaming in from a scraper has its count and
+ * preview rolled up. See the scan loop in `refreshNow` for why it is not
+ * "only at the end" and not "on every message".
+ */
+const INCREMENTAL_ROLLUP_INTERVAL_MS = 1_000;
+
 /** Poll interval while waiting for the model; see `waitUntilEmbeddingReady`. */
 const EMBEDDING_WARM_POLL_MS = 100;
 const DEFAULT_WINDOW_SIZE = 8;
@@ -837,11 +844,34 @@ export class SqliteHandoffIndex implements SessionService {
       }
 
       let latestTimestamp: Date | null = null;
+      // The session the scraper is currently yielding. It is rolled up when
+      // the scraper moves on to another, and at most once a second while it
+      // is still streaming in, so a scan cut short — the normal case when a
+      // 20-second agent session ends before a 20-second scan does — leaves a
+      // count and a preview behind rather than "0 messages" and nothing. The
+      // timer matters more than the switch: the session the next agent wants
+      // is the newest one, which is the last file a scraper reads, so nothing
+      // ever moves past it before an interruption. Once per second keeps the
+      // roll-up from being paid per message, which is what made indexing
+      // O(N²) per session before it was deferred to the end. Retrieval units
+      // still wait for the end: only search reads them, and search scans for
+      // itself.
+      let openSession: string | null = null;
+      let openSessionRolledUpAt = 0;
       try {
         for await (const chunk of scraper.scrape()) {
           const sessionRef = this.upsertChunk(chunk);
           if (sessionRef) {
             touchedSessions.add(sessionRef);
+            if (openSession !== null && openSession !== sessionRef) {
+              this.prepared().sessionRollup.run(openSession);
+              openSessionRolledUpAt = 0;
+            }
+            openSession = sessionRef;
+            if (Date.now() - openSessionRolledUpAt >= INCREMENTAL_ROLLUP_INTERVAL_MS) {
+              this.prepared().sessionRollup.run(openSession);
+              openSessionRolledUpAt = Date.now();
+            }
           }
           if (!latestTimestamp || chunk.timestamp > latestTimestamp) {
             latestTimestamp = chunk.timestamp;
@@ -865,6 +895,10 @@ export class SqliteHandoffIndex implements SessionService {
         // advancing would skip that content permanently. Re-scraping the
         // same window is safe (message ids are deterministic hashes).
       } finally {
+        // The last session a scraper yielded has nobody to move past it.
+        if (openSession !== null) {
+          this.prepared().sessionRollup.run(openSession);
+        }
         // Read, whether or not it succeeded: a tool whose scrape failed has
         // an error recorded against it and is not something the caller should
         // be told to wait for. "Outstanding" here means "not looked at yet in
