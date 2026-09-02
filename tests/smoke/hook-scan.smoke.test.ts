@@ -11,7 +11,7 @@
  */
 import Database from "better-sqlite3";
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -24,7 +24,11 @@ describe("session-start hook launches a real background scan", () => {
   let homeDir = "";
 
   beforeEach(async () => {
-    projectRoot = await mkdtemp(join(tmpdir(), "xtctx-hookscan-smoke-"));
+    // realpath, because the product canonicalises its project root and the
+    // seeded session records this path as its cwd: on macOS the temp dir is a
+    // symlink and on Windows CI it is an 8.3 short name, so without this the
+    // scan ran, found nothing for the project, and the test failed there only.
+    projectRoot = await realpath(await mkdtemp(join(tmpdir(), "xtctx-hookscan-smoke-")));
     homeDir = await mkdtemp(join(tmpdir(), "xtctx-hookscan-smoke-home-"));
     await mkdir(join(projectRoot, ".xtctx", "state"), { recursive: true });
     await writeFile(
