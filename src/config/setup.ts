@@ -167,6 +167,19 @@ export async function setupProject(options: SetupOptions = {}): Promise<SetupRes
     changed: await installClaudeHook(projectRoot),
   });
 
+  // The half setup cannot do. Claude Code ignores `permissions.allow` outright
+  // in a workspace the user has not trusted, so the grants written above are
+  // inert until someone accepts the trust dialog. Trusting a directory is a
+  // security decision that belongs to the person, not to an installer — but
+  // saying nothing left a headless agent with tool calls refused and no
+  // explanation, which is how this was found.
+  warnings.push(
+    "Claude Code applies the tool permissions written to .claude/settings.json " +
+      "only in a workspace you have trusted. Open this project in Claude Code " +
+      "once and accept the trust prompt; until then its xtctx tool calls are " +
+      "refused, silently in non-interactive runs.",
+  );
+
   return { projectRoot, configPath, writes, warnings, failures };
 }
 
@@ -527,6 +540,24 @@ async function claudeHookCommand(projectRoot: string): Promise<string> {
     : CLAUDE_HOOK_COMMAND;
 }
 
+/**
+ * The tools an agent may call, namespaced the way Claude Code addresses them:
+ * `mcp__<server>__<tool>`.
+ *
+ * Listed explicitly rather than as a wildcard. `mcp__xtctx__*` would silently
+ * grant any tool a future version adds; naming them means a new tool is a
+ * deliberate decision, taken here, in a diff someone can read. All five are
+ * read-only — the MCP layer has no write path at all — which is what makes
+ * pre-granting them reasonable at all.
+ */
+export const CLAUDE_TOOL_PERMISSIONS = [
+  "mcp__xtctx__xtctx_recent_sessions",
+  "mcp__xtctx__xtctx_session_detail",
+  "mcp__xtctx__xtctx_search_sessions",
+  "mcp__xtctx__xtctx_continuity_status",
+  "mcp__xtctx__xtctx_handoff_manifest",
+] as const;
+
 async function installClaudeHook(projectRoot: string): Promise<boolean> {
   // Claude Code reads hooks from .claude/settings.json (matcher-group shape).
   // Earlier xtctx versions wrote a flat array to .claude/hooks.json, which
@@ -553,15 +584,31 @@ async function installClaudeHook(projectRoot: string): Promise<boolean> {
       ),
   );
 
-  if (alreadyInstalled) {
-    return legacyChanged;
+  // Not an early return on `alreadyInstalled`. Every project set up before
+  // permissions existed already has the hook, so stopping here would leave
+  // exactly the installs that need the fix without it.
+  if (!alreadyInstalled) {
+    hooks.SessionStart = [
+      ...sessionStart,
+      { hooks: [{ type: "command", command: await claudeHookCommand(projectRoot) }] },
+    ];
+    root.hooks = hooks;
   }
 
-  hooks.SessionStart = [
-    ...sessionStart,
-    { hooks: [{ type: "command", command: await claudeHookCommand(projectRoot) }] },
-  ];
-  root.hooks = hooks;
+  // Registering the server is not the same as being allowed to call it.
+  // Without this every tool call is refused — a prompt the user clicks
+  // through interactively, and a silent refusal everywhere else, which is
+  // the automated case cross-tool handoff exists for.
+  const permissions = isRecord(root.permissions) ? root.permissions : {};
+  const allow = Array.isArray(permissions.allow)
+    ? permissions.allow.filter((entry): entry is string => typeof entry === "string")
+    : [];
+  const missing = CLAUDE_TOOL_PERMISSIONS.filter((tool) => !allow.includes(tool));
+  if (missing.length > 0) {
+    permissions.allow = [...allow, ...missing];
+    root.permissions = permissions;
+  }
+
   const changed = await writeIfChanged(
     settingsPath,
     JSON.stringify(root, null, 2) + "\n",

@@ -6,7 +6,7 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { removeMcpServerConfigs } from "./mcp-config.js";
 import { BUILT_IN_SKILL_ID, removeSyncedSkillsForTools } from "./skills.js";
 import { SUPPORTED_TOOLS, getToolDefinition, type ToolId } from "../tools/sources.js";
-import { CLAUDE_HOOK_MARKER } from "./setup.js";
+import { CLAUDE_HOOK_MARKER, CLAUDE_TOOL_PERMISSIONS } from "./setup.js";
 
 const TOOL_ALIASES: Record<string, ToolId> = {
   claude: "claude-code",
@@ -587,8 +587,40 @@ async function removeClaudeHookFromSettings(
     return false;
   }
 
-  if (!isRecord(parsed) || !isRecord(parsed.hooks)) {
+  if (!isRecord(parsed)) {
     return false;
+  }
+
+  // Setup grants the five xtctx tools in `permissions.allow`; disconnect takes
+  // exactly those back and leaves everything else. Filtering by our own list
+  // rather than by prefix is what keeps a rule the user wrote by hand — or one
+  // another tool added — out of the blast radius.
+  let permissionsChanged = false;
+  if (isRecord(parsed.permissions) && Array.isArray(parsed.permissions.allow)) {
+    const allow = parsed.permissions.allow;
+    const kept = allow.filter(
+      (entry) => typeof entry !== "string" || !(CLAUDE_TOOL_PERMISSIONS as readonly string[]).includes(entry),
+    );
+    if (kept.length !== allow.length) {
+      permissionsChanged = true;
+      if (kept.length === 0) {
+        delete parsed.permissions.allow;
+        if (Object.keys(parsed.permissions).length === 0) {
+          delete parsed.permissions;
+        }
+      } else {
+        parsed.permissions.allow = kept;
+      }
+    }
+  }
+
+  if (!isRecord(parsed.hooks)) {
+    if (permissionsChanged) {
+      await writeFileAtomic(settingsPath, JSON.stringify(parsed, null, 2) + "\n", {
+        containWithin: projectRoot,
+      });
+    }
+    return permissionsChanged;
   }
 
   const sessionStart = Array.isArray(parsed.hooks.SessionStart) ? parsed.hooks.SessionStart : [];
@@ -609,7 +641,7 @@ async function removeClaudeHookFromSettings(
       (group) => !isRecord(group) || !Array.isArray(group.hooks) || group.hooks.length > 0,
     );
 
-  if (JSON.stringify(kept) === JSON.stringify(sessionStart)) {
+  if (JSON.stringify(kept) === JSON.stringify(sessionStart) && !permissionsChanged) {
     return false;
   }
 
