@@ -62,12 +62,25 @@
  * Both collapse eventually; potion collapses at the length this project
  * actually embeds. A window here is eight messages.
  *
- * So the door is not closed, but it opens the other way round: a static model
- * is worth revisiting only alongside much shorter windows, where its margin
- * survives. Decoupled fine windows were measured on 2026-09-02 and rejected
- * because hybrid regressed; embedding cost was the reason they had to stay
- * coarse, and a 70x cheaper model removes that constraint. Neither change
- * stands alone.
+ * That suggested one more experiment: if length is the problem, the static
+ * model should recover at shorter windows, and a 70x cheaper model is exactly
+ * what would make short windows affordable. Measured on 2026-09-03, vector
+ * mode, same sixty queries:
+ *
+ *   size/stride   potion   MiniLM
+ *   8/4           0.016    0.246
+ *   4/2           0.044    0.331
+ *   2/1           0.097    0.461
+ *
+ * The diagnosis holds — potion climbs monotonically as the windows shrink —
+ * and the conclusion does not change, because MiniLM climbs faster. The gap
+ * widens rather than closes: 0.23 at 8/4, 0.36 at 2/1. There is no window size
+ * at which the static model is the better choice here, so this is closed
+ * rather than merely deferred.
+ *
+ * What the control did turn up is about windows, not models: MiniLM at 4/2 and
+ * 2/1 is markedly better in `vector` mode than at the current 8/4. That is
+ * recorded on `DEFAULT_WINDOW_SIZE`, where the decision belongs.
  */
 export const DEFAULT_EMBEDDING_MODEL = "Xenova/all-MiniLM-L6-v2";
 /**
