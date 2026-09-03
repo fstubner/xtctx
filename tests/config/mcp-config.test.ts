@@ -2,7 +2,11 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { removeMcpServerConfigs, syncToolMcpConfigs } from "@xtctx/config/mcp-config";
+import {
+  inspectMcpWiring,
+  removeMcpServerConfigs,
+  syncToolMcpConfigs,
+} from "@xtctx/config/mcp-config";
 
 describe("syncToolMcpConfigs", () => {
   let projectDir = "";
@@ -498,5 +502,56 @@ describe("removeMcpServerConfigs on a config it cannot parse", () => {
     // The parser detail is kept, but as supporting evidence rather than the
     // whole message.
     expect(warning).not.toMatch(/^Failed to remove MCP config/m);
+  });
+});
+
+/**
+ * `xtctx status` answers one question: can an agent actually reach xtctx from
+ * this tool right now?
+ *
+ * A config file it cannot parse is a config whose contents it does not know,
+ * so the only honest answer is "not wired" — the entry may be absent, or
+ * present under a typo, and either way the client is not loading it. Reporting
+ * it as wired is the failure that makes status worth nothing: the user is told
+ * everything is fine while no tool call reaches xtctx, and the file that would
+ * have shown them why is the one nobody looked at.
+ */
+describe("inspectMcpWiring on a config it cannot parse", () => {
+  let projectDir = "";
+  let homeDir = "";
+
+  beforeEach(async () => {
+    projectDir = await mkdtemp(join(tmpdir(), "xtctx-mcp-inspect-"));
+    homeDir = await mkdtemp(join(tmpdir(), "xtctx-mcp-inspect-home-"));
+  });
+
+  afterEach(async () => {
+    await rm(projectDir, { recursive: true, force: true });
+    await rm(homeDir, { recursive: true, force: true });
+  });
+
+  it("never reports an unreadable config as wired", async () => {
+    // Truncated, so neither the parser nor the comment-stripping retry can
+    // recover it — unlike JSONC, which is read successfully on purpose.
+    await writeFile(join(projectDir, ".mcp.json"), '{ "mcpServers": { "xtctx"', "utf-8");
+
+    const [state] = await inspectMcpWiring(projectDir, "xtctx", ["claude-code"], { homeDir });
+
+    expect(state.wired).toBe(false);
+    // And distinguished from a config that is simply absent: the file is
+    // there, so this is wiring to repair rather than a tool never opted into.
+    expect(state.configExists).toBe(true);
+  });
+
+  it("still reports a wired config as wired", async () => {
+    await writeFile(
+      join(projectDir, ".mcp.json"),
+      JSON.stringify({ mcpServers: { xtctx: { command: "npx" } } }),
+      "utf-8",
+    );
+
+    const [state] = await inspectMcpWiring(projectDir, "xtctx", ["claude-code"], { homeDir });
+
+    expect(state.wired).toBe(true);
   });
 });
