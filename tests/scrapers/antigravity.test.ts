@@ -133,7 +133,25 @@ describe("AntigravityScraper", () => {
       }),
       "utf-8",
     );
-    await writeFile(join(sessionDir, "implementation_plan.md.resolved"), "duplicate", "utf-8");
+    // The duplicate the `.resolved` guard exists to drop, spelled the way it
+    // has to be spelled to reach that guard, and carrying the same project
+    // reference as the plan itself.
+    //
+    // The fixture was `implementation_plan.md.resolved` with the body
+    // "duplicate", and neither part reached the guard: that name has
+    // extension `.resolved`, so the extension check rejects it first, and a
+    // body naming no project path is dropped by attribution anyway. Removing
+    // the guard entirely failed nothing. `plan.resolved.md` is also the real
+    // shape — a copy of the plan with its references expanded.
+    await writeFile(
+      join(sessionDir, "implementation_plan.resolved.md"),
+      [
+        "# Implementation Plan",
+        "",
+        "Modify [src/index.ts](file:///h%3A/projects/private/needs-work/xtctx/src/index.ts).",
+      ].join("\n"),
+      "utf-8",
+    );
 
     const chunks = await collect(new AntigravityScraper(rootDir, stateDir, projectRoot, emptyRuntimeClient()));
 
@@ -587,6 +605,39 @@ describe("shouldFetchTrajectory", () => {
 
   it("fetches everything when the scraper is not scoped to a project", () => {
     expect(shouldFetchTrajectory(summaryFor("file:///somewhere/else"), undefined)).toBe(true);
+  });
+
+  /**
+   * Antigravity has carried the workspace list in two places, and the nested
+   * one was read by code no test reached: replacing the
+   * `trajectoryMetadata.workspaces` fallback with `return []` failed nothing.
+   * If the field moves there for good, attribution stops silently — every
+   * summary reads as "names no workspace", so every session on the machine is
+   * fetched and then attributed by path evidence alone.
+   */
+  describe("the nested workspace list", () => {
+    function nestedSummaryFor(...uris: string[]) {
+      return {
+        trajectoryMetadata: { workspaces: uris.map((uri) => ({ workspaceFolderAbsoluteUri: uri })) },
+      };
+    }
+
+    it("is read when the top-level list is absent", () => {
+      expect(
+        shouldFetchTrajectory(nestedSummaryFor("file:///home/dev/projects/netscli"), projectRoot),
+      ).toBe(false);
+      expect(
+        shouldFetchTrajectory(nestedSummaryFor("file:///home/dev/projects/xtctx"), projectRoot),
+      ).toBe(true);
+    });
+
+    it("does not override a top-level list that is present", () => {
+      const both = {
+        ...summaryFor("file:///home/dev/projects/xtctx"),
+        ...nestedSummaryFor("file:///home/dev/projects/netscli"),
+      };
+      expect(shouldFetchTrajectory(both, projectRoot)).toBe(true);
+    });
   });
 });
 
