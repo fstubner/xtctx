@@ -752,6 +752,24 @@ describe("antigravity drift reporting", () => {
     expect(warnings).toEqual([]);
   });
 
+  /**
+   * A step that is not an object at all — the whole `steps` array arriving as
+   * strings, or as some envelope this reader does not unwrap. Every message in
+   * the session is dropped, and a mutation sweep showed the warning could be
+   * deleted with the suite still green: the drop itself is invisible, since a
+   * session yielding nothing is indistinguishable from an empty one.
+   */
+  it("reports a trajectory step that is not an object", () => {
+    const messages = parseAntigravityRuntimeSteps(
+      "cascade-shape",
+      ["a step as a bare string", null, 7],
+      summary,
+    );
+
+    expect(messages).toEqual([]);
+    expect(warnings.join("\n")).toContain("not an object");
+  });
+
   it("reports a step whose type field has gone missing", () => {
     parseAntigravityRuntimeSteps(
       "cascade-untyped",

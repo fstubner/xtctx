@@ -374,6 +374,51 @@ describe("CursorScraper reading conversations no workspace lists", () => {
     expect((await collect()).map((chunk) => chunk.content)).toEqual(["still read"]);
   });
 
+  /**
+   * `COMPOSER_PATH_FIELDS` is an allowlist of the fields Cursor records a file
+   * *location* under, and the walk deliberately checks nothing else. A foreign
+   * conversation can still carry a path of ours somewhere — a command it ran, a
+   * link it was given, an argument it echoed back — and none of those say the
+   * conversation belongs here.
+   *
+   * Found by mutation: dropping the key check, so any string field counted,
+   * left the whole suite green. Every existing fixture puts the project's path
+   * in a path field and only the project's *name* elsewhere, so nothing
+   * separated "recorded a file here" from "mentioned a path". Without the
+   * allowlist this conversation — whose recorded files are all another
+   * project's — is served as ours.
+   */
+  it("does not attribute one that names a path of ours outside a location field", async () => {
+    const composerId = "orphan-mentioning";
+    const bubbleId = `${composerId}-bubble`;
+    const ourFile = join(projectRoot, "src", "index.ts");
+    const db = new Database(globalDbPath);
+    db.prepare("INSERT OR REPLACE INTO cursorDiskKV (key, value) VALUES (?, ?)").run(
+      `composerData:${composerId}`,
+      JSON.stringify({
+        composerId,
+        name: "about orphan-project",
+        fullConversationHeadersOnly: [{ bubbleId, type: 1 }],
+        createdAt: new Date("2026-02-24T10:00:00Z").getTime(),
+        // The files this conversation actually recorded are someone else's.
+        context: {
+          fileSelections: [{ fsPath: join("H:", "projects", "private", "someone-else", "a.ts") }],
+        },
+        // Ours, but not as a recorded location: an argument the conversation
+        // happened to carry, and a link it was handed.
+        toolCall: { argument: ourFile },
+        reference: { url: `file:///${ourFile.split(sep).join("/")}` },
+      }),
+    );
+    db.prepare("INSERT OR REPLACE INTO cursorDiskKV (key, value) VALUES (?, ?)").run(
+      `bubbleId:${composerId}:${bubbleId}`,
+      JSON.stringify({ type: 1, text: "their turn", createdAt: "2026-02-24T10:00:00Z" }),
+    );
+    db.close();
+
+    expect(await collect()).toEqual([]);
+  });
+
   it("does not read them twice when a workspace already lists one", async () => {
     addOrphan("orphan-mine", join(projectRoot, "src", "index.ts"), "listed once");
 
@@ -541,5 +586,95 @@ describe("CursorScraper when globalStorage cannot be read for orphans", () => {
 
     expect(chunks).toEqual([]);
     expect(warnings.join("\n")).toContain("globalStorage unreadable while looking for unlisted");
+  });
+});
+
+/**
+ * Two shapes that empty a workspace in silence.
+ *
+ * Both are guarded in the reader and neither was pinned: a mutation sweep
+ * deleted each warning in turn and the whole suite stayed green. Cursor's
+ * storage format is not ours, so the drift warning is the only way a rename
+ * becomes visible before someone notices their history has gone missing — and
+ * both of these fail by producing *no chunks*, which looks exactly like a
+ * workspace that was never used.
+ */
+describe("CursorScraper reports workspace shapes it cannot read", () => {
+  let rootDir = "";
+  let stateDir = "";
+  let warnings: string[] = [];
+  let originalWarn: typeof console.warn;
+
+  async function collect(): Promise<CursorChunk[]> {
+    const scraper = new CursorScraper(join(rootDir, "workspaceStorage"), stateDir);
+    const chunks: CursorChunk[] = [];
+    for await (const chunk of scraper.fullSync()) chunks.push(chunk);
+    return chunks;
+  }
+
+  function writeWorkspaceValue(value: unknown): void {
+    const db = new Database(join(rootDir, "workspaceStorage", "wshash", "state.vscdb"));
+    db.prepare("INSERT OR REPLACE INTO ItemTable (key, value) VALUES (?, ?)").run(
+      "composer.composerData",
+      JSON.stringify(value),
+    );
+    db.close();
+  }
+
+  beforeEach(async () => {
+    rootDir = await mkdtemp(join(tmpdir(), "xtctx-cursor-shape-"));
+    stateDir = await mkdtemp(join(tmpdir(), "xtctx-cursor-shape-state-"));
+
+    const wsDir = join(rootDir, "workspaceStorage", "wshash");
+    await mkdir(wsDir, { recursive: true });
+    createWorkspaceDb(join(wsDir, "state.vscdb"), []);
+
+    await mkdir(join(rootDir, "globalStorage"), { recursive: true });
+    const global = new Database(join(rootDir, "globalStorage", "state.vscdb"));
+    global.exec("CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+    global.close();
+
+    warnings = [];
+    originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => warnings.push(args.map(String).join(" "));
+  });
+
+  afterEach(async () => {
+    console.warn = originalWarn;
+    await rm(rootDir, { recursive: true, force: true });
+    await rm(stateDir, { recursive: true, force: true });
+  });
+
+  /**
+   * `allComposers` retyped — an object keyed by id rather than a list, say.
+   * Every conversation in the workspace disappears, and without the warning
+   * nothing distinguishes that from an empty workspace.
+   */
+  it("reports 'allComposers' arriving as something other than an array", async () => {
+    writeWorkspaceValue({ allComposers: { "comp-1": { composerId: "comp-1" } } });
+
+    expect(await collect()).toEqual([]);
+    expect(warnings.join("\n")).toContain("allComposers");
+  });
+
+  /** An empty workspace is normal and must stay quiet, or the warning is noise. */
+  it("stays quiet about a workspace that simply lists no composers", async () => {
+    writeWorkspaceValue({ allComposers: [] });
+
+    expect(await collect()).toEqual([]);
+    expect(warnings).toEqual([]);
+  });
+
+  /**
+   * The workspace names a conversation globalStorage does not hold. That is how
+   * a changed key prefix looks from here — the workspace half still reads, the
+   * message bodies are simply never found — so it is reported rather than
+   * skipped in silence.
+   */
+  it("reports a composer the workspace lists but globalStorage does not hold", async () => {
+    writeWorkspaceValue({ allComposers: [{ composerId: "comp-vanished" }] });
+
+    expect(await collect()).toEqual([]);
+    expect(warnings.join("\n")).toContain("missing from globalStorage");
   });
 });
