@@ -139,6 +139,79 @@ summary, not an exit code, and smoke mutations rebuild `dist/` first, because
 the smoke suite spawns the built CLI and would otherwise test the previous
 build.
 
+### The append-scraper sweep
+
+A third sweep on 2026-09-03 broke 45 load-bearing behaviours across the four
+append-style scrapers — `claude-code.ts`, `codex.ts`, `copilot-cli.ts`,
+`opencode.ts` — one line at a time, concentrating on the places where a defect
+reaches a user silently: project attribution, resume cursors, role mapping,
+message-index stability, timestamp handling, and the drift warnings that fire
+on an unrecognised shape. The existing suite killed 25 and 20 survived. Thirteen
+of those behaviours are now closed, each by a test verified to fail against the
+exact mutation that survived it; the remaining five were left, with reasons.
+
+The survivors clustered in three places, and all three are the same shape: a
+guard that only runs when a transcript says *nothing*.
+
+- **The fail-closed defaults were untested.** Every existing boundary test
+  gives its fixture a `cwd`, a `session.start` context, or a non-null
+  `directory`, and then checks the right decision is made about it. That
+  exercises the comparison and never the default. So `codex` serving a session
+  whose `session_meta` carries no `cwd`, `copilot-cli` treating a
+  `session.start` with no context as a match, and `opencode` admitting a
+  session row whose `directory` is null all passed the whole suite. The
+  opencode case could not have been caught: the existing fixture builder
+  declares `directory TEXT NOT NULL`, so the row the filter exists for was
+  unrepresentable.
+- **Cursors could manufacture a decision nobody made.** `claude-code` writing
+  `projectMatched: true` for a file it had actually refused let the next scan
+  resume with the refusal overturned. This is the same defect
+  `copilot-cli-resume-boundary.test.ts` already records for its scraper; the
+  claude-code path had no equivalent.
+- **A cursor recorded at the file's size rather than the boundary it read to**
+  survived in both `claude-code` and `copilot-cli`. These files are appended to
+  while being read, so the last line frequently has no newline yet;
+  `readJsonlLines` stops short of it on purpose. Recording the size moves the
+  next scan into the middle of that record, and it is never yielded — a
+  permanent loss, one per interrupted append, with no signal.
+
+Left, with reasons rather than tests:
+
+| Survivor | Why it is not a gap |
+|---|---|
+| claude-code prefers `message.role` over the record's `type` | Real transcripts always agree between the two, so the mutation is unobservable on any shape the tool writes. A test would pin a preference, not a behaviour. |
+| codex non-assistant `response_item` consumes an index | Skipped identically on a full and an incremental read, so index parity holds either way. Behaviourally equivalent. |
+| codex drops the `break` on a `session_meta` mismatch | Still sets `projectMatched = false`, so the fail-closed gate refuses every later record and nothing leaks. Dropping the *assignment* instead — the documented bug — is killed. |
+| copilot-cli `session.start` mismatch returns early | The `projectMatch !== true` guard below refuses every record anyway. The only observable difference is a misleading drift message. |
+| opencode missing-`role` guard loses its `continue` | The type check immediately below skips the same record. Removing the guard outright, or both guards, is killed. |
+
+The sweep also turned up one open defect, which is a bug rather than a coverage
+gap and is deliberately not fixed here. **An oversized `codex` line is dropped
+with no drift warning at all, and the code that was meant to warn cannot run.**
+`readJsonlLines` already caps lines at `MAX_LINE_BYTES` and delivers anything
+over it as `line: null`, discarding the bytes; `codex.ts` then `continue`s on
+that branch in silence. The `isWithinLineLimit(line)` check below it — the one
+that calls `isKnownBulkyRecord` so a benign `compacted` restatement is skipped
+quietly while anything else is reported — is unreachable, because a line that
+survived the reader is always within the limit. Measured directly: a 9MB
+`response_item` between two ordinary records yields the ordinary records and
+zero warnings. `claude-code.ts` and `copilot-cli.ts` both warn on the same
+branch, so codex is the only one that goes quiet. Fixing it needs
+`readJsonlLines` to hand back a head sample of a discarded line, since the
+classification requires the record's `type` and the bytes are gone by then —
+a shared-reader change, left for whoever owns that module.
+
+Two lessons about sweeping, both cheap to repeat:
+
+- **An equivalent mutation is not a gap, and telling them apart takes a second
+  mutation.** Five of the twenty survivors were behaviourally equivalent —
+  masked by a guard below, or symmetric across both read paths. Each was
+  settled by sharpening the mutation rather than by writing a test, and one
+  test was only kept because a sharpened mutation proved it was not vacuous.
+- **`npm` on a developer machine may not be npm.** The shim on this one ignores
+  the lockfile pin and resolves the newest version, which is how a sweep can
+  end up scoring mutations against a test runner it never installed.
+
 ## Known and accepted
 
 - **Ranking numbers are the eval's; ranking behaviour is not.** A weight is a
