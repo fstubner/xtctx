@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { existsSync, realpathSync } from "node:fs";
 import { mkdir, readdir, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -22,6 +21,13 @@ import type {
 } from "./types.js";
 import { cosineSimilarity, deserializeVector, serializeVector } from "./vector.js";
 import { NullEmbeddingProvider } from "./null-embeddings.js";
+import {
+  DEFAULT_WINDOW_SIZE,
+  DEFAULT_WINDOW_STRIDE,
+  type MessageRow,
+  hashParts,
+  planRetrievalUnits,
+} from "./retrieval-units.js";
 import {
   type CountRow,
   type PreparedStatements,
@@ -128,15 +134,6 @@ interface SessionRow {
   git_commit: string | null;
 }
 
-interface MessageRow {
-  id: string;
-  timestamp: string;
-  role: SessionMessage["role"];
-  content: string;
-  message_index: number;
-  source_pointer: string | null;
-}
-
 interface VectorUnitRow extends RetrievalUnitRow {
   vector: Buffer;
   dimensions: number;
@@ -212,8 +209,6 @@ const INCREMENTAL_ROLLUP_INTERVAL_MS = 1_000;
 
 /** Poll interval while waiting for the model; see `waitUntilEmbeddingReady`. */
 const EMBEDDING_WARM_POLL_MS = 100;
-const DEFAULT_WINDOW_SIZE = 8;
-const DEFAULT_WINDOW_STRIDE = 4;
 /**
  * Candidate windows fetched per requested session.
  *
@@ -1002,35 +997,7 @@ export class SqliteHandoffIndex implements SessionService {
     // everything: unit ids are deterministic content hashes, so unchanged
     // windows (and, via the FK, their vectors) survive a re-index untouched.
     const now = new Date().toISOString();
-    const desired = new Map<
-      string,
-      {
-        start: MessageRow;
-        end: MessageRow;
-        content: string;
-        searchableText: string;
-        contentHash: string;
-      }
-    >();
-    for (const window of buildMessageWindows(messages, this.windowSize, this.windowStride)) {
-      const content = formatRetrievalUnitContent(sessionRef, window.messages);
-      const searchableText = window.messages.map((message) => message.content).join("\n");
-      const contentHash = hashParts([content]);
-      const unitId = hashParts([
-        "retrieval-unit",
-        sessionRef,
-        String(window.start.message_index),
-        String(window.end.message_index),
-        contentHash,
-      ]);
-      desired.set(unitId, {
-        start: window.start,
-        end: window.end,
-        content,
-        searchableText,
-        contentHash,
-      });
-    }
+    const desired = planRetrievalUnits(sessionRef, messages, this.windowSize, this.windowStride);
 
     const existing = new Set(
       (stmts.selectUnitIds.all(sessionRef) as Array<{ id: string }>).map((row) => row.id),
@@ -1526,53 +1493,6 @@ function formatSessionRow(row: SessionRow): SessionSummary {
   };
 }
 
-function buildMessageWindows(
-  messages: MessageRow[],
-  windowSize: number,
-  windowStride: number,
-): Array<{ start: MessageRow; end: MessageRow; messages: MessageRow[] }> {
-  const windows: Array<{ start: MessageRow; end: MessageRow; messages: MessageRow[] }> = [];
-  for (let start = 0; start < messages.length; start += windowStride) {
-    const slice = messages.slice(start, start + windowSize);
-    if (slice.length === 0) {
-      continue;
-    }
-
-    windows.push({
-      start: slice[0],
-      end: slice[slice.length - 1],
-      messages: slice,
-    });
-
-    if (start + windowSize >= messages.length) {
-      break;
-    }
-  }
-  return windows;
-}
-
-function formatRetrievalUnitContent(sessionRef: string, messages: MessageRow[]): string {
-  const lines = [
-    `Session: ${sessionRef}`,
-    `Chronological window: messages ${messages[0].message_index} through ${
-      messages[messages.length - 1].message_index
-    }`,
-  ];
-
-  for (const [index, message] of messages.entries()) {
-    lines.push(
-      [
-        `Turn ${index + 1}/${messages.length}`,
-        `message_index=${message.message_index}`,
-        `${message.role} @ ${message.timestamp}`,
-      ].join(" | "),
-    );
-    lines.push(message.content);
-  }
-
-  return lines.join("\n");
-}
-
 function normalizeLimit(value: number, fallback: number): number {
   if (!Number.isFinite(value) || value <= 0) {
     return fallback;
@@ -1663,15 +1583,6 @@ function sourcePathFromMetadata(metadata: ConversationChunk["metadata"]): string
 
 function overlapTimestamp(value: Date): Date {
   return new Date(Math.max(0, value.getTime() - SOURCE_CURSOR_OVERLAP_MS));
-}
-
-function hashParts(parts: string[]): string {
-  const hash = createHash("sha256");
-  for (const part of parts) {
-    hash.update(part);
-    hash.update("\0");
-  }
-  return hash.digest("hex");
 }
 
 async function safeDetect(scraper: ConversationScraper): Promise<boolean> {
