@@ -10,12 +10,16 @@
  * Written because a deliberate wrong path for one tool left every existing
  * test green.
  */
-import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { describeDisconnectPlan } from "@xtctx/config/disconnect";
 
-const projectRoot = join("H:", "projects", "app");
-const homeDir = join("C:", "Users", "someone");
+// Absolute on every platform: describeDisconnectPlan resolves the project
+// path, so a Windows-shaped literal lands under the runner's cwd on macOS
+// and Linux and matches nothing. Nothing is written here; these are names.
+const projectRoot = resolve(tmpdir(), "xtctx-planned-paths-app");
+const homeDir = resolve(tmpdir(), "xtctx-planned-paths-home");
 
 describe("planned MCP config paths", () => {
   it("names the same file for every tool as before the table took over", () => {
