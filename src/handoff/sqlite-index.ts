@@ -24,17 +24,23 @@ import {
   type MessageRow,
   planRetrievalUnits,
 } from "./retrieval-units.js";
-import { safeDetect, scanTool, waitWithBudget } from "./scan.js";
+import { scanTool, waitWithBudget } from "./scan.js";
 import {
-  type CountRow,
   type PreparedStatements,
   clearSetting,
-  getSetting,
   openDatabase,
   placeholders,
   prepareStatements,
   setSetting,
 } from "./schema.js";
+import {
+  PROJECT_ROOT_SQL,
+  countWhere,
+  normalizeRootForCompare,
+  retrievalUnitSelect,
+  toFtsQuery,
+} from "./queries.js";
+import { buildIndexProgress, buildStatus } from "./status.js";
 import {
   countUnvectorizedUnits,
   dropVectorsFromOtherModels,
@@ -133,13 +139,6 @@ interface SessionRow {
   git_commit: string | null;
 }
 
-interface ToolCountRow {
-  tool: string;
-  sessions: number;
-  messages: number;
-  last_indexed_at: string | null;
-}
-
 const DEFAULT_LIMIT = 5;
 const MAX_LIMIT = 100;
 
@@ -207,24 +206,6 @@ function embeddingWarmBudgetFromEnv(): number | undefined {
  * Swept against the eval; see the table on `blendScores`.
  */
 const CANDIDATE_WINDOWS_PER_SESSION = 12;
-
-/**
- * SQL that reduces a stored `project_root` to a comparable form, and the JS
- * that does the same to the value compared against it.
- *
- * Raw string equality was too strict, and the way it failed is the dangerous
- * direction: rows silently stop being returned. One directory has several
- * legitimate spellings — `/var/...` and `/private/var/...` for a macOS temp
- * dir, `H:\` and `H:/` separators on Windows, and case differences on both — and
- * rows written under one spelling are read under another whenever the writer
- * canonicalised and the reader did not, or vice versa. Any row written before
- * the root was canonicalised at all would have vanished from every read.
- */
-const PROJECT_ROOT_SQL = `rtrim(replace(lower(project_root), '\\', '/'), '/')`;
-
-function normalizeRootForCompare(value: string): string {
-  return value.replace(/\\/g, "/").replace(/[/]+$/, "").toLowerCase();
-}
 
 /**
  * The project root as the filesystem reports it, so writes and reads agree.
@@ -485,88 +466,15 @@ export class SqliteHandoffIndex implements SessionService {
 
   async getStatus(): Promise<HandoffStatus> {
     await this.refresh({ statusOnly: true });
-    const db = this.getDb();
-    // Scoped like the read paths. Unscoped counts disagreed with what the
-    // retrieval tools return, and a status saying "3 sessions" for a project
-    // whose searches return one is the report that makes a scoping bug look
-    // like a search bug.
-    const scoped = `WHERE session_ref IN (
-      SELECT session_ref FROM sessions WHERE ${PROJECT_ROOT_SQL} = ?
-    )`;
-    const sessionCount = countWhere(
-      db,
-      "sessions",
-      `WHERE ${PROJECT_ROOT_SQL} = ?`,
-      this.scopedRoot,
-    );
-    const messageCount = countWhere(db, "messages", scoped, this.scopedRoot);
-    const retrievalUnitCount = countWhere(db, "retrieval_units", scoped, this.scopedRoot);
-    const vectorizedUnitCount = countWhere(
-      db,
-      "retrieval_unit_vectors",
-      `WHERE unit_id IN (SELECT id FROM retrieval_units ${scoped})`,
-      this.scopedRoot,
-    );
-    const lastScan = getSetting(db, "last_scan_at");
-    // Settings are text; a value written by an older version, or by hand, must
-    // not turn a status report into NaN.
-    const numericSetting = (key: string): number | null => {
-      const raw = getSetting(db, key);
-      if (raw === null) return null;
-      const value = Number(raw);
-      return Number.isFinite(value) ? value : null;
-    };
-    const indexedByTool = new Map(
-      (
-        db
-          .prepare(
-            `SELECT s.tool,
-                    COUNT(DISTINCT s.session_ref) AS sessions,
-                    COUNT(m.id) AS messages,
-                    MAX(m.indexed_at) AS last_indexed_at
-             FROM sessions s
-             LEFT JOIN messages m ON m.session_ref = s.session_ref
-             WHERE ${PROJECT_ROOT_SQL.replace("project_root", "s.project_root")} = ?
-             GROUP BY s.tool`,
-          )
-          .all(this.scopedRoot) as ToolCountRow[]
-      ).map((row) => [row.tool, row]),
-    );
-
-    const tools = await Promise.all(
-      this.tools.map(async ({ tool, scraper }) => {
-        const detected = await safeDetect(scraper);
-        const indexed = indexedByTool.get(tool);
-        return {
-          tool,
-          detected,
-          store_paths: scraper.getStorePaths(),
-          indexed_sessions: indexed?.sessions ?? 0,
-          indexed_messages: indexed?.messages ?? 0,
-          last_indexed_at: indexed?.last_indexed_at ?? null,
-          last_error: getSetting(db, `last_error:${tool}`),
-        };
-      }),
-    );
-
-    return {
-      // The root as given, not `scopedRoot`. That one is lowercased and
-      // separator-folded for comparison; showing it to a person or an agent
-      // would report a path that is not how their project is spelled.
-      project_root: this.projectRoot,
-      db_path: this.dbPath,
-      last_scan_at: lastScan,
-      last_scan_ms: numericSetting("last_scan_ms"),
-      sessions: sessionCount,
-      messages: messageCount,
-      retrieval_units: retrievalUnitCount,
-      vectorized_units: vectorizedUnitCount,
-      vector_ms_per_unit: numericSetting("vector_ms_per_unit"),
-      vector_model: this.embeddingProvider.model,
-      embedding_error: getSetting(db, "last_error:embeddings"),
-      redirected_tools: this.redirectedTools,
-      tools,
-    };
+    return buildStatus({
+      db: this.getDb(),
+      scopedRoot: this.scopedRoot,
+      projectRoot: this.projectRoot,
+      dbPath: this.dbPath,
+      tools: this.tools,
+      redirectedTools: this.redirectedTools,
+      vectorModel: this.embeddingProvider.model,
+    });
   }
 
   async close(): Promise<void> {
@@ -616,17 +524,16 @@ export class SqliteHandoffIndex implements SessionService {
   }
 
   getIndexProgress(): IndexProgress {
-    return {
+    return buildIndexProgress({
       scanning: this.isScanning(),
-      unreadTools: this.tools
-        .map(({ tool }) => tool)
-        .filter((tool) => !this.scannedTools.has(tool)),
+      tools: this.tools,
+      scannedTools: this.scannedTools,
       vectorBacklog: this.countUnvectorizedUnits(),
       // Asked, not remembered. The flag was only ever written by a search, so
       // the scan-time warm left it reading false while the model was loading —
       // and two more tools now publish it.
       embeddingWarming: this.embeddingProvider.isReady?.() === false,
-    };
+    });
   }
 
   private countUnvectorizedUnits(): number {
@@ -658,13 +565,15 @@ export class SqliteHandoffIndex implements SessionService {
     this.reconcileRetrievalUnits();
 
     for (const { scraper } of this.tools) {
-      await scanTool(scraper, {
+      const scanned = await scanTool(scraper, {
         db,
         stmts: this.prepared(),
         scopedRoot: this.scopedRoot,
-        touchedSessions,
-        scannedTools: this.scannedTools,
       });
+      for (const sessionRef of scanned.touchedSessions) {
+        touchedSessions.add(sessionRef);
+      }
+      this.scannedTools.add(scanned.tool);
     }
 
     for (const sessionRef of touchedSessions) {
@@ -1030,37 +939,6 @@ export class SqliteHandoffIndex implements SessionService {
   }
 }
 
-/**
- * How much of a window's text the search paths load.
- *
- * They use it for one thing: a 240-character preview, produced by collapsing
- * whitespace and slicing. Selecting the whole column meant every search read
- * the entire vectorised corpus into memory — 1,770 windows measured at 22.6MB
- * on a modest index, growing linearly, paid on every query, in a process
- * spawned per agent session.
- *
- * Four times the preview so whitespace collapsing cannot leave it short, and
- * still a small fraction of a window, which holds eight messages.
- */
-const PREVIEW_SOURCE_CHARS = 960;
-
-function retrievalUnitSelect(): string {
-  return `SELECT u.id AS unit_id,
-                u.session_ref,
-                u.tool,
-                u.message_start_index,
-                u.message_end_index,
-                u.started_at,
-                u.ended_at,
-                substr(u.content, 1, ${PREVIEW_SOURCE_CHARS}) AS content,
-                u.content_hash,
-                s.started_at AS session_started_at,
-                s.last_activity_at AS session_last_activity_at,
-                s.message_count AS session_message_count,
-                s.preview AS session_preview,
-                s.source_path`;
-}
-
 function formatSessionRow(row: SessionRow): SessionSummary {
   return {
     session_ref: row.session_ref,
@@ -1093,64 +971,3 @@ function normalizeToolFilter(value?: string[]): string[] {
 
   return [...new Set(value.filter((item) => typeof item === "string" && item.length > 0))];
 }
-
-/**
- * Words too common to be evidence of anything.
- *
- * Terms are OR-ed, so one match anywhere returns a session. That made a
- * question about sourdough bread return five results from a corpus about a
- * TypeScript project, because it contains "how", "do" and "make" — and hybrid
- * then presented them beside a similarity of 0.130 as though they were finds.
- * Deliberately short: it holds words that carry no signal in any corpus, not a
- * general English stoplist, because a term like "test" or "index" is exactly
- * what someone searching a transcript means.
- */
-const FTS_STOPWORDS = new Set([
-  "a", "about", "all", "an", "and", "any", "are", "as", "at", "be", "been", "but", "by", "can",
-  "did", "do", "does", "for", "from", "had", "has", "have", "how", "i", "if", "in", "into",
-  "is", "it", "its", "just", "me", "my", "no", "not", "of", "on", "or", "our", "out",
-  "should", "so", "some", "than", "that", "the", "their", "them", "then", "there", "these",
-  "they", "this", "to", "up", "us", "want", "was", "we", "were", "what", "when",
-  "why", "will", "with", "would", "you", "your",
-]);
-
-/**
- * `make`, `get` and `which` were on this list and should not have been. Each is
- * a real search term in a corpus of developer transcripts — a keyword search
- * for `make` returned nothing at all against 1475 windows. A stoplist that
- * swallows the vocabulary of the thing being searched is worse than the noise
- * it removes.
- *
- * The rest stay because they carry no signal as bare words. `so` is on the list
- * and `libfoo.so` still searches fine: the tokenizer keeps dotted and
- * hyphenated terms whole, so only the bare word is dropped.
- */
-
-function toFtsQuery(query: string): string {
-  const terms = query.toLowerCase().match(/[a-z0-9_./:-]{2,}/g) ?? [];
-  const meaningful = terms.filter((term) => !FTS_STOPWORDS.has(term));
-
-  // A query of nothing but common words has nothing to search for. Returning
-  // no results is the honest answer; matching on "how" is not.
-  return meaningful.map((term) => `"${term.replace(/"/g, '""')}"`).join(" OR ");
-}
-
-/**
- * A row count restricted to this project. The `where` clause is built from
- * literals in this module and the value is bound, never interpolated.
- *
- * There is no unscoped variant: the one that existed reported totals that
- * disagreed with what every retrieval path returned.
- */
-function countWhere(
-  db: DatabaseHandle,
-  table: "sessions" | "messages" | "retrieval_units" | "retrieval_unit_vectors",
-  where: string,
-  scopedRoot: string,
-): number {
-  const row = db.prepare(`SELECT COUNT(*) AS count FROM ${table} ${where}`).get(scopedRoot) as
-    | CountRow
-    | undefined;
-  return row?.count ?? 0;
-}
-
