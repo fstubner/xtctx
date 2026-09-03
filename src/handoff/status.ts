@@ -125,6 +125,7 @@ interface ProgressInputs {
   scannedTools: ReadonlySet<string>;
   vectorBacklog: number;
   embeddingWarming: boolean;
+  literalSearchStoppedEarly?: boolean;
 }
 
 export function buildIndexProgress(inputs: ProgressInputs): IndexProgress {
@@ -135,5 +136,8 @@ export function buildIndexProgress(inputs: ProgressInputs): IndexProgress {
       .filter((tool) => !inputs.scannedTools.has(tool)),
     vectorBacklog: inputs.vectorBacklog,
     embeddingWarming: inputs.embeddingWarming,
+    ...(inputs.literalSearchStoppedEarly === undefined
+      ? {}
+      : { literalSearchStoppedEarly: inputs.literalSearchStoppedEarly }),
   };
 }

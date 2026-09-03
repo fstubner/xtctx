@@ -109,8 +109,9 @@ export function buildToolDefinitions(): Tool[] {
           },
           mode: {
             type: "string",
-            enum: ["hybrid", "keyword", "vector"],
-            description: "Retrieval mode. Default: hybrid",
+            enum: ["hybrid", "keyword", "vector", "literal"],
+            description:
+              "Retrieval mode. Default: hybrid. Use literal to match text directly in the transcript stores without the index — slower per query, but it answers before a scan has finished and finds exact strings the index has not reached yet.",
           },
           format: {
             type: "string",

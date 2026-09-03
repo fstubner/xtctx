@@ -25,6 +25,7 @@ import {
   planRetrievalUnits,
 } from "./retrieval-units.js";
 import { scanTool, waitWithBudget } from "./scan.js";
+import { literalSearch } from "./literal-search.js";
 import {
   type PreparedStatements,
   clearSetting,
@@ -70,6 +71,8 @@ interface SqliteHandoffIndexOptions {
   embeddingWarmBudgetMs?: number;
   /** How long one search spends building vectors before answering with what it has. */
   vectorBudgetMs?: number;
+  /** How long a literal pass reads transcript stores before answering. */
+  literalBudgetMs?: number;
   /**
    * Whether opening the index may create it.
    *
@@ -126,6 +129,20 @@ const DEFAULT_REFRESH_BUDGET_MS = 4_000;
  * recall improves call over call until the corpus is covered.
  */
 const DEFAULT_VECTOR_BUDGET_MS = 6_000;
+
+/**
+ * How long a literal pass spends reading transcript stores.
+ *
+ * Its own budget, not the refresh one. `refreshBudgetMs: 0` means "do not
+ * wait for a scan", which is a reasonable thing to ask for and says nothing
+ * about how long a search may take — reusing it made a literal search with
+ * that setting return nothing at all, immediately, and call itself complete.
+ *
+ * Sized as a search a person is waiting on rather than as a scan: this route
+ * exists to answer while the index is still filling, so spending longer than
+ * the scan would defeat it.
+ */
+const DEFAULT_LITERAL_BUDGET_MS = 5_000;
 
 interface SessionRow {
   session_ref: string;
@@ -244,6 +261,12 @@ export class SqliteHandoffIndex implements SessionService {
    */
   private readonly refreshTtlMs = 30_000;
   private readonly refreshBudgetMs: number;
+  private readonly literalBudgetMs: number;
+  /**
+   * Whether the last literal search read everything it was asked to, or
+   * stopped on its limit or budget. Undefined until one has run.
+   */
+  private lastLiteralWasExhaustive: boolean | undefined;
   private readonly embeddingWarmBudgetMs: number;
   private readonly vectorBudgetMs: number;
   private scanStartedMs = 0;
@@ -284,6 +307,7 @@ export class SqliteHandoffIndex implements SessionService {
     this.windowSize = Math.max(2, Math.floor(options.windowSize ?? DEFAULT_WINDOW_SIZE));
     this.windowStride = Math.max(1, Math.floor(options.windowStride ?? DEFAULT_WINDOW_STRIDE));
     this.refreshBudgetMs = Math.max(0, options.refreshBudgetMs ?? DEFAULT_REFRESH_BUDGET_MS);
+    this.literalBudgetMs = Math.max(0, options.literalBudgetMs ?? DEFAULT_LITERAL_BUDGET_MS);
     this.embeddingWarmBudgetMs = Math.max(
       0,
       options.embeddingWarmBudgetMs ??
@@ -426,6 +450,20 @@ export class SqliteHandoffIndex implements SessionService {
     }
 
     const normalizedMode = normalizeSearchMode(mode);
+
+    // Answered without the index, so it deliberately skips the refresh above
+    // having settled and does not touch the database at all.
+    if (normalizedMode === "literal") {
+      const { sessions, exhausted } = await literalSearch(
+        this.tools,
+        trimmed,
+        { limit: normalizeLimit(limit, DEFAULT_LIMIT), budgetMs: this.literalBudgetMs },
+        toolFilter,
+      );
+      this.lastLiteralWasExhaustive = exhausted;
+      return sessions;
+    }
+
     if (normalizedMode === "keyword") {
       return this.keywordSearch(trimmed, limit, toolFilter, branchFilter);
     }
@@ -533,6 +571,9 @@ export class SqliteHandoffIndex implements SessionService {
       // the scan-time warm left it reading false while the model was loading —
       // and two more tools now publish it.
       embeddingWarming: this.embeddingProvider.isReady?.() === false,
+      ...(this.lastLiteralWasExhaustive === undefined
+        ? {}
+        : { literalSearchStoppedEarly: !this.lastLiteralWasExhaustive }),
     });
   }
 
@@ -961,7 +1002,9 @@ function normalizeLimit(value: number, fallback: number): number {
 }
 
 function normalizeSearchMode(value: SessionSearchMode): SessionSearchMode {
-  return value === "keyword" || value === "vector" || value === "hybrid" ? value : "hybrid";
+  return value === "keyword" || value === "vector" || value === "hybrid" || value === "literal"
+    ? value
+    : "hybrid";
 }
 
 function normalizeToolFilter(value?: string[]): string[] {

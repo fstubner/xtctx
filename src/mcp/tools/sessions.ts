@@ -142,7 +142,14 @@ export function createSearchSessionsHandler(service: SessionService) {
  */
 export function indexingPayload(
   service: SessionService,
-): { scanning: boolean; vector_backlog: number; embedding_warming: boolean } | undefined {
+):
+  | {
+      scanning: boolean;
+      vector_backlog: number;
+      embedding_warming: boolean;
+      literal_search_stopped_early?: boolean;
+    }
+  | undefined {
   const progress = service.getIndexProgress?.();
   if (!progress) {
     return undefined;
@@ -151,6 +158,9 @@ export function indexingPayload(
   return {
     scanning: progress.scanning,
     vector_backlog: progress.vectorBacklog,
+    ...(progress.literalSearchStoppedEarly === undefined
+      ? {}
+      : { literal_search_stopped_early: progress.literalSearchStoppedEarly }),
     embedding_warming: progress.embeddingWarming,
   };
 }
@@ -191,9 +201,20 @@ function progressNote(service: SessionService): string {
     notes.push(`${progress.vectorBacklog} windows not yet vectorized`);
   }
 
-  return notes.length > 0
-    ? `\n\n_Indexing in progress (${notes.join("; ")}) — ask again shortly for more._`
+  // Said separately, because it is not about the index. A literal pass that
+  // stopped on its limit or its budget did not read every store, so "nothing
+  // more matched" is not what it found — and unlike the notes above, asking
+  // again on its own changes nothing. Narrowing or raising the limit does.
+  const literalNote = progress.literalSearchStoppedEarly
+    ? "\n\n_The literal pass stopped at its limit or time budget before reading every store, so there may be more matches. Narrow the query or raise `limit`._"
     : "";
+
+  const indexingNote =
+    notes.length > 0
+      ? `\n\n_Indexing in progress (${notes.join("; ")}) — ask again shortly for more._`
+      : "";
+
+  return indexingNote + literalNote;
 }
 
 function formatRecentSessionsMarkdown(
@@ -332,5 +353,7 @@ function numberOrDefault(value: unknown, fallback: number): number {
 }
 
 function normalizeSearchMode(value: unknown): SessionSearchMode {
-  return value === "keyword" || value === "vector" || value === "hybrid" ? value : "hybrid";
+  return value === "keyword" || value === "vector" || value === "hybrid" || value === "literal"
+    ? value
+    : "hybrid";
 }
