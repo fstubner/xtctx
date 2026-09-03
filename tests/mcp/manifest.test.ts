@@ -112,3 +112,112 @@ describe("xtctx_handoff_manifest", () => {
     expect(manifest.missing_session_refs).toEqual(["codex:never-existed"]);
   });
 });
+
+/** Records what the handler actually asked the index for. */
+class FilterRecordingService extends LimitHonoringService {
+  lastToolFilter: string[] | undefined = undefined;
+  called = false;
+
+  constructor() {
+    super([]);
+  }
+
+  override async listRecentSessions(
+    _limit: number,
+    toolFilter?: string[],
+  ): Promise<SessionSummary[]> {
+    this.called = true;
+    this.lastToolFilter = toolFilter;
+    return [];
+  }
+}
+
+/**
+ * The manifest takes the same filters as the session tools, and once carried
+ * no validation for them at all.
+ *
+ * A bare `tool_filter: "codex"` — a string where an array belongs — normalized
+ * to an empty list further down, and an empty list means *no filter*. So an
+ * orchestrator asking for one tool's sessions was handed every tool's, with
+ * nothing in the response to say the filter had been dropped. Widening is the
+ * wrong direction to fail in: they asked for less and got more.
+ *
+ * `sessions.ts` already pins this for the session tools. It stayed green while
+ * this handler passed the same bare string straight through, which is exactly
+ * how the gap opened the first time.
+ */
+describe("manifest filter arguments that are not arrays of strings", () => {
+  it.each([
+    ["a bare string", "codex"],
+    ["a number", 3],
+    ["an object", { tool: "codex" }],
+    ["an array holding a non-string", [{}]],
+    ["an array holding an empty string", [""]],
+  ])("rejects %s rather than returning every tool", async (_label, value) => {
+    const service = new FilterRecordingService();
+    const handler = createHandoffManifestHandler(service);
+
+    await expect(handler({ tool_filter: value } as Record<string, unknown>)).rejects.toThrow(
+      /tool_filter/,
+    );
+    // And it never reached the index to be quietly widened.
+    expect(service.called).toBe(false);
+  });
+
+  it("rejects a bad branch_filter too", async () => {
+    const service = new FilterRecordingService();
+
+    await expect(
+      createHandoffManifestHandler(service)({ branch_filter: "main" }),
+    ).rejects.toThrow(/branch_filter/);
+  });
+
+  it("passes a valid filter through unchanged", async () => {
+    const service = new FilterRecordingService();
+
+    await createHandoffManifestHandler(service)({ tool_filter: ["codex"] });
+
+    expect(service.lastToolFilter).toEqual(["codex"]);
+  });
+});
+
+/** Reports a scan still in flight, the way the real service does mid-index. */
+class StillIndexingService extends LimitHonoringService {
+  constructor() {
+    super([summary("codex:only-one", "2026-05-01T10:00:00.000Z")]);
+  }
+
+  getIndexProgress() {
+    return { scanning: true, vectorBacklog: 42, embeddingWarming: false, unreadTools: [] };
+  }
+}
+
+/**
+ * The manifest is the surface an external orchestrator reads instead of the
+ * markdown one, so it has no prose note to fall back on: `freshness.indexing`
+ * is the only thing that can tell it the session set is still filling.
+ *
+ * Reporting `null` there while a scan is running presents a partial index as
+ * the whole history — the orchestrator concludes the sessions it did not get
+ * do not exist, and stops asking. That is the failure mode this whole layer
+ * exists to avoid, and it is invisible to a test that only counts sessions.
+ */
+describe("manifest freshness while the index is still filling", () => {
+  it("reports indexing progress rather than claiming the set is complete", async () => {
+    const manifest = (await createHandoffManifestHandler(new StillIndexingService())({})) as {
+      freshness: { indexing: { scanning: boolean; vector_backlog: number } | null };
+    };
+
+    expect(manifest.freshness.indexing).not.toBeNull();
+    expect(manifest.freshness.indexing?.scanning).toBe(true);
+    expect(manifest.freshness.indexing?.vector_backlog).toBe(42);
+  });
+
+  it("still reports null when the service tracks no progress at all", async () => {
+    const manifest = (await createHandoffManifestHandler(new LimitHonoringService([]))({})) as {
+      freshness: { indexing: unknown };
+    };
+
+    expect(manifest.freshness.indexing).toBeNull();
+  });
+});
