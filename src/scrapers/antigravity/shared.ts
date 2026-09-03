@@ -47,11 +47,13 @@ export interface AntigravityRuntimeConversation {
 /**
  * What a runtime listing came back with, and whether it is the whole picture.
  *
- * A bare array means "this is everything" — the shape every existing caller and
- * test stub already returns. `degradation` is set when the language server was
- * there but could not be fully read: the transcripts exist, this scan just did
- * not get them. That difference decides whether the reader may advance its
- * incremental cursor, so it cannot be flattened into an empty array.
+ * `degradation` unset means "this is everything". It is set when the language
+ * server was there but could not be fully read: the transcripts exist, this
+ * scan just did not get them. That difference decides whether the reader may
+ * advance its incremental cursor, so it cannot be flattened into an empty
+ * array — which is why this is the only shape a client may return. A listing
+ * that could also be a bare array leaves every caller to re-derive "complete
+ * or not" from the type it happened to get.
  */
 export interface AntigravityRuntimeListing {
   conversations: AntigravityRuntimeConversation[];
@@ -60,8 +62,6 @@ export interface AntigravityRuntimeListing {
 }
 
 export interface AntigravityRuntimeClient {
-  listConversations(
-    conversationsDir: string,
-  ): Promise<AntigravityRuntimeConversation[] | AntigravityRuntimeListing>;
+  listConversations(conversationsDir: string): Promise<AntigravityRuntimeListing>;
 }
 

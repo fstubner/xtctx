@@ -379,7 +379,7 @@ describe("Golden snapshots", () => {
       tempDir,
       stateDir,
       join("H:", "projects", "private", "needs-work", "xtctx"),
-      { async listConversations() { return []; } },
+      { async listConversations() { return { conversations: [] }; } },
     );
     const chunks = await collectChunks(scraper);
     await assertSnapshot("antigravity", normalise(chunks));
