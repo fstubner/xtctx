@@ -26,12 +26,12 @@ export type SkillSyncMode =
   | "managed-block"
   | "unsupported";
 
-export interface ToolSkillCapability {
+interface ToolSkillCapability {
   mode: SkillSyncMode;
   targetPath?: (projectRoot: string, skillId: string) => string;
 }
 
-export interface ToolSourceDefinition {
+interface ToolSourceDefinition {
   id: ToolId;
   label: string;
   defaultStorePath: () => string;
@@ -168,11 +168,13 @@ export function getToolDefinition(toolId: string): ToolSourceDefinition | undefi
   return SUPPORTED_TOOLS.find((tool) => tool.id === toolId);
 }
 
+/** @internal Exported for tests only. */
 export function defaultClaudeProjectsDir(): string {
   const home = process.env.USERPROFILE ?? process.env.HOME ?? "";
   return join(home, ".claude", "projects");
 }
 
+/** @internal Exported for tests only. */
 export function defaultCursorStorePath(): string {
   const appData = process.env.APPDATA;
   if (appData) {
@@ -183,11 +185,13 @@ export function defaultCursorStorePath(): string {
   return join(home, ".cursor", "workspaceStorage");
 }
 
+/** @internal Exported for tests only. */
 export function defaultCodexSessionsPath(): string {
   const home = process.env.USERPROFILE ?? process.env.HOME ?? "";
   return join(home, ".codex", "sessions");
 }
 
+/** @internal Exported for tests only. */
 export function defaultCopilotHistoryPath(): string {
   const home = process.env.USERPROFILE ?? process.env.HOME ?? "";
 
@@ -203,6 +207,7 @@ export function defaultCopilotHistoryPath(): string {
   return join(home, "Library", "Application Support", "Code", "User", "workspaceStorage");
 }
 
+/** @internal Exported for tests only. */
 export function defaultAntigravityStorePath(): string {
   const home = process.env.USERPROFILE ?? process.env.HOME ?? "";
   return join(home, ".gemini", "antigravity");
@@ -218,6 +223,7 @@ export function defaultAntigravityStorePath(): string {
  * So the conventional location is preferred but not assumed: whichever
  * candidate actually exists wins, and the conventional one is the fallback so
  * status still names the path a user would expect.
+ * @internal Exported for tests only.
  */
 export function defaultOpenCodeStorePath(): string {
   const home = process.env.USERPROFILE ?? process.env.HOME ?? "";
@@ -243,6 +249,7 @@ export function defaultOpenCodeStorePath(): string {
   return conventional;
 }
 
+/** @internal Exported for tests only. */
 export function defaultCopilotCliSessionPath(): string {
   const home = process.env.USERPROFILE ?? process.env.HOME ?? "";
   return join(home, ".copilot", "session-state");

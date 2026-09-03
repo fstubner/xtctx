@@ -190,6 +190,7 @@ export class AntigravityLanguageServerClient implements AntigravityRuntimeClient
  *
  * One failed fetch must not lose the rest of the scan, so a rejection becomes
  * a null for that item rather than taking the whole batch down.
+ * @internal Exported for tests only.
  */
 export async function mapWithConcurrency<T, R>(
   items: T[],
@@ -242,6 +243,7 @@ interface AntigravityDiscovery {
  * Split out because this one branch is the whole distinction, and getting it
  * wrong is silent by construction: the first version of this fix only checked
  * the fetches and left discovery reading a slow server as a closed one.
+ * @internal Exported for tests only.
  */
 export function describeUnreachableServer(processesFound: number): string | undefined {
   return processesFound === 0
@@ -413,6 +415,7 @@ async function findListeningPorts(pid: number): Promise<number[]> {
  * `endsWith` treats PID 2140 as a match for PID 140, which would attribute
  * an unrelated process's port to the language server — and the CSRF token
  * is POSTed to whatever answers there. The column is compared exactly.
+ * @internal Exported for tests only.
  */
 export function parseWindowsListeningPorts(netstatOutput: string, pid: number): number[] {
   return netstatOutput
@@ -427,7 +430,10 @@ export function parseWindowsListeningPorts(netstatOutput: string, pid: number): 
     .filter((value) => Number.isFinite(value));
 }
 
-/** Extract listening ports from `lsof -Pan -p <pid> -iTCP -sTCP:LISTEN`. */
+/**
+ * Extract listening ports from `lsof -Pan -p <pid> -iTCP -sTCP:LISTEN`.
+ * @internal Exported for tests only.
+ */
 export function parsePosixListeningPorts(lsofOutput: string): number[] {
   return lsofOutput
     .split(/\r?\n/)

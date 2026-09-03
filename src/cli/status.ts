@@ -9,7 +9,7 @@ import { readDriftLog, type DriftLogFile } from "../scrapers/drift-log.js";
 import { SUPPORTED_TOOLS } from "../tools/sources.js";
 import { readXtctxPackage } from "../utils/package-info.js";
 
-export interface StatusOptions {
+interface StatusOptions {
   projectPath?: string;
 }
 
@@ -37,7 +37,7 @@ export async function runStatus(options: StatusOptions = {}): Promise<void> {
   }
 }
 
-export interface StatusRenderOptions {
+interface StatusRenderOptions {
   /**
    * Home directory to resolve global MCP configs against. Production uses the
    * real one; tests that configure a sandbox home must inspect that same home,
@@ -46,6 +46,7 @@ export interface StatusRenderOptions {
   homeDir?: string;
 }
 
+/** @internal Exported for tests only. */
 export async function renderStatusBlock(
   services: ProjectServices,
   options: StatusRenderOptions = {},
@@ -278,6 +279,7 @@ function managedTargets(projectRoot: string): Array<{ label: string; path: strin
  *
  * Nothing is rewritten here — a config file is the user's. But the stale case
  * is named, with the path that does exist and how to adopt it.
+ * @internal Exported for tests only.
  */
 export function storePathNotes(
   definition: (typeof SUPPORTED_TOOLS)[number] | undefined,

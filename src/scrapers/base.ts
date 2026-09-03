@@ -203,7 +203,7 @@ export function resumeOffset(
 }
 
 /** Most leading bytes fingerprinted to tell an append from a rewrite. */
-export const FILE_HEAD_HASH_BYTES = 1024;
+const FILE_HEAD_HASH_BYTES = 1024;
 
 /**
  * Hash the leading bytes of a file, or null when it cannot be read.

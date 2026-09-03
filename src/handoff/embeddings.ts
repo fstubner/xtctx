@@ -41,7 +41,7 @@ export const DEFAULT_EMBEDDING_MODEL = "Xenova/all-MiniLM-L6-v2";
  * little and costs accuracy. The q8 tradeoff only mattered for mpnet, where
  * fp32 was 416MB.
  */
-export const DEFAULT_EMBEDDING_DTYPE = "fp32";
+const DEFAULT_EMBEDDING_DTYPE = "fp32";
 const MAX_SEQ_TOKENS = 256;
 /** ~4 characters per token, the budget splitTextForEmbedding segments to. */
 const MAX_SEQ_CHARS = MAX_SEQ_TOKENS * 4;
@@ -194,6 +194,7 @@ function toFloat32Array(data: Float32Array | Float64Array | number[]): Float32Ar
  * is a cap on cost, not the main lever: segment *count* was never the
  * dominant term, segment *cost* is (~360ms each on mpnet against ~116ms on
  * MiniLM), so this trims the tail rather than solving the total.
+ * @internal Exported for tests only.
  */
 export const MAX_SEGMENTS_PER_UNIT = 16;
 

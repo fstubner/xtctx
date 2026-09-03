@@ -30,6 +30,7 @@ import { decodeFileUrl, extractReferencedFiles, toStringArray, toStringValue } f
  * is transient UI; `ERROR_MESSAGE` and `GENERIC` are the two largest by far
  * and are mostly retry and status noise. Extracting any of them would add
  * volume without adding much a later session could act on.
+ * @internal Exported for tests only.
  */
 export const KNOWN_UNHANDLED_STEP_TYPES = new Set([
   "CORTEX_STEP_TYPE_CHECKPOINT",
@@ -50,6 +51,7 @@ export const KNOWN_UNHANDLED_STEP_TYPES = new Set([
  * this set is what the drift report means by "known": a type handled there but
  * missing here would be reported as drift on every scan, and one listed here
  * but silently dropped there would never be reported at all.
+ * @internal Exported for tests only.
  */
 export const HANDLED_STEP_TYPES = new Set([
   "CORTEX_STEP_TYPE_USER_INPUT",

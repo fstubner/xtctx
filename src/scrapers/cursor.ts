@@ -591,7 +591,7 @@ const COMPOSER_PATH_DEPTH = 6;
  * Fails closed: a conversation with no recorded location is not attributed to
  * anything, matching the project boundary the other readers hold to.
  */
-export function composerMentionsProject(composer: unknown, projectRoot: string): boolean {
+function composerMentionsProject(composer: unknown, projectRoot: string): boolean {
   return walkForProjectPath(composer, projectRoot, 0);
 }
 
@@ -631,7 +631,7 @@ function decodeFileUri(value: string): string {
  * at a single workspace directory inside it, which is what the tests do and
  * what a `storePath` override may do. Both resolve to the same sibling.
  */
-export function globalStoragePathForStore(storePath: string): string | null {
+function globalStoragePathForStore(storePath: string): string | null {
   const normalized = storePath.replace(/\\/g, "/").replace(/\/+$/, "");
   const index = normalized.lastIndexOf("/workspaceStorage");
   if (index === -1) return null;

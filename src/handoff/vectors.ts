@@ -80,7 +80,7 @@ export function countUnvectorizedUnits(db: DatabaseHandle, model: string): numbe
   return row?.count ?? 0;
 }
 
-export interface EnsureVectorsOptions {
+interface EnsureVectorsOptions {
   db: DatabaseHandle;
   embeddingProvider: EmbeddingProvider;
   /** Tool names to restrict the pass to; already normalized, empty for all. */

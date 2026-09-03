@@ -7,7 +7,7 @@ import { SUPPORTED_TOOLS, type SkillSyncMode, type ToolId } from "../tools/sourc
 
 export const BUILT_IN_SKILL_ID = "xtctx-handoff";
 
-export interface DiscoveredSkill {
+interface DiscoveredSkill {
   id: string;
   name: string;
   description: string;
@@ -23,7 +23,7 @@ export interface SkillSelection {
   path: string;
 }
 
-export interface SkillTargetState {
+interface SkillTargetState {
   mode: SkillSyncMode;
   path?: string;
 }
@@ -34,14 +34,14 @@ export interface ProjectSkillConfig {
   targets: Record<string, SkillTargetState>;
 }
 
-export interface SkillSyncResult {
+interface SkillSyncResult {
   config: ProjectSkillConfig;
   selected: SkillSelection[];
   writes: Array<{ path: string; kind: string; changed: boolean }>;
   warnings: string[];
 }
 
-export interface SkillStatus {
+interface SkillStatus {
   sourceDir: string;
   selected: Array<{ id: string; exists: boolean; hash?: string }>;
   targets: Array<{
@@ -481,6 +481,7 @@ async function listCanonicalSkillIds(sourceDir: string): Promise<string[]> {
  * Exported because the plugin package under `plugin/` ships the same skill as
  * a committed file, and a plugin whose skill has drifted from the one setup
  * writes would tell two agents different things about the same tool.
+ * @internal Reached only by tests and `scripts/sync-plugin-skill.mjs`.
  */
 export function builtInHandoffSkill(): string {
   return [

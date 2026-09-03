@@ -1,6 +1,6 @@
 import { createProjectServices } from "../runtime/services.js";
 
-export interface ScanOptions {
+interface ScanOptions {
   projectPath?: string;
 }
 

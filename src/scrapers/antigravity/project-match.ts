@@ -136,6 +136,7 @@ export function runtimeConversationMatchesProject(
  * same-named projects in one user's own playground would still collide — that
  * case is genuinely ambiguous from a path alone, and it is a far narrower
  * claim than "anywhere on the machine".
+ * @internal Exported for tests only.
  */
 export function textMentionsProject(
   value: string,

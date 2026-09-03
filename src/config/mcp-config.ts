@@ -21,17 +21,10 @@ import {
 // which tools are supported and how they are rendered lives in
 // `mcp-renderers.ts`, the wire formats in `config-file-format.ts`, and this
 // file owns reading, merging and writing an entry into a config on disk.
-export {
-  NATIVE_MCP_TOOLS,
-  hasNativeMcpSupport,
-  isGlobalOnlyMcpTool,
-  resolveConfigTarget,
-  type McpRenderer,
-  type McpServerDefinition,
-} from "./mcp-renderers.js";
+export { NATIVE_MCP_TOOLS, isGlobalOnlyMcpTool, resolveConfigTarget } from "./mcp-renderers.js";
 export { tomlHasComments } from "./config-file-format.js";
 
-export interface McpSyncResult {
+interface McpSyncResult {
   tool: string;
   path: string;
   scope: "project" | "global";
@@ -43,12 +36,12 @@ export interface McpSyncResult {
   failed?: boolean;
 }
 
-export interface McpSyncSummary {
+interface McpSyncSummary {
   results: McpSyncResult[];
   servers_loaded: number;
 }
 
-export interface McpRemoveResult {
+interface McpRemoveResult {
   tool: string;
   path: string;
   scope: "project" | "global";
@@ -57,11 +50,11 @@ export interface McpRemoveResult {
   warning?: string;
 }
 
-export interface McpRemoveSummary {
+interface McpRemoveSummary {
   results: McpRemoveResult[];
 }
 
-export interface McpWiringState {
+interface McpWiringState {
   tool: string;
   path: string;
   scope: "project" | "global";

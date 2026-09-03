@@ -3,7 +3,7 @@ import { createReadStream } from "node:fs";
 import { MAX_LINE_BYTES } from "./limits.js";
 
 /** One line of a JSONL file, with the byte position just past its newline. */
-export interface JsonlLine {
+interface JsonlLine {
   /** Line text, or null when it exceeded the cap and was discarded unread. */
   line: string | null;
   /**
@@ -18,7 +18,7 @@ export interface JsonlLine {
   oversized: boolean;
 }
 
-export interface ReadJsonlOptions {
+interface ReadJsonlOptions {
   /** Byte offset to resume from. Must be a boundary this reader reported. */
   start?: number;
   maxLineBytes?: number;

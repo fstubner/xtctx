@@ -86,7 +86,7 @@ export async function removeIfPresent(path: string): Promise<boolean> {
 }
 
 /** Strictly below the project root — the root itself is never a candidate. */
-export function isInsideProject(candidate: string, projectRoot: string): boolean {
+function isInsideProject(candidate: string, projectRoot: string): boolean {
   const relative = relativePath(projectRoot, candidate);
   return relative.length > 0 && !relative.startsWith("..") && !isAbsolute(relative);
 }

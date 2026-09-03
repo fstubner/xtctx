@@ -7,7 +7,7 @@ import {
   printDisconnectResult,
 } from "../config/disconnect.js";
 
-export interface DisconnectCliOptions {
+interface DisconnectCliOptions {
   projectPath?: string;
   tool?: string;
   all?: boolean;

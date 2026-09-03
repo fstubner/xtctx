@@ -31,7 +31,7 @@ const TOOL_ALIASES: Record<string, ToolId> = {
   "github-copilot-cli": "copilot-cli",
 };
 
-export interface DisconnectOptions {
+interface DisconnectOptions {
   projectPath?: string;
   tool?: string;
   all?: boolean;
@@ -58,7 +58,7 @@ const GLOBAL_MCP_LEFT_IN_PLACE =
   "so their xtctx entries were left in place. Run `xtctx disconnect --all --global-mcp` " +
   "to remove xtctx from those clients too.";
 
-export interface DisconnectResult {
+interface DisconnectResult {
   projectRoot: string;
   tools: ToolId[];
   /**
@@ -78,7 +78,7 @@ export interface DisconnectResult {
   warnings: string[];
 }
 
-export interface PlannedDisconnectWrite {
+interface PlannedDisconnectWrite {
   path: string;
   kind: string;
   note?: string;

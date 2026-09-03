@@ -32,7 +32,7 @@ export interface CountRow {
 // still compare equal — but not where `realpath` differs, and there the rows
 // go quiet rather than wrong. The scraper cursors would not re-add them, so
 // the rebuild has to be forced rather than waited for.
-export const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 3;
 
 export function openDatabase(dbPath: string): DatabaseHandle {
   const db = new Database(dbPath);

@@ -23,7 +23,7 @@ const { version: SERVER_VERSION } = readXtctxPackage(import.meta.url);
 type ToolParams = Record<string, unknown>;
 type ToolHandler = (params: ToolParams) => Promise<unknown>;
 
-export interface McpToolDependencies {
+interface McpToolDependencies {
   sessions?: SessionService;
   /**
    * Set when this directory has no `.xtctx/config.yaml` — nobody opted it in.
@@ -39,6 +39,7 @@ export interface McpToolDependencies {
   unconfiguredProjectRoot?: string;
 }
 
+/** @internal Exported for tests only. */
 export function buildToolDefinitions(): Tool[] {
   return [
     {
@@ -173,6 +174,7 @@ export function buildToolDefinitions(): Tool[] {
   ];
 }
 
+/** @internal Exported for tests only. */
 export function createToolHandlers(
   dependencies: McpToolDependencies = {},
 ): Map<string, ToolHandler> {
@@ -204,7 +206,7 @@ export function createToolHandlers(
   return handlers;
 }
 
-export function createMcpServer(dependencies: McpToolDependencies = {}): Server {
+function createMcpServer(dependencies: McpToolDependencies = {}): Server {
   const server = new Server(
     { name: "xtctx", version: SERVER_VERSION },
     { capabilities: { tools: {} } },

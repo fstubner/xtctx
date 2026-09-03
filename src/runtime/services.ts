@@ -5,7 +5,7 @@ import { SqliteHandoffIndex } from "../handoff/sqlite-index.js";
 import type { SessionService } from "../handoff/types.js";
 import { createDefaultScrapers } from "../tools/sources.js";
 
-export interface ProjectConfig {
+interface ProjectConfig {
   tools: Record<string, { enabled?: boolean; storePath?: string }>;
   /**
    * Whether `.xtctx/config.yaml` exists — whether anyone opted this directory
@@ -58,7 +58,7 @@ async function canonicalProjectRoot(projectPath: string): Promise<string> {
   }
 }
 
-export interface ProjectServicesOptions {
+interface ProjectServicesOptions {
   /** Diagnostics pass false so inspecting a project does not create one. */
   createIfMissing?: boolean;
   /**
@@ -132,7 +132,7 @@ export async function createProjectServices(
   };
 }
 
-export async function loadProjectConfig(configPath: string): Promise<ProjectConfig> {
+async function loadProjectConfig(configPath: string): Promise<ProjectConfig> {
   let raw: string;
   try {
     raw = await readFile(configPath, "utf-8");

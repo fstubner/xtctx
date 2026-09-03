@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { mkdir, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
-export interface WriteFileAtomicOptions {
+interface WriteFileAtomicOptions {
   /**
    * Directory the write must stay inside, after symlinks are resolved.
    *

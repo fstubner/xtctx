@@ -38,7 +38,7 @@ export function stripMarkers(value: string): string {
   return value.split(MARKERS.begin).join("").split(MARKERS.end).join("");
 }
 
-export function escapeRegExp(value: string): string {
+function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
@@ -92,7 +92,7 @@ export function removeManagedBlocks(content: string): string {
  * True when the file is predominantly CRLF, so writers can put it back the
  * way the author had it instead of silently reformatting the whole file.
  */
-export function isCrlfDominant(content: string): boolean {
+function isCrlfDominant(content: string): boolean {
   const crlf = content.match(/\r\n/g)?.length ?? 0;
   const lf = content.match(/\n/g)?.length ?? 0;
   return crlf > 0 && crlf * 2 > lf;
