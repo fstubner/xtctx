@@ -1,6 +1,6 @@
 import type { Database as DatabaseHandle } from "better-sqlite3";
 import type { ConversationChunk, ConversationScraper } from "../types/scraper.js";
-import { hashParts } from "./retrieval-units.js";
+import { hashParts } from "./hash.js";
 import { type PreparedStatements, clearSetting, setSetting } from "./schema.js";
 
 /**

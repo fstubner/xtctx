@@ -15,7 +15,7 @@
  * asserting the script's shape, because what failed was the *lifecycle wiring*
  * — a correct script nothing invokes is the same defect.
  */
-import { execFileSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import { cpSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -74,10 +74,14 @@ describe("version bump keeps every manifest in step", () => {
 
     // `--no-git-tag-version` is what the release workflow uses: there is no
     // git repo here to tag, and the workflow commits the result itself.
-    execFileSync("npm", ["version", "patch", "--no-git-tag-version"], {
+    // One fixed command string rather than a program plus an args array.
+    // `npm` is a shim on Windows — `.cmd` on a plain install, `.exe` under a
+    // version manager — so naming the program means guessing its extension,
+    // and `shell: true` alongside an args array is deprecated (DEP0190).
+    // Nothing here is interpolated, so a shell has nothing to reinterpret.
+    execSync("npm version patch --no-git-tag-version", {
       cwd: dir,
       stdio: "pipe",
-      shell: process.platform === "win32",
     });
 
     const versions = versionsIn(dir);
