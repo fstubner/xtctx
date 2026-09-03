@@ -74,6 +74,50 @@ The three "gap" rows were the dangerous ones. The resume-cursor overlap in
 particular loses messages silently: the cursor lands on the newest timestamp
 read, and any message sharing that timestamp is never yielded again.
 
+### The config and MCP sweep
+
+A second sweep on 2026-09-03 broke 33 load-bearing behaviours across
+`src/config/**` and `src/mcp/**`, one line at a time. Twenty-six were killed by
+the unit suite, two more only by smoke, and five survived everything. Those
+five are now closed, each by a test verified to fail against the exact mutation
+that survived it:
+
+| Mutation | Killed by | Outcome |
+|---|---|---|
+| project root rendered without `stripMarkers` | **nothing** | gap — now unit |
+| disconnect strips permissions by `mcp__` prefix | **nothing** | gap — now unit |
+| manifest filters passed through unvalidated | **nothing** | gap — now unit |
+| manifest reports `indexing: null` while scanning | **nothing** | gap — now unit |
+| unparsable MCP config reported as wired | **nothing** | gap — now unit |
+| not-configured notice reaches only the first tool | smoke | smoke-only, correct |
+| not-configured notice reads as an empty project | smoke | smoke-only, correct |
+
+Two patterns are worth naming, because both are the same mistake:
+
+- **A guard existing is not a guard being called.** `stripMarkers` had four
+  tests of its own, all green, while the renderer interpolated the project path
+  raw beside them. A path containing the end marker — legal on POSIX — closes
+  the block early, so disconnect leaves the block's tail and a stale marker
+  behind in the user's committed `CLAUDE.md`, and every later run compounds it.
+  Testing the helper is not testing the call site.
+- **A fix applied on one surface is not applied on the other.** The manifest
+  handler renders the same session fields and takes the same filters as the
+  session tools. `validatedFilter`'s own comment records that this handler had
+  already once passed a bare string through to the silent widening it exists to
+  prevent — and it had no test, so it could do it again.
+
+The two smoke-only rows are the split working as intended rather than a gap:
+whether an unconfigured directory is *named* as unconfigured is wiring, and
+wiring is what the smoke suite spawns a real server to check.
+
+The sweep also produced a lesson about sweeping. A first pass recorded a whole
+batch as "killed" on nonzero exit codes while `node_modules` had been destroyed
+and vitest was not running at all — the mutation harness was failing open in
+precisely the way the mutations look for. A verdict now requires a parsed test
+summary, not an exit code, and smoke mutations rebuild `dist/` first, because
+the smoke suite spawns the built CLI and would otherwise test the previous
+build.
+
 ## Known and accepted
 
 - **Ranking numbers are the eval's; ranking behaviour is not.** A weight is a
