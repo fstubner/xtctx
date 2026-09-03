@@ -19,7 +19,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { CursorScraper } from "@xtctx/scrapers/cursor";
-import { textMentionsProject } from "@xtctx/scrapers/antigravity";
+import { textMentionsProject } from "@xtctx/scrapers/antigravity/project-match";
 
 describe("cursor storePath pointing at a database file is still scoped", () => {
   let dir = "";

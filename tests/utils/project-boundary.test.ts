@@ -14,7 +14,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { pathMatchesProject } from "@xtctx/utils/project-scope";
-import { textMentionsProject } from "@xtctx/scrapers/antigravity";
+import { textMentionsProject } from "@xtctx/scrapers/antigravity/project-match";
 
 describe("pathMatchesProject traversal", () => {
   it("does not match a sibling project reached through ..", () => {
