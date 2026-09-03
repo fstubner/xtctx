@@ -34,7 +34,7 @@ const MAX_SURPRISE_LENGTH = 300;
  */
 const MAX_SURPRISES = 50;
 
-export interface DriftSurprise {
+interface DriftSurprise {
   surprise: string;
   firstLocation: string;
   firstSeen: string;

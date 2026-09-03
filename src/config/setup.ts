@@ -20,7 +20,7 @@ export { CLAUDE_HOOK_MARKER, CLAUDE_TOOL_PERMISSIONS } from "./claude-settings.j
 export { publishedServerDefinition, xtctxServerDefinition } from "./server-definition.js";
 export { pathExists } from "./file-io.js";
 
-export interface SetupOptions {
+interface SetupOptions {
   projectPath?: string;
   yes?: boolean;
   repair?: boolean;
@@ -29,7 +29,7 @@ export interface SetupOptions {
   includeGlobalMcp?: boolean;
 }
 
-export interface SetupResult {
+interface SetupResult {
   projectRoot: string;
   configPath: string;
   writes: Array<{ path: string; kind: string; changed: boolean }>;
@@ -38,7 +38,7 @@ export interface SetupResult {
   failures: string[];
 }
 
-export interface PlannedSetupWrite {
+interface PlannedSetupWrite {
   path: string;
   kind: string;
 }

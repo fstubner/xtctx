@@ -12,12 +12,12 @@ interface ToolCountRow {
   last_indexed_at: string | null;
 }
 
-export interface StatusToolRuntime {
+interface StatusToolRuntime {
   tool: string;
   scraper: ConversationScraper;
 }
 
-export interface StatusInputs {
+interface StatusInputs {
   db: DatabaseHandle;
   /** Canonical and normalized; see `canonicalRoot` in sqlite-index. */
   scopedRoot: string;
@@ -118,7 +118,7 @@ export async function buildStatus(inputs: StatusInputs): Promise<HandoffStatus> 
   };
 }
 
-export interface ProgressInputs {
+interface ProgressInputs {
   scanning: boolean;
   tools: Array<{ tool: string }>;
   /** Tools read at least once this process; see `scannedTools` on the index. */

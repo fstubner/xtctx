@@ -6,7 +6,7 @@ import { writeFileAtomic } from "../utils/atomic-file.js";
 import { inlineSafe } from "../utils/untrusted-text.js";
 import { pathMatchesProject } from "../utils/project-scope.js";
 
-export interface HookOptions {
+interface HookOptions {
   projectPath?: string;
   tool?: string;
   event?: string;
@@ -264,7 +264,7 @@ function readStdinWithin(timeoutMs: number): Promise<string> {
  * this is an optimisation over reconstructing the path, so failing to record
  * it costs accuracy in edge cases, never the session that is starting.
  */
-export const STORE_DIRS_FILE = "store-dirs.json";
+const STORE_DIRS_FILE = "store-dirs.json";
 
 async function rememberStoreDirs(
   projectRoot: string,

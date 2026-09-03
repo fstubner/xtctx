@@ -31,7 +31,7 @@ export {
 } from "./mcp-renderers.js";
 export { tomlHasComments } from "./config-file-format.js";
 
-export interface McpSyncResult {
+interface McpSyncResult {
   tool: string;
   path: string;
   scope: "project" | "global";
@@ -43,12 +43,12 @@ export interface McpSyncResult {
   failed?: boolean;
 }
 
-export interface McpSyncSummary {
+interface McpSyncSummary {
   results: McpSyncResult[];
   servers_loaded: number;
 }
 
-export interface McpRemoveResult {
+interface McpRemoveResult {
   tool: string;
   path: string;
   scope: "project" | "global";
@@ -57,11 +57,11 @@ export interface McpRemoveResult {
   warning?: string;
 }
 
-export interface McpRemoveSummary {
+interface McpRemoveSummary {
   results: McpRemoveResult[];
 }
 
-export interface McpWiringState {
+interface McpWiringState {
   tool: string;
   path: string;
   scope: "project" | "global";

@@ -30,7 +30,7 @@ const MAX_MATCHES_PER_SESSION = 3;
  * Unrelated sentence-transformer pairs sit near 0; related ones are
  * comfortably above this.
  */
-export const MIN_SEMANTIC_COSINE = 0.15;
+const MIN_SEMANTIC_COSINE = 0.15;
 
 /**
  * How similar the *best* window has to be before a query counts as having
@@ -88,7 +88,7 @@ export const MIN_SEMANTIC_COSINE = 0.15;
  *
  * If it needs to move, move it against the eval rather than against one query.
  */
-export const MIN_CONFIDENT_COSINE = 0.36;
+const MIN_CONFIDENT_COSINE = 0.36;
 /**
  * Weight of the recency/continuity tie-break in the relevance modes. Small
  * enough that it only ever separates candidates that are otherwise equal.
@@ -122,7 +122,7 @@ export function groupUnits(
   return groupScoredUnits(scored, retrieval, limit);
 }
 
-export function groupScoredUnits(
+function groupScoredUnits(
   scored: Array<{
     row: RetrievalUnitRow;
     score: number;
@@ -254,7 +254,7 @@ export function rankKeywordRows(rows: RetrievalUnitRow[]): Map<string, number> {
   return scores;
 }
 
-export function blendScores(
+function blendScores(
   mode: SessionSearchMode,
   semanticScore: number,
   keywordScore: number,
@@ -328,14 +328,14 @@ function corroboratedScore(scores: number[]): number {
   return total;
 }
 
-export function scoreContinuity(messageEndIndex: number, messageCount: number): number {
+function scoreContinuity(messageEndIndex: number, messageCount: number): number {
   if (messageCount <= 1) {
     return 1;
   }
   return Math.max(0, Math.min(1, messageEndIndex / (messageCount - 1)));
 }
 
-export function scoreRecency(value: string, range: { oldest: number; newest: number }): number {
+function scoreRecency(value: string, range: { oldest: number; newest: number }): number {
   const timestamp = Date.parse(value);
   if (!Number.isFinite(timestamp) || range.newest <= range.oldest) {
     return 1;
@@ -343,7 +343,7 @@ export function scoreRecency(value: string, range: { oldest: number; newest: num
   return Math.max(0, Math.min(1, (timestamp - range.oldest) / (range.newest - range.oldest)));
 }
 
-export function getTimeRange(values: string[]): { oldest: number; newest: number } {
+function getTimeRange(values: string[]): { oldest: number; newest: number } {
   const timestamps = values
     .map((value) => Date.parse(value))
     .filter((value) => Number.isFinite(value));

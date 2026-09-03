@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { describeSetupPlan, runSetup as setup } from "../config/setup.js";
 import { BUILT_IN_SKILL_ID, discoverProjectSkills } from "../config/skills.js";
 
-export interface SetupCliOptions {
+interface SetupCliOptions {
   projectPath?: string;
   yes?: boolean;
   repair?: boolean;

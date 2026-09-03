@@ -13,7 +13,7 @@ export interface MessageRow {
 export const DEFAULT_WINDOW_SIZE = 8;
 export const DEFAULT_WINDOW_STRIDE = 4;
 
-export interface RetrievalUnitPlan {
+interface RetrievalUnitPlan {
   start: MessageRow;
   end: MessageRow;
   content: string;
@@ -57,7 +57,7 @@ export function planRetrievalUnits(
   return desired;
 }
 
-export function buildMessageWindows(
+function buildMessageWindows(
   messages: MessageRow[],
   windowSize: number,
   windowStride: number,
@@ -82,7 +82,7 @@ export function buildMessageWindows(
   return windows;
 }
 
-export function formatRetrievalUnitContent(sessionRef: string, messages: MessageRow[]): string {
+function formatRetrievalUnitContent(sessionRef: string, messages: MessageRow[]): string {
   const lines = [
     `Session: ${sessionRef}`,
     `Chronological window: messages ${messages[0].message_index} through ${

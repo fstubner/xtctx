@@ -49,14 +49,14 @@ export async function waitWithBudget(
   }
 }
 
-export interface ScanToolDeps {
+interface ScanToolDeps {
   db: DatabaseHandle;
   stmts: PreparedStatements;
   /** Canonical and normalized; see `canonicalRoot` in sqlite-index. */
   scopedRoot: string;
 }
 
-export interface ScanToolResult {
+interface ScanToolResult {
   /** Every session this scan wrote to; the caller rolls them up at the end. */
   touchedSessions: string[];
   /**
@@ -153,7 +153,7 @@ export async function scanTool(
 }
 
 /** Writes one chunk; returns its session ref, or null for an empty chunk. */
-export function upsertChunk(
+function upsertChunk(
   stmts: PreparedStatements,
   scopedRoot: string,
   chunk: ConversationChunk,

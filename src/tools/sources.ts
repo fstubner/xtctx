@@ -26,12 +26,12 @@ export type SkillSyncMode =
   | "managed-block"
   | "unsupported";
 
-export interface ToolSkillCapability {
+interface ToolSkillCapability {
   mode: SkillSyncMode;
   targetPath?: (projectRoot: string, skillId: string) => string;
 }
 
-export interface ToolSourceDefinition {
+interface ToolSourceDefinition {
   id: ToolId;
   label: string;
   defaultStorePath: () => string;

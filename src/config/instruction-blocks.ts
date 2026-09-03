@@ -25,7 +25,7 @@ import type { HookMode } from "../tools/sources.js";
  * the layer that knows which files those strings live in.
  */
 
-export interface MemoryTarget {
+interface MemoryTarget {
   tool: string;
   path: string;
   hookMode: HookMode;
