@@ -164,15 +164,6 @@ const RETRIEVAL_UNIT_RECONCILE_LIMIT = 4;
 const DEFAULT_EMBEDDING_WARM_BUDGET_MS = 5_000;
 
 /**
- * Override for the warm budget, in milliseconds; `0` disables the wait.
- *
- * The wait exists because this process is usually the only one there will be,
- * so deferring vectorising to "the next scan" meant never. That reasoning does
- * not apply to a test, where every scan would block on a model load nothing in
- * the test is asserting — and with a suite fanned out across workers, each one
- * paying that separately is contention rather than coverage.
- */
-/**
  * The real model unless `XTCTX_DISABLE_EMBEDDINGS=1`.
  *
  * The switch is for the test suite, where several workers each loading a
@@ -188,6 +179,15 @@ function defaultEmbeddingProvider(): EmbeddingProvider {
     : new TransformersEmbeddingProvider(DEFAULT_EMBEDDING_MODEL);
 }
 
+/**
+ * Override for the warm budget, in milliseconds; `0` disables the wait.
+ *
+ * The wait exists because this process is usually the only one there will be,
+ * so deferring vectorising to "the next scan" meant never. That reasoning does
+ * not apply to a test, where every scan would block on a model load nothing in
+ * the test is asserting — and with a suite fanned out across workers, each one
+ * paying that separately is contention rather than coverage.
+ */
 function embeddingWarmBudgetFromEnv(): number | undefined {
   const raw = Number.parseInt(process.env.XTCTX_EMBEDDING_WARM_MS ?? "", 10);
   return Number.isFinite(raw) && raw >= 0 ? raw : undefined;

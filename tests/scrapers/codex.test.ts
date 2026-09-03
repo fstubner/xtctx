@@ -258,24 +258,39 @@ describe("CodexCliScraper", () => {
   });
 
   it("skips non-conversation event types", async () => {
+    // Asserted on what must NOT appear, not only on what must.
+    //
+    // This test used to check only that the real message was present, and it
+    // passed with the `payload.type === "user_message"` filter deleted
+    // entirely — because its one `event_msg` extra carried no `message`
+    // field, so it produced no content either way. A mutation sweep found
+    // that: removing the filter left all 552 tests green.
+    //
+    // `agent_message` is the case that matters. It is a real Codex event type
+    // and it does carry `message`, so without the filter every assistant turn
+    // would also be served as something the user typed.
     const sessionWithExtras = join(tempDir, "session-extras.jsonl");
     await writeFile(
       sessionWithExtras,
       [
         sessionMeta("extra-session", "2026-02-25T00:00:00Z"),
-        // event_msg with non-user_message type should be ignored
         JSON.stringify({
           timestamp: "2026-02-25T00:00:01Z",
           type: "event_msg",
-          payload: { type: "tool_call_result", result: "ignored" },
+          payload: { type: "agent_message", message: "assistant thinking aloud" },
+        }),
+        JSON.stringify({
+          timestamp: "2026-02-25T00:00:02Z",
+          type: "event_msg",
+          payload: { type: "tool_call_result", message: "tool output", result: "ignored" },
         }),
         // response_item with non-message payload should be ignored
         JSON.stringify({
-          timestamp: "2026-02-25T00:00:02Z",
+          timestamp: "2026-02-25T00:00:03Z",
           type: "response_item",
           payload: { type: "function_call", name: "read_file" },
         }),
-        userMessage("real message", "2026-02-25T00:00:03Z"),
+        userMessage("real message", "2026-02-25T00:00:04Z"),
       ].join("\n") + "\n",
       "utf-8",
     );
@@ -285,9 +300,10 @@ describe("CodexCliScraper", () => {
       chunks.push(chunk);
     }
 
-    // From session-extras.jsonl only "real message" should appear
-    const realMsg = chunks.find((c) => c.content === "real message");
-    expect(realMsg).toBeDefined();
+    expect(chunks.find((c) => c.content === "real message")).toBeDefined();
+    for (const leaked of ["assistant thinking aloud", "tool output", "read_file"]) {
+      expect(chunks.map((c) => c.content), leaked).not.toContain(leaked);
+    }
   });
 
   it("assigns layer 0 to normal conversation turns", async () => {
