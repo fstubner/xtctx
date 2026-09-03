@@ -147,4 +147,38 @@ describe("claude code tool permissions", () => {
       expect(allow).toContain("Bash(npm test)");
     }
   });
+
+  /**
+   * Disconnect filters by xtctx's own list, not by the `mcp__` prefix the
+   * entries happen to share.
+   *
+   * The distinction is invisible in a project whose only other rule is a Bash
+   * one — the test above passes either way. Prefix removal is the plausible
+   * "simplification", and it silently deletes every grant the user holds for
+   * every *other* MCP server: GitHub, Playwright, whatever else they wired up.
+   * Those are not xtctx's to touch, and nothing tells the user they went.
+   */
+  it("leaves other MCP servers' permissions alone on disconnect", async () => {
+    const foreign = [
+      "mcp__github__create_issue",
+      "mcp__plugin_playwright_playwright__browser_click",
+    ];
+    await mkdir(join(root, ".claude"), { recursive: true });
+    await writeFile(
+      join(root, ".claude", "settings.json"),
+      `${JSON.stringify({ permissions: { allow: [...foreign, "Bash(npm test)"] } }, null, 2)}\n`,
+      "utf-8",
+    );
+    await setupProject({ projectPath: root, homeDir: home, yes: true });
+
+    await disconnectProject({ projectPath: root, homeDir: home, all: true });
+
+    const allow = (await settings().catch(() => ({}) as ClaudeSettings)).permissions?.allow ?? [];
+    for (const tool of EXPECTED) {
+      expect(allow, tool).not.toContain(tool);
+    }
+    for (const entry of foreign) {
+      expect(allow, entry).toContain(entry);
+    }
+  });
 });
