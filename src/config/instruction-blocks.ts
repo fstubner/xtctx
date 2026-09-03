@@ -1,7 +1,11 @@
+import { rm } from "node:fs/promises";
 import { isAbsolute, join, relative, sep } from "node:path";
+import { writeFileAtomic } from "../utils/atomic-file.js";
 import {
   MARKERS,
   countManagedBlocks,
+  matchLineEndings,
+  normalizeNewlines,
   removeManagedBlocks,
   stripMarkers,
 } from "./managed-block.js";
@@ -159,6 +163,58 @@ export async function upsertManagedBlock(
   const separator = repaired.length > 0 ? "\n\n" : "";
   const content = `${prefix}${repaired}${separator}${block}`;
   return writeIfChanged(filePath, content, containWithin);
+}
+
+/**
+ * Take the managed block back out of one instruction file.
+ *
+ * The mirror of `upsertManagedBlock`, and here beside it for that reason: the
+ * two have to agree byte-for-byte about the separator and the line endings or
+ * a setup/disconnect round trip edits content xtctx does not own.
+ */
+export async function removeManagedBlocksFromFile(
+  filePath: string,
+  projectRoot: string,
+): Promise<boolean> {
+  const existing = await readUtf8IfExists(filePath);
+  if (existing === null) {
+    return false;
+  }
+
+  // Untrimmed: `removeManagedBlocks` gives back exactly the bytes that were
+  // there before setup added its separator, and trimming here would undo that
+  // by editing the tail of the user's own content.
+  const repaired = removeManagedBlocks(existing);
+  if (normalizeNewlines(existing) === repaired) {
+    return false;
+  }
+
+  if (!repaired.trim() || isOnlyFrontmatter(repaired)) {
+    // The file held nothing but the xtctx block — or the YAML frontmatter
+    // xtctx itself wrote above it, which Cursor would keep loading as an
+    // xtctx rule. Either way setup created it and disconnect owns removing
+    // it, rather than leaving a stub behind.
+    await rm(filePath, { force: true });
+    return true;
+  }
+
+  // Put the author's line endings back: removal must not reformat the file.
+  // No trailing newline is appended — whatever the file ended with is already
+  // in `repaired`, and adding one is an edit to content xtctx does not own.
+  await writeFileAtomic(filePath, matchLineEndings(repaired, existing), {
+    containWithin: projectRoot,
+  });
+  return true;
+}
+
+/** True when nothing survives but a single YAML frontmatter block. */
+function isOnlyFrontmatter(content: string): boolean {
+  const trimmed = content.trim();
+  if (!trimmed.startsWith("---")) {
+    return false;
+  }
+  const end = trimmed.indexOf("\n---", 3);
+  return end !== -1 && trimmed.slice(end + 4).trim().length === 0;
 }
 
 export async function inspectManagedFile(filePath: string): Promise<{

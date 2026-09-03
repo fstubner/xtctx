@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { rm } from "node:fs/promises";
-import { isRecord, readJsonIfExists, writeIfChanged } from "./file-io.js";
+import { writeFileAtomic } from "../utils/atomic-file.js";
+import { isRecord, readJsonIfExists, readUtf8IfExists, writeIfChanged } from "./file-io.js";
 import { SELF_HOSTED_ENTRY, isSelfHostedProject } from "./server-definition.js";
 
 /**
@@ -161,4 +162,134 @@ async function removeLegacyClaudeHook(hooksPath: string, projectRoot: string): P
 
   hooks.SessionStart = kept;
   return writeIfChanged(hooksPath, JSON.stringify(existing, null, 2) + "\n", projectRoot);
+}
+
+/** Strip xtctx SessionStart matcher groups from .claude/settings.json. */
+export async function removeClaudeHookFromSettings(
+  settingsPath: string,
+  projectRoot: string,
+): Promise<boolean> {
+  const raw = await readUtf8IfExists(settingsPath);
+  if (raw === null) {
+    return false;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    return false;
+  }
+
+  if (!isRecord(parsed)) {
+    return false;
+  }
+
+  // Setup grants the five xtctx tools in `permissions.allow`; disconnect takes
+  // exactly those back and leaves everything else. Filtering by our own list
+  // rather than by prefix is what keeps a rule the user wrote by hand — or one
+  // another tool added — out of the blast radius.
+  let permissionsChanged = false;
+  if (isRecord(parsed.permissions) && Array.isArray(parsed.permissions.allow)) {
+    const allow = parsed.permissions.allow;
+    const kept = allow.filter(
+      (entry) => typeof entry !== "string" || !(CLAUDE_TOOL_PERMISSIONS as readonly string[]).includes(entry),
+    );
+    if (kept.length !== allow.length) {
+      permissionsChanged = true;
+      if (kept.length === 0) {
+        delete parsed.permissions.allow;
+        if (Object.keys(parsed.permissions).length === 0) {
+          delete parsed.permissions;
+        }
+      } else {
+        parsed.permissions.allow = kept;
+      }
+    }
+  }
+
+  if (!isRecord(parsed.hooks)) {
+    if (permissionsChanged) {
+      await writeFileAtomic(settingsPath, JSON.stringify(parsed, null, 2) + "\n", {
+        containWithin: projectRoot,
+      });
+    }
+    return permissionsChanged;
+  }
+
+  const sessionStart = Array.isArray(parsed.hooks.SessionStart) ? parsed.hooks.SessionStart : [];
+  const kept = sessionStart
+    .map((group) => {
+      if (!isRecord(group) || !Array.isArray(group.hooks)) {
+        return group;
+      }
+      const hooks = group.hooks.filter(
+        (hook) =>
+          !isRecord(hook) ||
+          typeof hook.command !== "string" ||
+          !hook.command.includes(CLAUDE_HOOK_MARKER),
+      );
+      return hooks.length === group.hooks.length ? group : { ...group, hooks };
+    })
+    .filter(
+      (group) => !isRecord(group) || !Array.isArray(group.hooks) || group.hooks.length > 0,
+    );
+
+  if (JSON.stringify(kept) === JSON.stringify(sessionStart) && !permissionsChanged) {
+    return false;
+  }
+
+  parsed.hooks.SessionStart = kept;
+
+  // A settings file left holding nothing but an empty SessionStart list was
+  // created by setup for that hook alone; remove it rather than leave litter.
+  const hooksOnly =
+    Object.keys(parsed).length === 1 &&
+    Object.keys(parsed.hooks).length === 1 &&
+    kept.length === 0;
+  if (hooksOnly) {
+    await rm(settingsPath, { force: true });
+    return true;
+  }
+
+  await writeFileAtomic(settingsPath, JSON.stringify(parsed, null, 2) + "\n", {
+    containWithin: projectRoot,
+  });
+  return true;
+}
+
+/** Strip xtctx entries from the legacy flat `.claude/hooks.json`. */
+export async function removeClaudeHook(hooksPath: string, projectRoot: string): Promise<boolean> {
+  const raw = await readUtf8IfExists(hooksPath);
+  if (raw === null) {
+    return false;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    return false;
+  }
+
+  if (!isRecord(parsed) || !isRecord(parsed.hooks)) {
+    return false;
+  }
+
+  const sessionStart = Array.isArray(parsed.hooks.SessionStart) ? parsed.hooks.SessionStart : [];
+  const nextSessionStart = sessionStart.filter(
+    (entry) => !isRecord(entry) ||
+      typeof entry.command !== "string" ||
+      !entry.command.includes(CLAUDE_HOOK_MARKER),
+  );
+
+  if (nextSessionStart.length === sessionStart.length) {
+    return false;
+  }
+
+  parsed.hooks.SessionStart = nextSessionStart;
+  await writeFileAtomic(hooksPath, JSON.stringify(parsed, null, 2) + "\n", {
+    containWithin: projectRoot,
+  });
+  return true;
 }
