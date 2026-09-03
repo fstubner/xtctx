@@ -272,6 +272,10 @@ export function prepareStatements(db: DatabaseHandle): PreparedStatements {
   };
 }
 
+export function placeholders(countValue: number): string {
+  return Array.from({ length: countValue }, () => "?").join(", ");
+}
+
 export function getSetting(db: DatabaseHandle, key: string): string | null {
   const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as
     | { value: string }
