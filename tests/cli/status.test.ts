@@ -47,6 +47,53 @@ describe("status", () => {
   });
 
   /**
+   * Status exists to tell someone what state their handoff is in, so a line
+   * that always reports the same thing is worse than no line: it reads as an
+   * answer. A mutation sweep found the scan line could be hard-wired to
+   * "never" with the whole suite green, which would tell every user their
+   * transcripts had never been read.
+   *
+   * Asserted through the two states rather than on a timestamp, so the format
+   * stays free to change.
+   */
+  it("distinguishes an index that has been scanned from one that has not", async () => {
+    await setupProject({ projectPath: projectRoot, homeDir, yes: true });
+    // Every tool switched off, so the scan completes with nothing to read.
+    // Left on, this reads every transcript store on the machine — a real one
+    // ran past two minutes here before it was capped.
+    await writeFile(
+      join(projectRoot, ".xtctx", "config.yaml"),
+      [
+        "tools:",
+        ...["claude-code", "cursor", "codex", "copilot", "antigravity", "opencode", "copilot-cli"].flatMap(
+          (tool) => [`  ${tool}:`, "    enabled: false"],
+        ),
+        "",
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const before = await createProjectServices(projectRoot);
+    try {
+      expect(await renderStatusBlock(before, { homeDir })).toMatch(/Scan\s+never/);
+    } finally {
+      await before.sessions.close();
+    }
+
+    const scanned = await createProjectServices(projectRoot);
+    try {
+      await scanned.sessions.listRecentSessions(1);
+      await scanned.sessions.whenScanSettled?.();
+      const status = await renderStatusBlock(scanned, { homeDir });
+
+      expect(status).not.toMatch(/Scan\s+never/);
+      expect(status).toMatch(/Scan\s+\d{4}-\d{2}-\d{2}/);
+    } finally {
+      await scanned.sessions.close();
+    }
+  }, 60_000);
+
+  /**
    * A persisted drift log nobody surfaces is the same dead end as the stderr
    * it replaced. Status is where a person looks, so it is where a reader's
    * complaints about another tool's format have to show up.
