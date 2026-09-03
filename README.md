@@ -257,6 +257,11 @@ npm run build
 npm run demo:public
 ```
 
+`npm test` excludes the smoke, drift and eval suites, which build, spawn
+processes and load a real embedding model. What each suite defends, what it
+structurally cannot catch, and how that was measured is in
+[`docs/testing-strategy.md`](docs/testing-strategy.md).
+
 `npm run demo:public` creates synthetic Claude Code and Codex transcript stores
 in a temporary project, starts the built MCP server, and calls the public
 handoff tools. It does not scan private local transcript directories. See
