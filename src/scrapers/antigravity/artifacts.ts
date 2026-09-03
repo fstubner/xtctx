@@ -11,9 +11,15 @@ import type { AntigravityArtifact } from "./shared.js";
 
 export function isReadableArtifactName(name: string): boolean {
   const extension = extname(name).toLowerCase();
-  return (extension === ".md" || extension === ".txt") &&
-    !name.endsWith(".metadata.json") &&
-    !name.includes(".resolved");
+  // `.resolved` is checked anywhere in the name, not as the extension:
+  // `plan.resolved.md` is a duplicate of `plan.md` with the references
+  // expanded, and it ends in `.md` like any other artifact. A name ending
+  // `.resolved` outright is already excluded, since that is its extension.
+  //
+  // There was a third clause here rejecting `.metadata.json`. It could never
+  // fire — such a name has extension `.json`, so the check above rejects it
+  // first — and a guard that cannot run reads as protection that is not there.
+  return (extension === ".md" || extension === ".txt") && !name.includes(".resolved");
 }
 
 export function formatArtifactContent(artifact: AntigravityArtifact): string {
