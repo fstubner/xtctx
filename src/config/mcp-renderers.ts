@@ -133,10 +133,6 @@ export const NATIVE_MCP_TOOLS: Record<string, McpRenderer> = {
   },
 };
 
-export function hasNativeMcpSupport(tool: string): boolean {
-  return tool in NATIVE_MCP_TOOLS;
-}
-
 export function isGlobalOnlyMcpTool(tool: string): boolean {
   const renderer = NATIVE_MCP_TOOLS[tool];
   return Boolean(renderer?.globalPath && !renderer.projectPath);

@@ -16,8 +16,8 @@ import { SUPPORTED_TOOLS } from "../tools/sources.js";
 // `claude-settings.ts`, and which xtctx entry point gets wired up in
 // `server-definition.ts`.
 export { inspectManagedFile } from "./instruction-blocks.js";
-export { CLAUDE_HOOK_MARKER, CLAUDE_TOOL_PERMISSIONS } from "./claude-settings.js";
-export { publishedServerDefinition, xtctxServerDefinition } from "./server-definition.js";
+export { CLAUDE_HOOK_MARKER } from "./claude-settings.js";
+export { xtctxServerDefinition } from "./server-definition.js";
 export { pathExists } from "./file-io.js";
 
 interface SetupOptions {

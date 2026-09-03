@@ -68,7 +68,7 @@ const XTCTX_TOOL_NAMES = [
  * allowlist naming only the project server's copy would have left every one
  * of those calls to a prompt — or, non-interactively, to a silent refusal.
  */
-export const CLAUDE_TOOL_PERMISSIONS = XTCTX_TOOL_NAMES.flatMap((tool) => [
+const CLAUDE_TOOL_PERMISSIONS = XTCTX_TOOL_NAMES.flatMap((tool) => [
   `mcp__xtctx__${tool}`,
   `mcp__plugin_xtctx_xtctx__${tool}`,
 ]);

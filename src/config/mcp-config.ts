@@ -21,14 +21,7 @@ import {
 // which tools are supported and how they are rendered lives in
 // `mcp-renderers.ts`, the wire formats in `config-file-format.ts`, and this
 // file owns reading, merging and writing an entry into a config on disk.
-export {
-  NATIVE_MCP_TOOLS,
-  hasNativeMcpSupport,
-  isGlobalOnlyMcpTool,
-  resolveConfigTarget,
-  type McpRenderer,
-  type McpServerDefinition,
-} from "./mcp-renderers.js";
+export { NATIVE_MCP_TOOLS, isGlobalOnlyMcpTool, resolveConfigTarget } from "./mcp-renderers.js";
 export { tomlHasComments } from "./config-file-format.js";
 
 interface McpSyncResult {
