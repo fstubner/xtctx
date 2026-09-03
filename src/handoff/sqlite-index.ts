@@ -1,17 +1,12 @@
-import { createHash } from "node:crypto";
 import { existsSync, realpathSync } from "node:fs";
 import { mkdir, readdir, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import Database from "better-sqlite3";
-import type { Database as DatabaseHandle, Statement, Transaction } from "better-sqlite3";
-import type { ConversationChunk, ConversationScraper } from "../types/scraper.js";
+import type { Database as DatabaseHandle } from "better-sqlite3";
+import type { ConversationScraper } from "../types/scraper.js";
 import {
   DEFAULT_EMBEDDING_MODEL,
   TransformersEmbeddingProvider,
-  poolVectors,
-  splitTextForEmbedding,
   type EmbeddingProvider,
-  capSegments,
 } from "./embeddings.js";
 import type {
   HandoffStatus,
@@ -21,8 +16,31 @@ import type {
   SessionService,
   SessionSummary,
 } from "./types.js";
-import { cosineSimilarity, deserializeVector, serializeVector } from "./vector.js";
+import { cosineSimilarity, deserializeVector } from "./vector.js";
 import { NullEmbeddingProvider } from "./null-embeddings.js";
+import {
+  DEFAULT_WINDOW_SIZE,
+  DEFAULT_WINDOW_STRIDE,
+  type MessageRow,
+  planRetrievalUnits,
+} from "./retrieval-units.js";
+import { safeDetect, scanTool, waitWithBudget } from "./scan.js";
+import {
+  type CountRow,
+  type PreparedStatements,
+  clearSetting,
+  getSetting,
+  openDatabase,
+  placeholders,
+  prepareStatements,
+  setSetting,
+} from "./schema.js";
+import {
+  countUnvectorizedUnits,
+  dropVectorsFromOtherModels,
+  ensureVectors,
+  waitUntilEmbeddingReady,
+} from "./vectors.js";
 import {
   MIN_CONFIDENT_COSINE,
   MIN_SEMANTIC_COSINE,
@@ -39,23 +57,6 @@ import {
 interface ToolRuntime {
   tool: string;
   scraper: ConversationScraper;
-}
-
-interface PreparedStatements {
-  upsertSession: Statement;
-  insertMessage: Statement;
-  upsertChunkTxn: Transaction<(sessionArgs: unknown[], messageArgs: unknown[]) => void>;
-  sessionRollup: Statement;
-  /** Repairs roll-ups a previous scan died before reaching. See its prepare. */
-  reconcileSessionRollups: Statement;
-  /** Sessions whose retrieval units do not reach their last message. */
-  selectSessionsMissingUnits: Statement;
-  selectSessionMessages: Statement;
-  selectSessionTool: Statement;
-  selectUnitIds: Statement;
-  insertUnit: Statement;
-  insertUnitFts: Statement;
-  deleteUnit: Statement;
 }
 
 interface SqliteHandoffIndexOptions {
@@ -137,22 +138,9 @@ interface SessionRow {
   git_commit: string | null;
 }
 
-interface MessageRow {
-  id: string;
-  timestamp: string;
-  role: SessionMessage["role"];
-  content: string;
-  message_index: number;
-  source_pointer: string | null;
-}
-
 interface VectorUnitRow extends RetrievalUnitRow {
   vector: Buffer;
   dimensions: number;
-}
-
-interface CountRow {
-  count: number;
 }
 
 interface ToolCountRow {
@@ -161,18 +149,6 @@ interface ToolCountRow {
   messages: number;
   last_indexed_at: string | null;
 }
-
-/**
- * Bumped whenever the schema shape changes. The index is derived data, so a
- * version mismatch (older or newer) triggers a full rebuild rather than a
- * migration — the transcript stores remain authoritative.
- */
-// 3: `project_root` is stored canonicalised and normalized, and every read
-// filters on it. An index written by version 2 holds raw roots, which mostly
-// still compare equal — but not where `realpath` differs, and there the rows
-// go quiet rather than wrong. The scraper cursors would not re-add them, so
-// the rebuild has to be forced rather than waited for.
-const SCHEMA_VERSION = 3;
 
 const DEFAULT_LIMIT = 5;
 const MAX_LIMIT = 100;
@@ -229,17 +205,6 @@ function embeddingWarmBudgetFromEnv(): number | undefined {
 }
 
 /**
- * How often a session still streaming in from a scraper has its count and
- * preview rolled up. See the scan loop in `refreshNow` for why it is not
- * "only at the end" and not "on every message".
- */
-const INCREMENTAL_ROLLUP_INTERVAL_MS = 1_000;
-
-/** Poll interval while waiting for the model; see `waitUntilEmbeddingReady`. */
-const EMBEDDING_WARM_POLL_MS = 100;
-const DEFAULT_WINDOW_SIZE = 8;
-const DEFAULT_WINDOW_STRIDE = 4;
-/**
  * Candidate windows fetched per requested session.
  *
  * Not the same number as the matches shown. The keyword pass fetches windows,
@@ -252,7 +217,6 @@ const DEFAULT_WINDOW_STRIDE = 4;
  * Swept against the eval; see the table on `blendScores`.
  */
 const CANDIDATE_WINDOWS_PER_SESSION = 12;
-const SOURCE_CURSOR_OVERLAP_MS = 1_000;
 
 /**
  * SQL that reduces a stored `project_root` to a comparable form, and the JS
@@ -653,40 +617,7 @@ export class SqliteHandoffIndex implements SessionService {
       this.scanStartedMs = Date.now();
     }
 
-    await this.waitWithBudget(this.refreshPromise);
-  }
-
-  /**
-   * Wait for the scan, but not past the budget. Nothing is cancelled on
-   * timeout — the scan keeps running and keeps committing — so a caller that
-   * stops waiting costs the index nothing, and the next call finds more.
-   */
-  private async waitWithBudget(scan: Promise<void>): Promise<void> {
-    if (this.refreshBudgetMs === 0) {
-      return;
-    }
-
-    // The budget is spent by the scan, not by each caller. Measuring it from
-    // when the scan started means one call pays the wait and the calls behind
-    // it return straight away with whatever has landed so far — rather than
-    // every call in a session paying the full budget over again.
-    const remaining = this.scanStartedMs + this.refreshBudgetMs - Date.now();
-    if (remaining <= 0) {
-      return;
-    }
-
-    let timer: NodeJS.Timeout | undefined;
-    const budget = new Promise<void>((resolve) => {
-      timer = setTimeout(resolve, remaining);
-      // Do not hold the process open just to enforce a deadline.
-      timer.unref?.();
-    });
-
-    try {
-      await Promise.race([scan.catch(() => {}), budget]);
-    } finally {
-      clearTimeout(timer);
-    }
+    await waitWithBudget(this.refreshPromise, this.scanStartedMs, this.refreshBudgetMs);
   }
 
   /** True when a scan started by an earlier call is still running. */
@@ -708,28 +639,9 @@ export class SqliteHandoffIndex implements SessionService {
     };
   }
 
-  /**
-   * Windows with no vector for the current model.
-   *
-   * Counted from the index rather than remembered from the last vectorizing
-   * pass: that pass only runs inside a search, so anything that had not run
-   * one yet reported a backlog of zero — which a JSON consumer reads as
-   * "nothing outstanding" while thousands of windows are unvectorized.
-   */
   private countUnvectorizedUnits(): number {
     try {
-      const row = this.getDb()
-        .prepare(
-          `SELECT COUNT(*) AS count
-           FROM retrieval_units u
-           LEFT JOIN retrieval_unit_vectors v
-             ON v.unit_id = u.id
-            AND v.model = ?
-            AND v.content_hash = u.content_hash
-           WHERE v.unit_id IS NULL`,
-        )
-        .get(this.embeddingProvider.model) as CountRow | undefined;
-      return row?.count ?? 0;
+      return countUnvectorizedUnits(this.getDb(), this.embeddingProvider.model);
     } catch {
       // Progress reporting must never be the thing that fails a tool call.
       return 0;
@@ -756,75 +668,13 @@ export class SqliteHandoffIndex implements SessionService {
     this.reconcileRetrievalUnits();
 
     for (const { scraper } of this.tools) {
-      if (!(await safeDetect(scraper))) {
-        // Not installed here, so there is nothing to wait for — read, rather
-        // than outstanding forever.
-        this.scannedTools.add(scraper.tool);
-        continue;
-      }
-
-      let latestTimestamp: Date | null = null;
-      // The session the scraper is currently yielding. It is rolled up when
-      // the scraper moves on to another, and at most once a second while it
-      // is still streaming in, so a scan cut short — the normal case when a
-      // 20-second agent session ends before a 20-second scan does — leaves a
-      // count and a preview behind rather than "0 messages" and nothing. The
-      // timer matters more than the switch: the session the next agent wants
-      // is the newest one, which is the last file a scraper reads, so nothing
-      // ever moves past it before an interruption. Once per second keeps the
-      // roll-up from being paid per message, which is what made indexing
-      // O(N²) per session before it was deferred to the end. Retrieval units
-      // still wait for the end: only search reads them, and search scans for
-      // itself.
-      let openSession: string | null = null;
-      let openSessionRolledUpAt = 0;
-      try {
-        for await (const chunk of scraper.scrape()) {
-          const sessionRef = this.upsertChunk(chunk);
-          if (sessionRef) {
-            touchedSessions.add(sessionRef);
-            if (openSession !== null && openSession !== sessionRef) {
-              this.prepared().sessionRollup.run(openSession);
-              openSessionRolledUpAt = 0;
-            }
-            openSession = sessionRef;
-            if (Date.now() - openSessionRolledUpAt >= INCREMENTAL_ROLLUP_INTERVAL_MS) {
-              this.prepared().sessionRollup.run(openSession);
-              openSessionRolledUpAt = Date.now();
-            }
-          }
-          if (!latestTimestamp || chunk.timestamp > latestTimestamp) {
-            latestTimestamp = chunk.timestamp;
-          }
-        }
-
-        if (latestTimestamp) {
-          await scraper.saveScrapedPosition({
-            lastTimestamp: overlapTimestamp(latestTimestamp),
-          });
-        }
-        clearSetting(db, `last_error:${scraper.tool}`);
-      } catch (error) {
-        setSetting(
-          db,
-          `last_error:${scraper.tool}`,
-          error instanceof Error ? error.message : String(error),
-        );
-        // Deliberately do NOT advance the cursor here: chunks yielded before
-        // the failure may sort after content in files never reached, and
-        // advancing would skip that content permanently. Re-scraping the
-        // same window is safe (message ids are deterministic hashes).
-      } finally {
-        // The last session a scraper yielded has nobody to move past it.
-        if (openSession !== null) {
-          this.prepared().sessionRollup.run(openSession);
-        }
-        // Read, whether or not it succeeded: a tool whose scrape failed has
-        // an error recorded against it and is not something the caller should
-        // be told to wait for. "Outstanding" here means "not looked at yet in
-        // this process", nothing more.
-        this.scannedTools.add(scraper.tool);
-      }
+      await scanTool(scraper, {
+        db,
+        stmts: this.prepared(),
+        scopedRoot: this.scopedRoot,
+        touchedSessions,
+        scannedTools: this.scannedTools,
+      });
     }
 
     for (const sessionRef of touchedSessions) {
@@ -877,7 +727,7 @@ export class SqliteHandoffIndex implements SessionService {
       // wait is bounded rather than skipped, and a model that misses the
       // deadline keeps loading in the background for the next caller.
       this.embeddingProvider.warm?.();
-      if (!(await this.waitUntilEmbeddingReady())) {
+      if (!(await waitUntilEmbeddingReady(this.embeddingProvider, this.embeddingWarmBudgetMs))) {
         return;
       }
     }
@@ -887,92 +737,6 @@ export class SqliteHandoffIndex implements SessionService {
     } catch {
       // Nothing to do here — search reports embedding failures where they matter.
     }
-  }
-
-  /**
-   * Poll until the embedding model is loaded, or the budget runs out.
-   *
-   * Polling rather than awaiting the load: `warm()` returns void by design, so
-   * that a caller cannot accidentally block on it. The interval is short
-   * relative to a model load and the whole wait is capped, so the cost of a
-   * provider that never becomes ready is one bounded delay per scan.
-   */
-  private async waitUntilEmbeddingReady(): Promise<boolean> {
-    const isReady = this.embeddingProvider.isReady;
-    if (!isReady) {
-      return true;
-    }
-
-    const deadline = Date.now() + this.embeddingWarmBudgetMs;
-    while (Date.now() < deadline) {
-      if (isReady.call(this.embeddingProvider)) {
-        return true;
-      }
-      await new Promise((resolve) => {
-        const timer = setTimeout(resolve, EMBEDDING_WARM_POLL_MS);
-        // Never hold the process open purely to keep polling.
-        timer.unref?.();
-      });
-    }
-
-    return isReady.call(this.embeddingProvider);
-  }
-
-  private upsertChunk(chunk: ConversationChunk): string | null {
-    if (!chunk.content.trim()) {
-      return null;
-    }
-
-    const stmts = this.prepared();
-    const timestamp = chunk.timestamp.toISOString();
-    const sessionRef = `${chunk.tool}:${chunk.sessionId}`;
-    const messageIndex = chunk.metadata.messageIndex ?? 0;
-    const id = hashParts([
-      chunk.tool,
-      chunk.sessionId,
-      timestamp,
-      chunk.role,
-      String(messageIndex),
-      chunk.content,
-    ]);
-    const contentHash = hashParts([chunk.content]);
-    const now = new Date().toISOString();
-    const metadataJson = JSON.stringify(chunk.metadata ?? {});
-    const sourcePointer = sourcePathFromMetadata(chunk.metadata);
-
-    stmts.upsertChunkTxn(
-      [
-        sessionRef,
-        chunk.tool,
-        chunk.sessionId,
-        // Canonical and normalized, matching what the read filter compares
-        // against. Writing the raw root here is what made rows invisible when
-        // the reader resolved a symlink and the writer had not.
-        this.scopedRoot,
-        chunk.metadata?.gitBranch ?? null,
-        chunk.metadata?.gitCommit ?? null,
-        timestamp,
-        timestamp,
-        sourcePointer,
-        now,
-      ],
-      [
-        id,
-        sessionRef,
-        chunk.tool,
-        chunk.sessionId,
-        timestamp,
-        chunk.role,
-        chunk.content,
-        messageIndex,
-        contentHash,
-        metadataJson,
-        sourcePointer,
-        now,
-      ],
-    );
-
-    return sessionRef;
   }
 
   /**
@@ -1027,35 +791,7 @@ export class SqliteHandoffIndex implements SessionService {
     // everything: unit ids are deterministic content hashes, so unchanged
     // windows (and, via the FK, their vectors) survive a re-index untouched.
     const now = new Date().toISOString();
-    const desired = new Map<
-      string,
-      {
-        start: MessageRow;
-        end: MessageRow;
-        content: string;
-        searchableText: string;
-        contentHash: string;
-      }
-    >();
-    for (const window of buildMessageWindows(messages, this.windowSize, this.windowStride)) {
-      const content = formatRetrievalUnitContent(sessionRef, window.messages);
-      const searchableText = window.messages.map((message) => message.content).join("\n");
-      const contentHash = hashParts([content]);
-      const unitId = hashParts([
-        "retrieval-unit",
-        sessionRef,
-        String(window.start.message_index),
-        String(window.end.message_index),
-        contentHash,
-      ]);
-      desired.set(unitId, {
-        start: window.start,
-        end: window.end,
-        content,
-        searchableText,
-        contentHash,
-      });
-    }
+    const desired = planRetrievalUnits(sessionRef, messages, this.windowSize, this.windowStride);
 
     const existing = new Set(
       (stmts.selectUnitIds.all(sessionRef) as Array<{ id: string }>).map((row) => row.id),
@@ -1111,142 +847,7 @@ export class SqliteHandoffIndex implements SessionService {
       return this.stmts;
     }
 
-    const db = this.getDb();
-    const upsertSession = db.prepare(
-      `INSERT INTO sessions
-       (session_ref, tool, source_session_id, project_root, git_branch, git_commit,
-        started_at, last_activity_at, message_count, preview, source_path, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?)
-       ON CONFLICT(session_ref) DO UPDATE SET
-         started_at = CASE
-           WHEN excluded.started_at < started_at THEN excluded.started_at
-           ELSE started_at
-         END,
-         last_activity_at = CASE
-           WHEN excluded.last_activity_at > last_activity_at THEN excluded.last_activity_at
-           ELSE last_activity_at
-         END,
-         -- First non-null wins: a session keeps the branch it started on
-         -- even if later records omit it.
-         git_branch = COALESCE(git_branch, excluded.git_branch),
-         git_commit = COALESCE(git_commit, excluded.git_commit),
-         source_path = COALESCE(source_path, excluded.source_path),
-         -- Overwritten, not preserved. A row was pinned forever to whatever
-         -- root it was first written under, so renaming or moving a project
-         -- directory left its whole history filtered out of every read while
-         -- the rows sat intact in the table. This upsert only runs because a
-         -- scraper just attributed this session to *this* project, so taking
-         -- the new root is the same decision the insert would make.
-         project_root = excluded.project_root,
-         updated_at = excluded.updated_at`,
-    );
-    const insertMessage = db.prepare(
-      `INSERT OR IGNORE INTO messages
-       (id, session_ref, tool, source_session_id, timestamp, role, content,
-        message_index, content_hash, metadata_json, source_pointer, indexed_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    );
-
-    this.stmts = {
-      upsertSession,
-      insertMessage,
-      upsertChunkTxn: db.transaction((sessionArgs: unknown[], messageArgs: unknown[]) => {
-        upsertSession.run(...sessionArgs);
-        insertMessage.run(...messageArgs);
-      }),
-      sessionRollup: db.prepare(
-        `UPDATE sessions
-         SET message_count = (
-               SELECT COUNT(*) FROM messages WHERE messages.session_ref = sessions.session_ref
-             ),
-             preview = COALESCE(
-               (
-                 SELECT substr(content, 1, 240)
-                 FROM messages
-                 WHERE messages.session_ref = sessions.session_ref
-                 ORDER BY timestamp ASC, message_index ASC, id ASC
-                 LIMIT 1
-               ),
-               preview
-             )
-         WHERE session_ref = ?`,
-      ),
-      /**
-       * Repair sessions whose stored roll-up disagrees with their messages.
-       *
-       * The per-session roll-up above runs once per scan, after every scraper
-       * has finished — but each scraper advances its own cursor as soon as it
-       * finishes. Between those two points the messages are committed and the
-       * store will not be re-read, so a process that dies in the gap leaves the
-       * session reporting zero messages permanently, with its content still
-       * fully retrievable. Re-ingesting cannot fix that; only reconciling
-       * against what is already stored can.
-       *
-       * The WHERE clause is what keeps this cheap: rows that agree are not
-       * written, so a healthy index pays a single indexed COUNT per session and
-       * dirties nothing. `idx_messages_session_order` leads with `session_ref`,
-       * so each count is index-served rather than a table scan.
-       */
-      reconcileSessionRollups: db.prepare(
-        `UPDATE sessions
-         SET message_count = (
-               SELECT COUNT(*) FROM messages WHERE messages.session_ref = sessions.session_ref
-             ),
-             preview = COALESCE(
-               (
-                 SELECT substr(content, 1, 240)
-                 FROM messages
-                 WHERE messages.session_ref = sessions.session_ref
-                 ORDER BY timestamp ASC, message_index ASC, id ASC
-                 LIMIT 1
-               ),
-               preview
-             )
-         WHERE message_count <> (
-           SELECT COUNT(*) FROM messages WHERE messages.session_ref = sessions.session_ref
-         )`,
-      ),
-      /**
-       * Sessions whose windows stop short of their last message.
-       *
-       * `MAX(message_end_index)` against `MAX(message_index)` is exact rather
-       * than approximate: on a healthy index every session reports a gap of
-       * zero, so this returns nothing and the scan pays one indexed pass.
-       * Ordered by recency because the repair is bounded per scan.
-       */
-      selectSessionsMissingUnits: db.prepare(
-        `SELECT s.session_ref
-         FROM sessions s
-         WHERE COALESCE(
-                 (SELECT MAX(u.message_end_index) FROM retrieval_units u
-                  WHERE u.session_ref = s.session_ref), -1
-               ) < COALESCE(
-                 (SELECT MAX(m.message_index) FROM messages m
-                  WHERE m.session_ref = s.session_ref), -1
-               )
-         ORDER BY s.last_activity_at DESC
-         LIMIT ?`,
-      ),
-      selectSessionMessages: db.prepare(
-        `SELECT id, timestamp, role, content, message_index, source_pointer
-         FROM messages
-         WHERE session_ref = ?
-         ORDER BY timestamp ASC, message_index ASC, id ASC`,
-      ),
-      selectSessionTool: db.prepare("SELECT tool FROM sessions WHERE session_ref = ?"),
-      selectUnitIds: db.prepare("SELECT id FROM retrieval_units WHERE session_ref = ?"),
-      insertUnit: db.prepare(
-        `INSERT INTO retrieval_units
-         (id, session_ref, tool, message_start_index, message_end_index,
-          started_at, ended_at, content, content_hash, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ),
-      insertUnitFts: db.prepare(
-        `INSERT INTO retrieval_units_fts(unit_id, session_ref, tool, content)
-         VALUES (?, ?, ?, ?)`,
-      ),
-      deleteUnit: db.prepare("DELETE FROM retrieval_units WHERE id = ?"),
-    };
+    this.stmts = prepareStatements(this.getDb());
     return this.stmts;
   }
 
@@ -1459,98 +1060,12 @@ export class SqliteHandoffIndex implements SessionService {
     if (this.freezeVectors) {
       return;
     }
-    const db = this.getDb();
-    const filters = normalizeToolFilter(toolFilter);
-    const toolWhere = filters.length > 0 ? `AND u.tool IN (${placeholders(filters.length)})` : "";
-    const rows = db
-      .prepare(
-        `SELECT u.id AS unit_id, u.content, u.content_hash
-         FROM retrieval_units u
-         LEFT JOIN retrieval_unit_vectors v
-           ON v.unit_id = u.id
-          AND v.model = ?
-          AND v.content_hash = u.content_hash
-         WHERE v.unit_id IS NULL ${toolWhere}
-         ORDER BY u.ended_at DESC`,
-      )
-      .all(this.embeddingProvider.model, ...filters) as Array<{
-        unit_id: string;
-        content: string;
-        content_hash: string;
-      }>;
-
-    this.vectorBacklog = 0;
-    if (rows.length === 0) {
-      return;
-    }
-
-    const upsert = db.prepare(
-      `INSERT INTO retrieval_unit_vectors
-       (unit_id, model, dimensions, content_hash, vector, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(unit_id, model) DO UPDATE SET
-         dimensions = excluded.dimensions,
-         content_hash = excluded.content_hash,
-         vector = excluded.vector,
-         created_at = excluded.created_at`,
-    );
-
-    // Bounded batches keep memory flat on a first-time index of a large
-    // history, and each batch commits before the next one embeds.
-    // Small enough that the budget below can actually bite. At 64 windows a
-    // single batch took 20-30s on the real index, so the deadline — checked
-    // between batches — could not stop a search from blowing straight past it.
-    const unitBatchSize = 8;
-    // Answer with the vectors that exist rather than making the caller wait
-    // for the whole corpus. Every batch below commits before the next starts,
-    // so an unfinished pass is progress, not wasted work.
-    const deadline = this.vectorBudgetMs > 0 ? Date.now() + this.vectorBudgetMs : Infinity;
-    const passStartedAt = Date.now();
-    let embedded = 0;
-    for (let start = 0; start < rows.length; start += unitBatchSize) {
-      if (Date.now() >= deadline) {
-        this.vectorBacklog = rows.length - start;
-        break;
-      }
-      const batch = rows.slice(start, start + unitBatchSize);
-      embedded += batch.length;
-      // Long windows are segmented to the model's sequence budget and
-      // mean-pooled, so content beyond the window's opening still shapes
-      // the unit's vector.
-      const segmented = batch.map((row) => capSegments(splitTextForEmbedding(row.content)));
-      const segmentVectors = await this.embeddingProvider.embedBatch(segmented.flat());
-
-      let cursor = 0;
-      const pooled = segmented.map((segments) => {
-        const slice = segmentVectors.slice(cursor, cursor + segments.length);
-        cursor += segments.length;
-        return poolVectors(slice);
-      });
-
-      const now = new Date().toISOString();
-      const transaction = db.transaction(() => {
-        batch.forEach((row, index) => {
-          const vector = pooled[index];
-          upsert.run(
-            row.unit_id,
-            this.embeddingProvider.model,
-            vector.length,
-            row.content_hash,
-            serializeVector(vector),
-            now,
-          );
-        });
-      });
-      transaction();
-    }
-
-    // Per window rather than per pass, so a pass that embedded eight and one
-    // that embedded eight hundred report a comparable figure — and so the
-    // backlog can be read as a duration rather than a count.
-    if (embedded > 0) {
-      const perUnit = Math.round(((Date.now() - passStartedAt) / embedded) * 10) / 10;
-      setSetting(db, "vector_ms_per_unit", String(perUnit));
-    }
+    this.vectorBacklog = await ensureVectors({
+      db: this.getDb(),
+      embeddingProvider: this.embeddingProvider,
+      filters: normalizeToolFilter(toolFilter),
+      vectorBudgetMs: this.vectorBudgetMs,
+    });
   }
 
   private async initialize(): Promise<void> {
@@ -1591,23 +1106,7 @@ export class SqliteHandoffIndex implements SessionService {
       await this.clearScraperCursors();
     }
 
-    this.dropVectorsFromOtherModels();
-  }
-
-  /**
-   * Discard vectors built by any model other than the one now in use.
-   *
-   * Every read filters on `model`, so stale rows are already inert — but
-   * nothing deletes them, and changing the default model would otherwise
-   * leave a whole second copy of the corpus in the index permanently. The
-   * vectors are derived data that the next searches rebuild, so dropping
-   * them costs re-embedding, which is budgeted and incremental, and no
-   * transcript content is lost either way.
-   */
-  private dropVectorsFromOtherModels(): void {
-    this.getDb()
-      .prepare("DELETE FROM retrieval_unit_vectors WHERE model != ?")
-      .run(this.embeddingProvider.model);
+    dropVectorsFromOtherModels(this.getDb(), this.embeddingProvider.model);
   }
 
   private async deleteDatabaseFiles(): Promise<void> {
@@ -1639,106 +1138,6 @@ export class SqliteHandoffIndex implements SessionService {
     }
     return this.db;
   }
-}
-
-function openDatabase(dbPath: string): DatabaseHandle {
-  const db = new Database(dbPath);
-  try {
-    db.pragma("journal_mode = WAL");
-    db.pragma("foreign_keys = ON");
-    const objectCount = (
-      db.prepare("SELECT COUNT(*) AS count FROM sqlite_master").get() as CountRow
-    ).count;
-    const version = db.pragma("user_version", { simple: true }) as number;
-    if (objectCount > 0 && version !== SCHEMA_VERSION) {
-      throw new Error(
-        `xtctx index schema version ${version} does not match supported version ${SCHEMA_VERSION}`,
-      );
-    }
-    createSchema(db);
-    db.pragma(`user_version = ${SCHEMA_VERSION}`);
-    return db;
-  } catch (error) {
-    db.close();
-    throw error;
-  }
-}
-
-function createSchema(db: DatabaseHandle): void {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS sessions (
-      session_ref TEXT PRIMARY KEY,
-      tool TEXT NOT NULL,
-      source_session_id TEXT NOT NULL,
-      project_root TEXT NOT NULL,
-      git_branch TEXT,
-      git_commit TEXT,
-      started_at TEXT NOT NULL,
-      last_activity_at TEXT NOT NULL,
-      message_count INTEGER NOT NULL DEFAULT 0,
-      preview TEXT,
-      source_path TEXT,
-      updated_at TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS messages (
-      id TEXT PRIMARY KEY,
-      session_ref TEXT NOT NULL REFERENCES sessions(session_ref) ON DELETE CASCADE,
-      tool TEXT NOT NULL,
-      source_session_id TEXT NOT NULL,
-      timestamp TEXT NOT NULL,
-      role TEXT NOT NULL,
-      content TEXT NOT NULL,
-      message_index INTEGER NOT NULL,
-      content_hash TEXT NOT NULL,
-      metadata_json TEXT NOT NULL,
-      source_pointer TEXT,
-      indexed_at TEXT NOT NULL
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_sessions_activity ON sessions(last_activity_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_messages_session_order
-      ON messages(session_ref, timestamp, message_index, id);
-
-    CREATE TABLE IF NOT EXISTS retrieval_units (
-      id TEXT PRIMARY KEY,
-      session_ref TEXT NOT NULL REFERENCES sessions(session_ref) ON DELETE CASCADE,
-      tool TEXT NOT NULL,
-      message_start_index INTEGER NOT NULL,
-      message_end_index INTEGER NOT NULL,
-      started_at TEXT NOT NULL,
-      ended_at TEXT NOT NULL,
-      content TEXT NOT NULL,
-      content_hash TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_retrieval_units_session
-      ON retrieval_units(session_ref, message_start_index, message_end_index);
-    CREATE INDEX IF NOT EXISTS idx_retrieval_units_tool_time
-      ON retrieval_units(tool, ended_at DESC);
-
-    CREATE VIRTUAL TABLE IF NOT EXISTS retrieval_units_fts
-      USING fts5(unit_id UNINDEXED, session_ref UNINDEXED, tool UNINDEXED, content);
-
-    CREATE TABLE IF NOT EXISTS retrieval_unit_vectors (
-      unit_id TEXT NOT NULL REFERENCES retrieval_units(id) ON DELETE CASCADE,
-      model TEXT NOT NULL,
-      dimensions INTEGER NOT NULL,
-      content_hash TEXT NOT NULL,
-      vector BLOB NOT NULL,
-      created_at TEXT NOT NULL,
-      PRIMARY KEY (unit_id, model)
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_retrieval_unit_vectors_model
-      ON retrieval_unit_vectors(model);
-
-    CREATE TABLE IF NOT EXISTS settings (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    );
-  `);
 }
 
 /**
@@ -1784,53 +1183,6 @@ function formatSessionRow(row: SessionRow): SessionSummary {
     git_branch: row.git_branch ?? undefined,
     git_commit: row.git_commit ?? undefined,
   };
-}
-
-function buildMessageWindows(
-  messages: MessageRow[],
-  windowSize: number,
-  windowStride: number,
-): Array<{ start: MessageRow; end: MessageRow; messages: MessageRow[] }> {
-  const windows: Array<{ start: MessageRow; end: MessageRow; messages: MessageRow[] }> = [];
-  for (let start = 0; start < messages.length; start += windowStride) {
-    const slice = messages.slice(start, start + windowSize);
-    if (slice.length === 0) {
-      continue;
-    }
-
-    windows.push({
-      start: slice[0],
-      end: slice[slice.length - 1],
-      messages: slice,
-    });
-
-    if (start + windowSize >= messages.length) {
-      break;
-    }
-  }
-  return windows;
-}
-
-function formatRetrievalUnitContent(sessionRef: string, messages: MessageRow[]): string {
-  const lines = [
-    `Session: ${sessionRef}`,
-    `Chronological window: messages ${messages[0].message_index} through ${
-      messages[messages.length - 1].message_index
-    }`,
-  ];
-
-  for (const [index, message] of messages.entries()) {
-    lines.push(
-      [
-        `Turn ${index + 1}/${messages.length}`,
-        `message_index=${message.message_index}`,
-        `${message.role} @ ${message.timestamp}`,
-      ].join(" | "),
-    );
-    lines.push(message.content);
-  }
-
-  return lines.join("\n");
 }
 
 function normalizeLimit(value: number, fallback: number): number {
@@ -1893,10 +1245,6 @@ function toFtsQuery(query: string): string {
   return meaningful.map((term) => `"${term.replace(/"/g, '""')}"`).join(" OR ");
 }
 
-function placeholders(countValue: number): string {
-  return Array.from({ length: countValue }, () => "?").join(", ");
-}
-
 /**
  * A row count restricted to this project. The `where` clause is built from
  * literals in this module and the value is bound, never interpolated.
@@ -1916,47 +1264,3 @@ function countWhere(
   return row?.count ?? 0;
 }
 
-function getSetting(db: DatabaseHandle, key: string): string | null {
-  const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as
-    | { value: string }
-    | undefined;
-  return row?.value ?? null;
-}
-
-function setSetting(db: DatabaseHandle, key: string, value: string): void {
-  db.prepare(
-    `INSERT INTO settings(key, value)
-     VALUES (?, ?)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-  ).run(key, value);
-}
-
-function clearSetting(db: DatabaseHandle, key: string): void {
-  db.prepare("DELETE FROM settings WHERE key = ?").run(key);
-}
-
-function sourcePathFromMetadata(metadata: ConversationChunk["metadata"]): string | null {
-  const value = (metadata as { sourcePath?: unknown }).sourcePath;
-  return typeof value === "string" && value.trim().length > 0 ? value : null;
-}
-
-function overlapTimestamp(value: Date): Date {
-  return new Date(Math.max(0, value.getTime() - SOURCE_CURSOR_OVERLAP_MS));
-}
-
-function hashParts(parts: string[]): string {
-  const hash = createHash("sha256");
-  for (const part of parts) {
-    hash.update(part);
-    hash.update("\0");
-  }
-  return hash.digest("hex");
-}
-
-async function safeDetect(scraper: ConversationScraper): Promise<boolean> {
-  try {
-    return await scraper.detect();
-  } catch {
-    return false;
-  }
-}
