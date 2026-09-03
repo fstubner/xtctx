@@ -14,7 +14,7 @@ import {
 } from "./base.js";
 import { pathMatchesProject } from "../utils/project-scope.js";
 import { withDriftReport } from "./drift-log.js";
-import { MAX_LINE_BYTES, isWithinLineLimit } from "./limits.js";
+import { MAX_LINE_BYTES } from "./limits.js";
 import { fileHeadHash, resumeOffset } from "./base.js";
 import { readJsonlLines } from "./jsonl-reader.js";
 import type { FileCursor } from "../types/scraper.js";
@@ -184,29 +184,31 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
         readTo = entry.endOffset;
         const line = entry.line;
         if (line === null) {
-          // Over the cap and discarded unread; see the classification below.
-          if (!entry.oversized) continue;
+          // Over the cap and discarded unread. Both branches used to
+          // `continue` in silence, and the classification that was meant to
+          // run here sat below a length check the reader makes unreachable —
+          // so an oversized record vanished permanently with nothing said,
+          // measured as zero warnings for a 9MB record between two ordinary
+          // ones. claude-code and copilot-cli both report this; codex was the
+          // only reader that went quiet.
+          //
+          // Not reported unconditionally, which is the other half of why this
+          // was wrong. A `compacted` record inlines the whole prior
+          // conversation in `replacement_history`, so it is routinely tens of
+          // megabytes and carries nothing unique — those turns are already
+          // indexed from the `response_item` and `event_msg` records they were
+          // copied from. A real store emits 47 of them a scan, and reporting
+          // every one is the crying-wolf failure this project already made
+          // once with `atis-latch`.
+          //
+          // The head is the whole record this reader still has, which is
+          // exactly enough to read its `type`.
+          if (entry.oversized && !isKnownBulkyRecord(entry.head)) {
+            warnDrift(filePath, `JSONL line exceeds ${MAX_LINE_BYTES} bytes; skipped`);
+          }
           continue;
         }
         if (!line.trim()) {
-          continue;
-        }
-
-        // See limits.ts: line length here is the writing tool's choice, not
-        // ours, and an unbounded line is buffered whole before parsing.
-        if (!isWithinLineLimit(line)) {
-          // A `compacted` record inlines the whole prior conversation in
-          // `replacement_history`, so it is routinely tens of megabytes and
-          // carries nothing unique: those turns are already indexed from the
-          // `response_item` and `event_msg` records they were copied from.
-          // Reporting it as drift on every scan is the crying-wolf failure
-          // this project already made once with `atis-latch`.
-          //
-          // Read from the head of the line rather than by parsing it, because
-          // parsing is the cost the cap exists to avoid.
-          if (!isKnownBulkyRecord(line)) {
-            warnDrift(filePath, `JSONL line exceeds ${MAX_LINE_BYTES} chars; skipped`);
-          }
           continue;
         }
 

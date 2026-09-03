@@ -16,13 +16,36 @@ interface JsonlLine {
   endOffset: number;
   /** True when the line was over the cap; `line` is null and its bytes are gone. */
   oversized: boolean;
+  /**
+   * The first bytes of an oversized line, decoded. Empty for every other line.
+   *
+   * A caller that only knows "something too big was skipped" has to choose
+   * between reporting every one — a real Codex store emits 47 benign oversized
+   * records a scan, all of them `compacted` restatements — and reporting none,
+   * which is silent data loss. Neither is right, and telling them apart needs
+   * the record's `type`, which lives at the head.
+   *
+   * Bounded, so it cannot reintroduce the cost the cap exists to avoid: this
+   * is the only part of a discarded line that is ever held.
+   */
+  head: string;
 }
 
 interface ReadJsonlOptions {
   /** Byte offset to resume from. Must be a boundary this reader reported. */
   start?: number;
   maxLineBytes?: number;
+  /** How much of an oversized line to keep for classification. */
+  headBytes?: number;
 }
+
+/**
+ * Enough of an oversized line to read its `type` field, and no more.
+ *
+ * The head is held for every line that goes over the cap, so this is a
+ * permanent cost per discarded record rather than a one-off.
+ */
+const DEFAULT_HEAD_BYTES = 512;
 
 /**
  * Read a JSONL file line by line, reporting byte offsets and bounding memory.
@@ -46,6 +69,7 @@ export async function* readJsonlLines(
   options: ReadJsonlOptions = {},
 ): AsyncGenerator<JsonlLine> {
   const maxLineBytes = options.maxLineBytes ?? MAX_LINE_BYTES;
+  const headBytes = options.headBytes ?? DEFAULT_HEAD_BYTES;
   const start = options.start ?? 0;
 
   const stream = createReadStream(path, start > 0 ? { start } : {});
@@ -54,6 +78,17 @@ export async function* readJsonlLines(
   let pendingBytes = 0;
   let discarding = false;
   let consumed = start;
+  // Kept separately from `pending`, which is dropped the moment a line goes
+  // over the cap. Filled from the front, so it survives that drop.
+  let head: Buffer[] = [];
+  let headLength = 0;
+
+  const keepHead = (piece: Buffer): void => {
+    if (headLength >= headBytes) return;
+    const slice = piece.subarray(0, headBytes - headLength);
+    head.push(slice);
+    headLength += slice.length;
+  };
 
   for await (const chunk of stream as AsyncIterable<Buffer>) {
     let from = 0;
@@ -67,15 +102,23 @@ export async function* readJsonlLines(
       consumed += lineBytes + 1;
 
       if (discarding || lineBytes > maxLineBytes) {
-        yield { line: null, endOffset: consumed, oversized: true };
+        keepHead(segment);
+        yield {
+          line: null,
+          endOffset: consumed,
+          oversized: true,
+          head: Buffer.concat(head).toString("utf-8"),
+        };
       } else {
         const buffer = pending.length > 0 ? Buffer.concat([...pending, segment]) : segment;
-        yield { line: buffer.toString("utf-8"), endOffset: consumed, oversized: false };
+        yield { line: buffer.toString("utf-8"), endOffset: consumed, oversized: false, head: "" };
       }
 
       pending = [];
       pendingBytes = 0;
       discarding = false;
+      head = [];
+      headLength = 0;
       from = i + 1;
     }
 
@@ -85,6 +128,7 @@ export async function* readJsonlLines(
     }
 
     pendingBytes += tail.length;
+    keepHead(tail);
     if (discarding || pendingBytes > maxLineBytes) {
       // Past the cap: keep counting so the offset stays right, but stop
       // holding the bytes. This is the whole point of not using readline.
