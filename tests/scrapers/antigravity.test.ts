@@ -4,19 +4,23 @@ import { join, sep } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   AntigravityScraper,
-  parseAntigravityRuntimeSteps,
-  HANDLED_STEP_TYPES,
-  KNOWN_UNHANDLED_STEP_TYPES,
-  reportHandledStepRenames,
-  describeUnreachableServer,
-  listConversationFileIds,
-  mapWithConcurrency,
-  parsePosixListeningPorts,
-  shouldFetchTrajectory,
-  parseWindowsListeningPorts,
   type AntigravityRuntimeClient,
   type AntigravityRuntimeConversation,
 } from "@xtctx/scrapers/antigravity";
+import {
+  HANDLED_STEP_TYPES,
+  KNOWN_UNHANDLED_STEP_TYPES,
+  parseAntigravityRuntimeSteps,
+  reportHandledStepRenames,
+} from "@xtctx/scrapers/antigravity/parse";
+import { shouldFetchTrajectory } from "@xtctx/scrapers/antigravity/project-match";
+import {
+  describeUnreachableServer,
+  mapWithConcurrency,
+  parsePosixListeningPorts,
+  parseWindowsListeningPorts,
+} from "@xtctx/scrapers/antigravity/runtime-client";
+import { listConversationFileIds } from "@xtctx/scrapers/antigravity/store";
 import { readDriftLog } from "@xtctx/scrapers/drift-log";
 import type { AntigravityChunk } from "@xtctx/types/scraper";
 
