@@ -1,12 +1,20 @@
-import { readdir, readFile, rm, rmdir, stat } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative as relativePath, resolve } from "node:path";
+import { readFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import { writeFileAtomic } from "../utils/atomic-file.js";
-import { matchLineEndings, normalizeNewlines, removeManagedBlocks } from "./managed-block.js";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { NATIVE_MCP_TOOLS, removeMcpServerConfigs, resolveConfigTarget } from "./mcp-config.js";
 import { BUILT_IN_SKILL_ID, removeSyncedSkillsForTools } from "./skills.js";
 import { SUPPORTED_TOOLS, getToolDefinition, type ToolId } from "../tools/sources.js";
-import { CLAUDE_HOOK_MARKER, CLAUDE_TOOL_PERMISSIONS } from "./setup.js";
+import { removeClaudeHook, removeClaudeHookFromSettings } from "./claude-settings.js";
+import { removeManagedBlocksFromFile } from "./instruction-blocks.js";
+import {
+  directoryIsEmpty,
+  isRecord,
+  pathExists,
+  pruneEmptyParents,
+  readUtf8IfExists,
+  removeIfPresent,
+} from "./file-io.js";
 
 const TOOL_ALIASES: Record<string, ToolId> = {
   claude: "claude-code",
@@ -411,69 +419,6 @@ function plannedSkillWrites(projectRoot: string, tool: ToolId): PlannedDisconnec
   return writes;
 }
 
-async function removeManagedBlocksFromFile(filePath: string, projectRoot: string): Promise<boolean> {
-  const existing = await readUtf8IfExists(filePath);
-  if (existing === null) {
-    return false;
-  }
-
-  // Untrimmed: `removeManagedBlocks` gives back exactly the bytes that were
-  // there before setup added its separator, and trimming here would undo that
-  // by editing the tail of the user's own content.
-  const repaired = removeManagedBlocks(existing);
-  if (normalizeNewlines(existing) === repaired) {
-    return false;
-  }
-
-  if (!repaired.trim() || isOnlyFrontmatter(repaired)) {
-    // The file held nothing but the xtctx block — or the YAML frontmatter
-    // xtctx itself wrote above it, which Cursor would keep loading as an
-    // xtctx rule. Either way setup created it and disconnect owns removing
-    // it, rather than leaving a stub behind.
-    await rm(filePath, { force: true });
-    return true;
-  }
-
-  // Put the author's line endings back: removal must not reformat the file.
-  // No trailing newline is appended — whatever the file ended with is already
-  // in `repaired`, and adding one is an edit to content xtctx does not own.
-  await writeFileAtomic(filePath, matchLineEndings(repaired, existing), {
-    containWithin: projectRoot,
-  });
-  return true;
-}
-
-/** True when the directory is missing or holds nothing. */
-async function directoryIsEmpty(path: string): Promise<boolean> {
-  try {
-    return (await readdir(path)).length === 0;
-  } catch {
-    // Missing, or not a directory: either way there is no index to protect.
-    return true;
-  }
-}
-
-async function removeIfPresent(path: string): Promise<boolean> {
-  try {
-    await stat(path);
-  } catch {
-    return false;
-  }
-  await rm(path, { recursive: true, force: true });
-  return true;
-}
-
-/**
- * Remove directories that only existed to hold what was just deleted.
- *
- * Disconnect left `.vscode/`, `.github/instructions/` and
- * `.cursor/rules/xtctx-skills/` standing empty — directories xtctx created,
- * now holding nothing, in projects that never had them. It walks upward while
- * each directory is genuinely empty, so anything the user keeps alongside our
- * files stops it immediately.
- */
-/** Strictly below the project root — the root itself is never a candidate. */
-
 /**
  * Cheap check for any sign that setup ran here.
  *
@@ -504,208 +449,6 @@ async function hasXtctxFootprint(projectRoot: string): Promise<boolean> {
   }
 
   return false;
-}
-
-async function pathExists(path: string): Promise<boolean> {
-  return stat(path).then(() => true).catch(() => false);
-}
-
-function isInsideProject(candidate: string, projectRoot: string): boolean {
-  const relative = relativePath(projectRoot, candidate);
-  return relative.length > 0 && !relative.startsWith("..") && !isAbsolute(relative);
-}
-
-async function pruneEmptyParents(directory: string, projectRoot: string): Promise<void> {
-  let current = directory;
-
-  // Hard floor at the project root. Several write paths sit at the root
-  // itself — `.mcp.json`, `CLAUDE.md`, `AGENTS.md` — so `dirname` is the root,
-  // and without this the walk climbed straight out of the project and deleted
-  // it along with its empty ancestors. Emptiness is not a licence to delete
-  // something xtctx never created.
-  if (!isInsideProject(current, projectRoot)) {
-    return;
-  }
-
-  // Bounded: three levels covers the deepest xtctx creates
-  // (`.cursor/rules/xtctx-skills`), and a bound is cheaper than reasoning
-  // about how far up an unexpected path could walk.
-  for (let depth = 0; depth < 3; depth += 1) {
-    if (!isInsideProject(current, projectRoot)) {
-      return;
-    }
-
-    let entries: string[];
-    try {
-      entries = await readdir(current);
-    } catch {
-      return;
-    }
-    if (entries.length > 0) {
-      return;
-    }
-    try {
-      // `rmdir`, not `rm`: it refuses a non-empty directory, so it is its own
-      // safety net. (`rm` without `recursive` throws on any directory at all,
-      // which the catch below silently turned into "give up" — the prune
-      // looked implemented and did nothing.)
-      await rmdir(current);
-    } catch {
-      return;
-    }
-    current = dirname(current);
-  }
-}
-
-/** True when nothing survives but a single YAML frontmatter block. */
-function isOnlyFrontmatter(content: string): boolean {
-  const trimmed = content.trim();
-  if (!trimmed.startsWith("---")) {
-    return false;
-  }
-  const end = trimmed.indexOf("\n---", 3);
-  return end !== -1 && trimmed.slice(end + 4).trim().length === 0;
-}
-
-/** Strip xtctx SessionStart matcher groups from .claude/settings.json. */
-async function removeClaudeHookFromSettings(
-  settingsPath: string,
-  projectRoot: string,
-): Promise<boolean> {
-  const raw = await readUtf8IfExists(settingsPath);
-  if (raw === null) {
-    return false;
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw) as unknown;
-  } catch {
-    return false;
-  }
-
-  if (!isRecord(parsed)) {
-    return false;
-  }
-
-  // Setup grants the five xtctx tools in `permissions.allow`; disconnect takes
-  // exactly those back and leaves everything else. Filtering by our own list
-  // rather than by prefix is what keeps a rule the user wrote by hand — or one
-  // another tool added — out of the blast radius.
-  let permissionsChanged = false;
-  if (isRecord(parsed.permissions) && Array.isArray(parsed.permissions.allow)) {
-    const allow = parsed.permissions.allow;
-    const kept = allow.filter(
-      (entry) => typeof entry !== "string" || !(CLAUDE_TOOL_PERMISSIONS as readonly string[]).includes(entry),
-    );
-    if (kept.length !== allow.length) {
-      permissionsChanged = true;
-      if (kept.length === 0) {
-        delete parsed.permissions.allow;
-        if (Object.keys(parsed.permissions).length === 0) {
-          delete parsed.permissions;
-        }
-      } else {
-        parsed.permissions.allow = kept;
-      }
-    }
-  }
-
-  if (!isRecord(parsed.hooks)) {
-    if (permissionsChanged) {
-      await writeFileAtomic(settingsPath, JSON.stringify(parsed, null, 2) + "\n", {
-        containWithin: projectRoot,
-      });
-    }
-    return permissionsChanged;
-  }
-
-  const sessionStart = Array.isArray(parsed.hooks.SessionStart) ? parsed.hooks.SessionStart : [];
-  const kept = sessionStart
-    .map((group) => {
-      if (!isRecord(group) || !Array.isArray(group.hooks)) {
-        return group;
-      }
-      const hooks = group.hooks.filter(
-        (hook) =>
-          !isRecord(hook) ||
-          typeof hook.command !== "string" ||
-          !hook.command.includes(CLAUDE_HOOK_MARKER),
-      );
-      return hooks.length === group.hooks.length ? group : { ...group, hooks };
-    })
-    .filter(
-      (group) => !isRecord(group) || !Array.isArray(group.hooks) || group.hooks.length > 0,
-    );
-
-  if (JSON.stringify(kept) === JSON.stringify(sessionStart) && !permissionsChanged) {
-    return false;
-  }
-
-  parsed.hooks.SessionStart = kept;
-
-  // A settings file left holding nothing but an empty SessionStart list was
-  // created by setup for that hook alone; remove it rather than leave litter.
-  const hooksOnly =
-    Object.keys(parsed).length === 1 &&
-    Object.keys(parsed.hooks).length === 1 &&
-    kept.length === 0;
-  if (hooksOnly) {
-    await rm(settingsPath, { force: true });
-    return true;
-  }
-
-  await writeFileAtomic(settingsPath, JSON.stringify(parsed, null, 2) + "\n", {
-    containWithin: projectRoot,
-  });
-  return true;
-}
-
-async function removeClaudeHook(hooksPath: string, projectRoot: string): Promise<boolean> {
-  const raw = await readUtf8IfExists(hooksPath);
-  if (raw === null) {
-    return false;
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw) as unknown;
-  } catch {
-    return false;
-  }
-
-  if (!isRecord(parsed) || !isRecord(parsed.hooks)) {
-    return false;
-  }
-
-  const sessionStart = Array.isArray(parsed.hooks.SessionStart) ? parsed.hooks.SessionStart : [];
-  const nextSessionStart = sessionStart.filter(
-    (entry) => !isRecord(entry) ||
-      typeof entry.command !== "string" ||
-      !entry.command.includes(CLAUDE_HOOK_MARKER),
-  );
-
-  if (nextSessionStart.length === sessionStart.length) {
-    return false;
-  }
-
-  parsed.hooks.SessionStart = nextSessionStart;
-  await writeFileAtomic(hooksPath, JSON.stringify(parsed, null, 2) + "\n", {
-    containWithin: projectRoot,
-  });
-  return true;
-}
-
-async function readUtf8IfExists(filePath: string): Promise<string | null> {
-  try {
-    return await readFile(filePath, "utf-8");
-  } catch {
-    return null;
-  }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function dedupePlannedWrites(writes: PlannedDisconnectWrite[]): PlannedDisconnectWrite[] {
