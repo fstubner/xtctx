@@ -364,3 +364,141 @@ function roundScore(value: number): number {
   return Math.round(value * 1000) / 1000;
 }
 
+
+/** A window with a stored vector, as the semantic query returns it. */
+export interface VectorUnitRow extends RetrievalUnitRow {
+  vector: Buffer;
+  dimensions: number;
+}
+
+/**
+ * Score windows against a query and group them into sessions.
+ *
+ * Everything here is a pure function of what the caller already fetched: the
+ * vectorized windows, the keyword hits, and the embedded query (null when
+ * there are no vectors to compare it against). The database work and the
+ * embedding call stay with the index; this is the part the eval tunes, so it
+ * lives beside the thresholds it applies.
+ */
+export function rankSearchCandidates(options: {
+  rows: VectorUnitRow[];
+  keywordRows: RetrievalUnitRow[];
+  queryVector: Float32Array | null;
+  mode: Exclude<SessionSearchMode, "keyword">;
+  limit: number;
+  cosineSimilarity: (left: Float32Array, right: Float32Array) => number;
+  deserializeVector: (buffer: Buffer, dimensions: number) => Float32Array;
+}): SessionSummary[] {
+  const { rows, keywordRows, queryVector, mode, limit } = options;
+
+  /**
+   * Windows that matched on words but have no vector yet.
+   *
+   * These used to be unreachable. The semantic query inner-joins the vector
+   * table, so hybrid could only ever return units that were already
+   * embedded, and a keyword hit on anything else was invisible. Vectorizing
+   * is budgeted and runs eight windows at a time on semantic searches only,
+   * so a partly-embedded index is the ordinary state rather than an edge
+   * case — this project sat at 8 vectorized windows out of 1,770.
+   *
+   * Measured on the eval by freezing the vectorized fraction, hybrid recall
+   * tracked coverage almost exactly — 0.500 at half embedded, 0.250 at a
+   * quarter, nothing at all at zero — while keyword held 0.850 throughout.
+   * Hybrid is the default mode, so the default was a strict subset of the
+   * cheaper one it is supposed to improve on.
+   */
+  const vectorized = new Set(rows.map((row) => row.unit_id));
+  const keywordOnly = keywordRows.filter((row) => !vectorized.has(row.unit_id));
+
+  if (rows.length === 0 && keywordOnly.length === 0) {
+    return [];
+  }
+
+  const keywordScores = rankKeywordRows(keywordRows);
+  const timeRange = getTimeRange([...rows, ...keywordOnly].map((row) => row.ended_at));
+  const candidates = [
+    ...rows.map((row) => ({
+      row: row as RetrievalUnitRow,
+      rawCosine: queryVector
+        ? options.cosineSimilarity(queryVector, options.deserializeVector(row.vector, row.dimensions))
+        : 0,
+      keywordScore: keywordScores.get(row.unit_id) ?? 0,
+      recencyScore: scoreRecency(row.ended_at, timeRange),
+      continuityScore: scoreContinuity(row.message_end_index, row.session_message_count),
+    })),
+    // No semantic evidence yet — carried on the keyword match alone, which
+    // the filter below still requires.
+    ...keywordOnly.map((row) => ({
+      row,
+      rawCosine: 0,
+      keywordScore: keywordScores.get(row.unit_id) ?? 0,
+      recencyScore: scoreRecency(row.ended_at, timeRange),
+      continuityScore: scoreContinuity(row.message_end_index, row.session_message_count),
+    })),
+  ]
+    // Require actual evidence. Raw cosine sits near zero for unrelated
+    // content, so without this the entire corpus came back for a query
+    // matching nothing, formatted exactly like a real hit. A unit qualifies
+    // on semantic similarity or a keyword match; "no matching sessions" is
+    // a more useful answer than a nearest vector.
+    .filter((item) => item.rawCosine >= MIN_SEMANTIC_COSINE || item.keywordScore > 0);
+
+  // Nothing here is actually similar to the query — keep only what matched
+  // on words. For a query that means nothing to this corpus that leaves
+  // nothing at all, which is the answer.
+  const bestCosine = candidates.reduce((best, item) => Math.max(best, item.rawCosine), 0);
+  const semanticallyConfident = bestCosine >= MIN_CONFIDENT_COSINE;
+  const surviving = semanticallyConfident
+    ? candidates
+    : candidates.filter((item) => item.keywordScore > 0);
+
+  if (surviving.length === 0) {
+    return [];
+  }
+
+  // Ordering and reporting are two different jobs, and conflating them is
+  // what made the score meaningless.
+  //
+  // Ordering wants contrast: rescaling this query's survivors onto [0,1]
+  // spreads them out and measurably ranks better (hybrid MRR 0.566 -> 0.613
+  // on the eval). Reporting wants an absolute: the rescale forces the best
+  // survivor to exactly 1.0 however weak it is, so three nonsense words
+  // scored 0.901 against a real query's 0.872 and an agent had no way to
+  // tell a find from a shrug.
+  //
+  // So candidates are ranked on the rescaled value and reported with the
+  // cosine itself.
+  const cosines = surviving.map((item) => item.rawCosine);
+  const lowest = Math.min(...cosines);
+  const highest = Math.max(...cosines);
+  const spread = highest - lowest;
+
+  const scored = surviving
+    .map((item) => {
+      // A lone survivor is the best match by definition, not the worst.
+      const semanticScore = spread > 0 ? (item.rawCosine - lowest) / spread : 1;
+      // A window with no vector has *unknown* similarity, not zero. Blending
+      // it as zero docks it 60% of the available score for not having been
+      // embedded yet, so a mediocre vectorized match outranked a strong
+      // keyword one purely by being earlier in the queue: at half coverage
+      // that held recall to 0.600 against keyword's 0.850. Scoring those on
+      // the evidence they do have — the keyword blend — removes the penalty
+      // without inventing a similarity for them.
+      const unvectorized = !vectorized.has(item.row.unit_id);
+      return {
+        ...item,
+        semanticScore,
+        relevance: unvectorized ? undefined : Math.max(0, Math.min(1, item.rawCosine)),
+        score: blendScores(
+          unvectorized ? "keyword" : mode,
+          semanticScore,
+          item.keywordScore,
+          item.recencyScore,
+          item.continuityScore,
+        ),
+      };
+    })
+    .sort((left, right) => right.score - left.score);
+
+  return groupScoredUnits(scored, mode, limit);
+}

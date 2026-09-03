@@ -10,6 +10,8 @@
  * command. The child process inherits stdio and the parent's env.
  */
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { delimiter, extname, isAbsolute, join } from "node:path";
 
 const argv = process.argv.slice(2);
 const separatorIdx = argv.indexOf("--");
@@ -36,10 +38,9 @@ for (const pair of envPairs) {
 }
 
 const [cmd, ...cmdArgs] = commandParts;
-const child = spawn(cmd, cmdArgs, {
+const child = spawn(windowsCommand(cmd), cmdArgs, {
   env: childEnv,
   stdio: "inherit",
-  shell: process.platform === "win32",
 });
 
 child.on("exit", (code, signal) => {
@@ -49,3 +50,32 @@ child.on("exit", (code, signal) => {
   }
   process.exit(code ?? 0);
 });
+
+/**
+ * Resolve a bare command name to a real file on Windows.
+ *
+ * `spawn` there will not run a `.cmd`/`.bat` shim under its bare name, which
+ * is what `shell: true` used to paper over — but Node deprecated that
+ * alongside an args array (DEP0190), and a shell would also reinterpret the
+ * arguments, which is wrong when one of them is a prompt. So look the command
+ * up on PATH the way the shell would and hand `spawn` the actual file.
+ *
+ * Guessing an extension is not enough: the same tool is `npm.cmd` on a plain
+ * install and `npm.exe` under a version manager, and naming the wrong one
+ * fails with EINVAL rather than falling back. Returns the name unchanged when
+ * nothing matches, so the failure is spawn's own.
+ */
+function windowsCommand(cmd) {
+  if (process.platform !== "win32") return cmd;
+  if (isAbsolute(cmd) || cmd.includes("/") || cmd.includes("\\")) return cmd;
+  if (extname(cmd)) return cmd;
+
+  const extensions = (process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean);
+  for (const dir of (process.env.PATH ?? "").split(delimiter).filter(Boolean)) {
+    for (const ext of extensions) {
+      const candidate = join(dir, cmd + ext);
+      if (existsSync(candidate)) return candidate;
+    }
+  }
+  return cmd;
+}

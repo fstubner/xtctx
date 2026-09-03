@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { hashParts } from "./hash.js";
 import type { SessionMessage } from "./types.js";
 
 export interface MessageRow {
@@ -104,11 +104,3 @@ export function formatRetrievalUnitContent(sessionRef: string, messages: Message
   return lines.join("\n");
 }
 
-export function hashParts(parts: string[]): string {
-  const hash = createHash("sha256");
-  for (const part of parts) {
-    hash.update(part);
-    hash.update("\0");
-  }
-  return hash.digest("hex");
-}
