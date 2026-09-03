@@ -12,7 +12,7 @@ import {
   KNOWN_UNHANDLED_STEP_TYPES,
   parseAntigravityRuntimeSteps,
   reportHandledStepRenames,
-} from "@xtctx/scrapers/antigravity/parse";
+} from "@xtctx/scrapers/antigravity/steps";
 import { shouldFetchTrajectory } from "@xtctx/scrapers/antigravity/project-match";
 import {
   describeUnreachableServer,

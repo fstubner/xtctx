@@ -3,14 +3,7 @@ import { basename, join } from "node:path";
 import type { AntigravityChunk } from "../../types/scraper.js";
 import { AbstractScraper, estimateTokens, toDate, toMessageIndex } from "../base.js";
 import { withDriftReport } from "../drift-log.js";
-import {
-  extractReferencedFiles,
-  formatArtifactContent,
-  isReadableArtifactName,
-  normalizeRole,
-  toStringArray,
-  toStringValue,
-} from "./parse.js";
+import { formatArtifactContent, isReadableArtifactName } from "./artifacts.js";
 import { artifactMatchesProject, runtimeConversationMatchesProject } from "./project-match.js";
 import { AntigravityLanguageServerClient } from "./runtime-client.js";
 import {
@@ -28,6 +21,12 @@ import {
   readArtifactMetadata,
   readTextIfExists,
 } from "./store.js";
+import {
+  extractReferencedFiles,
+  normalizeRole,
+  toStringArray,
+  toStringValue,
+} from "./values.js";
 
 export class AntigravityScraper extends AbstractScraper<AntigravityChunk> {
   readonly tool = "antigravity";

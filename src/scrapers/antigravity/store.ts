@@ -1,7 +1,7 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { toDate } from "../base.js";
-import { toStringValue } from "./parse.js";
+import { toStringValue } from "./values.js";
 import { type AntigravityArtifactMetadata, warnDrift } from "./shared.js";
 
 /**

@@ -4,22 +4,20 @@ import { request as httpsRequest } from "node:https";
 import { dirname } from "node:path";
 import { promisify } from "node:util";
 import { isRecord, toDate } from "../base.js";
-import {
-  type HandledStepTally,
-  extractWorkspaceUris,
-  parseAntigravityRuntimeSteps,
-  reportHandledStepRenames,
-  toPositiveInteger,
-  toStringValue,
-} from "./parse.js";
-import { shouldFetchTrajectory } from "./project-match.js";
+import { extractWorkspaceUris, shouldFetchTrajectory } from "./project-match.js";
 import {
   type AntigravityRuntimeClient,
   type AntigravityRuntimeConversation,
   type AntigravityRuntimeListing,
   warnDrift,
 } from "./shared.js";
+import {
+  type HandledStepTally,
+  parseAntigravityRuntimeSteps,
+  reportHandledStepRenames,
+} from "./steps.js";
 import { listConversationFileIds } from "./store.js";
+import { toPositiveInteger, toStringValue } from "./values.js";
 
 const execFileAsync = promisify(execFile);
 const LANGUAGE_SERVER_SERVICE = "exa.language_server_pb.LanguageServerService";
