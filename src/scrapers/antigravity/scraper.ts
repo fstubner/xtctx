@@ -29,7 +29,7 @@ import {
 } from "./values.js";
 
 export class AntigravityScraper extends AbstractScraper<AntigravityChunk> {
-  readonly tool = "antigravity";
+  readonly tool = SCRAPER_NAME;
 
   constructor(
     private readonly antigravityRoot: string,

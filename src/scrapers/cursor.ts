@@ -1,6 +1,6 @@
-import { readFile, readdir, stat } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { readdir, stat } from "node:fs/promises";
+import { workspaceMatchesProject } from "./vscode-workspace.js";
+import { basename, join } from "node:path";
 import type Database from "better-sqlite3";
 import { glob } from "glob";
 import type { CursorChunk } from "../types/scraper.js";
@@ -58,7 +58,7 @@ interface CursorBubbleData {
 }
 
 export class CursorScraper extends AbstractScraper<CursorChunk> {
-  readonly tool = "cursor";
+  readonly tool = SCRAPER_NAME;
 
   constructor(
     private readonly cursorStorePath: string,
@@ -545,23 +545,6 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
-async function workspaceMatchesProject(
-  workspaceDbPath: string,
-  projectRoot: string,
-): Promise<boolean> {
-  try {
-    const raw = await readFile(join(dirname(workspaceDbPath), "workspace.json"), "utf-8");
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    const folder = typeof parsed.folder === "string" ? parsed.folder : undefined;
-    if (!folder) {
-      return false;
-    }
-    const folderPath = folder.startsWith("file:") ? fileURLToPath(folder) : folder;
-    return pathMatchesProject(folderPath, projectRoot);
-  } catch {
-    return false;
-  }
-}
 
 /**
  * Derive the Cursor global storage path from a workspace database path.

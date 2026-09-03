@@ -64,7 +64,7 @@ const NON_MESSAGE_TYPES = new Set([
 ]);
 
 export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
-  readonly tool = "claude-code";
+  readonly tool = SCRAPER_NAME;
 
   /** Resume points from the last scan; empty on a full sync. */
   private cursors: Record<string, FileCursor> = {};
