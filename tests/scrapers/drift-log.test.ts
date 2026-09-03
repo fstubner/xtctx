@@ -443,6 +443,16 @@ describe("drift logs written by concurrent processes", () => {
     const log = await readDriftLog(stateDir, "codex");
     // 3 workers x 15 one-shot surprises, all under the 50 ceiling: nothing here
     // has a legitimate reason to be missing.
+    //
+    // If this fails, capture the output rather than re-running. It failed
+    // twice on 2026-09-03, both times while several agents were building and
+    // testing on the same machine, and both times it was this assertion at
+    // about 7.8s — not the 120s timeout, so contention slowing things down is
+    // not the explanation and a lost update is the obvious suspect. Neither
+    // failure output survived. It then passed 30+ consecutive runs, including
+    // six rounds of five concurrent copies of this file fighting over the same
+    // lock, so there is nothing reproducible to fix yet. What is missing is
+    // one captured failure showing how many surprises actually landed.
     expect(log?.surprises).toHaveLength(45);
   }, 120_000);
 });
