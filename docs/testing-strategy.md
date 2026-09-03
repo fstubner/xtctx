@@ -92,6 +92,20 @@ read, and any message sharing that timestamp is never yielded again.
   not admit `"`, so the escaping is unreachable belt-and-braces. Kept, and
   pinned by a test that says so, rather than removed.
 
+## The literal search route
+
+`mode: "literal"` reads the transcript stores instead of the index, which makes
+it the one retrieval path that could widen the project boundary — a grep over a
+store returns every project's conversations. It does not read files: it streams
+what each scraper yields, attribution already applied, so the boundary is
+enforced in one place rather than two. `tests/handoff/literal-search.test.ts`
+opens on that case for exactly that reason.
+
+Its budget is its own, not the refresh budget. Sharing them was a real bug
+caught while writing these tests: `refreshBudgetMs: 0` means "do not wait for a
+scan", and reusing it gave the literal pass no time at all, so it returned
+nothing and called itself complete.
+
 ## Adding a test
 
 Ask which layer would have caught the defect, not which is easiest to write.

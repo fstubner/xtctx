@@ -137,6 +137,15 @@ export interface IndexProgress {
   /** The embedding model is still loading, so this answer is keyword-only. */
   embeddingWarming: boolean;
   /**
+   * The last literal search hit its limit or its time budget before reading
+   * every store, so "no more matches" is not what it found.
+   *
+   * Set by a search rather than by the index, because the literal route reads
+   * the stores directly and has no index state to report. Absent until one has
+   * run in this process.
+   */
+  literalSearchStoppedEarly?: boolean;
+  /**
    * Tools whose transcript store has not been read yet in this process.
    *
    * Named individually because "still scanning" does not tell a caller
@@ -147,7 +156,14 @@ export interface IndexProgress {
   unreadTools: string[];
 }
 
-export type SessionSearchMode = "hybrid" | "keyword" | "vector";
+/**
+ * How a search was answered.
+ *
+ * `literal` is the one that does not read the index: it streams the transcript
+ * stores and matches text directly, so it can answer before a scan has
+ * finished. See `handoff/literal-search.ts`.
+ */
+export type SessionSearchMode = "hybrid" | "keyword" | "vector" | "literal";
 
 export interface RetrievalMatch {
   unit_id: string;
@@ -164,6 +180,12 @@ export interface RetrievalMatch {
   score?: number;
   semantic_score?: number;
   keyword_score?: number;
-  recency_score: number;
-  continuity_score: number;
+  /**
+   * The ranking components, when the route ranked at all. Absent for a literal
+   * match: that route reads the stores in the order it finds them and does not
+   * score, and reporting 0 would read as "least recent" rather than "not
+   * measured".
+   */
+  recency_score?: number;
+  continuity_score?: number;
 }

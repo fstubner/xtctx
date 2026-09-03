@@ -159,7 +159,7 @@ When invoked in a normal terminal, it shows the human CLI.
 
 - `xtctx_recent_sessions` lists recent indexed transcript sessions.
 - `xtctx_session_detail` returns raw messages for a `session_ref`.
-- `xtctx_search_sessions` hybrid-searches chronological transcript windows with local semantic vectors plus keyword fallback.
+- `xtctx_search_sessions` hybrid-searches chronological transcript windows with local semantic vectors plus keyword fallback. `mode: "literal"` skips the index entirely and matches text straight in the transcript stores, so it answers before a scan has finished and finds exact strings the index has not reached yet; it reads what the scrapers attribute to this project, so it never widens the project boundary. It says when it stopped at its limit or time budget rather than reporting an empty result as a complete one.
 - `xtctx_continuity_status` reports wiring and local index diagnostics.
 - `xtctx_handoff_manifest` returns a read-only orchestrator envelope with stable
   session handoff IDs and pointers to raw-detail retrieval. A caller can attach
