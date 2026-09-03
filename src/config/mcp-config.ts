@@ -93,7 +93,7 @@ export interface McpRenderer {
  * Tools NOT listed here receive MCP connection details embedded in their
  * managed-block instructions file via `renderMcpServersMarkdown`.
  */
-const NATIVE_MCP_TOOLS: Record<string, McpRenderer> = {
+export const NATIVE_MCP_TOOLS: Record<string, McpRenderer> = {
   // Claude Code — `.mcp.json` at project root, `mcpServers` key, stdio entries.
   // Keep both aliases because older local setup files may refer to `claude`,
   // while the current scraper/tool id is `claude-code`.
@@ -946,7 +946,7 @@ function describeRemovalFailure(configPath: string, error: unknown): string {
   return `Failed to remove MCP config: ${message}`;
 }
 
-function resolveConfigTarget(
+export function resolveConfigTarget(
   projectRoot: string,
   home: string,
   renderer: McpRenderer,

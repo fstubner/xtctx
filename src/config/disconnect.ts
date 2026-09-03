@@ -3,7 +3,7 @@ import { dirname, isAbsolute, join, relative as relativePath, resolve } from "no
 import { writeFileAtomic } from "../utils/atomic-file.js";
 import { matchLineEndings, normalizeNewlines, removeManagedBlocks } from "./managed-block.js";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { removeMcpServerConfigs } from "./mcp-config.js";
+import { NATIVE_MCP_TOOLS, removeMcpServerConfigs, resolveConfigTarget } from "./mcp-config.js";
 import { BUILT_IN_SKILL_ID, removeSyncedSkillsForTools } from "./skills.js";
 import { SUPPORTED_TOOLS, getToolDefinition, type ToolId } from "../tools/sources.js";
 import { CLAUDE_HOOK_MARKER, CLAUDE_TOOL_PERMISSIONS } from "./setup.js";
@@ -377,51 +377,22 @@ function memoryPathsToDisconnect(projectRoot: string, tools: ToolId[], all: bool
 }
 
 function plannedMcpWrites(projectRoot: string, tool: ToolId, homeDir?: string): PlannedDisconnectWrite[] {
-  const home = homeDir ?? process.env.USERPROFILE ?? process.env.HOME;
-  const writes: PlannedDisconnectWrite[] = [];
-
-  switch (tool) {
-    case "claude-code":
-      writes.push({ path: join(projectRoot, ".mcp.json"), kind: "mcp:claude-code" });
-      break;
-    case "cursor":
-      writes.push({ path: join(projectRoot, ".cursor", "mcp.json"), kind: "mcp:cursor" });
-      break;
-    case "copilot":
-      writes.push({ path: join(projectRoot, ".vscode", "mcp.json"), kind: "mcp:copilot" });
-      break;
-    case "codex":
-      writes.push({ path: join(projectRoot, ".codex", "config.toml"), kind: "mcp:codex" });
-      break;
-    case "opencode":
-      writes.push({ path: join(projectRoot, "opencode.json"), kind: "mcp:opencode" });
-      break;
-    case "antigravity":
-      if (home) {
-        writes.push({
-          path: join(home, ".gemini", "antigravity", "mcp_config.json"),
-          kind: "mcp:antigravity",
-          note: "global config",
-        });
-      }
-      break;
-    case "copilot-cli":
-      if (home) {
-        writes.push({
-          path: join(home, ".copilot", "mcp-config.json"),
-          kind: "mcp:copilot-cli",
-          note: "global config",
-        });
-      }
-      break;
-    default: {
-      const _exhaustive: never = tool;
-      void _exhaustive;
-      break;
-    }
+  const renderer = NATIVE_MCP_TOOLS[tool];
+  if (!renderer) {
+    return [];
   }
 
-  return writes;
+  const home = homeDir ?? process.env.USERPROFILE ?? process.env.HOME;
+  const target = resolveConfigTarget(projectRoot, home ?? "", renderer);
+  if (!target || (target.scope === "global" && !home)) {
+    return [];
+  }
+
+  return [
+    target.scope === "global"
+      ? { path: target.path, kind: `mcp:${tool}`, note: "global config" }
+      : { path: target.path, kind: `mcp:${tool}` },
+  ];
 }
 
 function plannedSkillWrites(projectRoot: string, tool: ToolId): PlannedDisconnectWrite[] {
