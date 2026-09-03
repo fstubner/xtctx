@@ -589,6 +589,7 @@ const BULKY_RESTATEMENT_TYPES = new Set(["compacted"]);
 /** How much of an oversized line to inspect for its `type`. */
 const TYPE_PEEK_CHARS = 200;
 
+/** @internal Exported for tests only. */
 export function isKnownBulkyRecord(line: string): boolean {
   const type = /"type"\s*:\s*"([^"]+)"/.exec(line.slice(0, TYPE_PEEK_CHARS))?.[1];
   return type !== undefined && BULKY_RESTATEMENT_TYPES.has(type);

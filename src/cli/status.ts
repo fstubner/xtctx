@@ -46,6 +46,7 @@ interface StatusRenderOptions {
   homeDir?: string;
 }
 
+/** @internal Exported for tests only. */
 export async function renderStatusBlock(
   services: ProjectServices,
   options: StatusRenderOptions = {},
@@ -278,6 +279,7 @@ function managedTargets(projectRoot: string): Array<{ label: string; path: strin
  *
  * Nothing is rewritten here — a config file is the user's. But the stale case
  * is named, with the path that does exist and how to adopt it.
+ * @internal Exported for tests only.
  */
 export function storePathNotes(
   definition: (typeof SUPPORTED_TOOLS)[number] | undefined,

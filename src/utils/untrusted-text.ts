@@ -33,6 +33,7 @@ export function inlineSafe(value: string): string {
 /**
  * Replace control characters with spaces, leaving tab, newline and carriage
  * return for the whitespace collapse to handle.
+ * @internal Exported for tests only.
  */
 export function replaceControlCharacters(value: string): string {
   let out = "";

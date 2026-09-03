@@ -611,6 +611,7 @@ function setAtPath(
  *
  * A file that does not parse is worth a warning: it is named like a session and
  * sits where sessions live, so if it cannot be read something has changed.
+ * @internal Exported for tests only.
  */
 export function* parseChatSessionFile(
   raw: string,

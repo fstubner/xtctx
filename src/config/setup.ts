@@ -49,6 +49,7 @@ export async function runSetup(options: SetupOptions = {}): Promise<SetupResult>
   return result;
 }
 
+/** @internal Reached only by tests and `scripts/public-demo-smoke.mjs`. */
 export async function setupProject(options: SetupOptions = {}): Promise<SetupResult> {
   const projectRoot = resolve(options.projectPath ?? process.cwd());
   const xtctxDir = join(projectRoot, ".xtctx");

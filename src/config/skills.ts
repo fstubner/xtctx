@@ -481,6 +481,7 @@ async function listCanonicalSkillIds(sourceDir: string): Promise<string[]> {
  * Exported because the plugin package under `plugin/` ships the same skill as
  * a committed file, and a plugin whose skill has drifted from the one setup
  * writes would tell two agents different things about the same tool.
+ * @internal Reached only by tests and `scripts/sync-plugin-skill.mjs`.
  */
 export function builtInHandoffSkill(): string {
   return [

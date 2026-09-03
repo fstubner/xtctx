@@ -39,6 +39,7 @@ interface McpToolDependencies {
   unconfiguredProjectRoot?: string;
 }
 
+/** @internal Exported for tests only. */
 export function buildToolDefinitions(): Tool[] {
   return [
     {
@@ -173,6 +174,7 @@ export function buildToolDefinitions(): Tool[] {
   ];
 }
 
+/** @internal Exported for tests only. */
 export function createToolHandlers(
   dependencies: McpToolDependencies = {},
 ): Map<string, ToolHandler> {

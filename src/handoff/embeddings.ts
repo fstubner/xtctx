@@ -194,6 +194,7 @@ function toFloat32Array(data: Float32Array | Float64Array | number[]): Float32Ar
  * is a cap on cost, not the main lever: segment *count* was never the
  * dominant term, segment *cost* is (~360ms each on mpnet against ~116ms on
  * MiniLM), so this trims the tail rather than solving the total.
+ * @internal Exported for tests only.
  */
 export const MAX_SEGMENTS_PER_UNIT = 16;
 
