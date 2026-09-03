@@ -55,7 +55,7 @@ jobs:
       # model can never be served to a new configuration. Editing that file
       # for anything else costs one download.
       - name: Cache the embedding model
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: node_modules/@huggingface/transformers/.cache
           key: hf-model-${{ runner.os }}-${{ hashFiles('src/handoff/embeddings.ts') }}
@@ -122,7 +122,7 @@ jobs:
       # model can never be served to a new configuration. Editing that file
       # for anything else costs one download.
       - name: Cache the embedding model
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: node_modules/@huggingface/transformers/.cache
           key: hf-model-${{ runner.os }}-${{ hashFiles('src/handoff/embeddings.ts') }}
