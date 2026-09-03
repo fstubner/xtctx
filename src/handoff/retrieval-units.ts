@@ -10,6 +10,29 @@ export interface MessageRow {
   source_pointer: string | null;
 }
 
+/**
+ * How many messages a retrieval window holds, and how far the next one starts.
+ *
+ * Swept on 2026-09-03 against the sixty-query eval, with the current model.
+ * Smaller windows help the semantic channel a great deal and cost the keyword
+ * one, which is the tension these two numbers sit in:
+ *
+ *   size/stride   vector mrr  r@5    top1     hybrid mrr  r@5
+ *   8/4 (this)    0.246       0.350  0.183    0.333       0.533
+ *   4/2           0.331       0.433  0.233    0.343       0.500
+ *   2/1           0.461       0.567  0.367    0.259       0.500
+ *
+ * Left at 8/4 deliberately, and not because it wins everywhere — it does not.
+ * Hybrid is the default mode, and 8/4 holds the best hybrid recall@5 of the
+ * three, which is the metric an agent reading five results actually feels.
+ * 4/2 is close to a straight upgrade on everything else and is the change to
+ * make if `vector` mode becomes the one people use, or if hybrid recall stops
+ * being the number to protect. That is a product decision, not a sweep result,
+ * which is why the sweep is recorded here rather than acted on.
+ *
+ * Smaller windows are also what a static embedding model would need to be
+ * viable; see the note on `DEFAULT_EMBEDDING_MODEL` for why that still loses.
+ */
 export const DEFAULT_WINDOW_SIZE = 8;
 export const DEFAULT_WINDOW_STRIDE = 4;
 
