@@ -444,15 +444,18 @@ describe("drift logs written by concurrent processes", () => {
     // 3 workers x 15 one-shot surprises, all under the 50 ceiling: nothing here
     // has a legitimate reason to be missing.
     //
-    // If this fails, capture the output rather than re-running. It failed
-    // twice on 2026-09-03, both times while several agents were building and
-    // testing on the same machine, and both times it was this assertion at
-    // about 7.8s — not the 120s timeout, so contention slowing things down is
-    // not the explanation and a lost update is the obvious suspect. Neither
-    // failure output survived. It then passed 30+ consecutive runs, including
-    // six rounds of five concurrent copies of this file fighting over the same
-    // lock, so there is nothing reproducible to fix yet. What is missing is
-    // one captured failure showing how many surprises actually landed.
+    // This caught a real lost update, twice on 2026-09-03 locally and then on
+    // a CI runner, which supplied the number the local sightings lacked: 42 of
+    // 45, three surprises gone. The cause was in the lock rather than the
+    // machine — a lock file was created empty and its pid written a moment
+    // later, so a waiter that looked in that gap saw no holder and, once the
+    // 250ms grace passed, broke a live lock. Two writers then interleaved a
+    // read-modify-write over the same file.
+    //
+    // Reproduced by cutting LOCK_PID_GRACE_MS to 1ms, which stands in for a
+    // loaded machine: the old code failed with exactly 42 of 45, the current
+    // code survives it. The lock is now linked into place with the pid already
+    // in it, so the window does not exist.
     expect(log?.surprises).toHaveLength(45);
   }, 120_000);
 });

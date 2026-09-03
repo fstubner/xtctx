@@ -1,4 +1,5 @@
-import { mkdir, open, readFile, rm, stat } from "node:fs/promises";
+import { link, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { writeFileAtomic } from "../utils/atomic-file.js";
 
@@ -141,9 +142,13 @@ function enqueueWrite(key: string, work: () => Promise<void>): Promise<void> {
 /**
  * Grace before a lock naming no live process is broken.
  *
- * Only covers the gap between `open` and the pid being written, so it needs to
- * be short. A lock whose holder is gone is broken immediately, which is what
- * keeps a killed server from stalling the next scan.
+ * A safety net rather than a load-bearing window. It used to cover the gap
+ * between creating the lock and writing the pid into it, and being too short
+ * for a loaded machine is what let a live holder's lock be broken; the lock is
+ * now linked into place with the pid already in it, so a lock that exists and
+ * names nobody means an unreadable or truncated file, not a holder mid-write.
+ * Kept short for the same reason as before: a lock whose holder is gone should
+ * be broken promptly, or a killed server stalls the next scan.
  */
 const LOCK_PID_GRACE_MS = 250;
 /**
@@ -192,23 +197,43 @@ const LOCK_CONTENTION_CODES = new Set(["EEXIST", "EPERM", "EACCES", "EBUSY"]);
  * incremental scan does not re-read records it has already consumed — so a
  * surprise lost this way is not found again on the next pass.
  *
- * `wx` fails when the lock exists, which is the atomic test-and-set this needs.
- * A lock older than the timeout is assumed to belong to a process that died
- * holding it; leaving one behind would disable drift persistence permanently,
- * which is worse than the interleaving the lock prevents.
+ * The lock is taken by writing the pid to a temp file and `link`ing that into
+ * place: `link` fails when the target exists, which is the atomic
+ * test-and-set this needs, and the pid is already in the file the instant the
+ * lock appears. A lock older than the timeout is assumed to belong to a
+ * process that died holding it; leaving one behind would disable drift
+ * persistence permanently, which is worse than the interleaving the lock
+ * prevents.
+ *
+ * It used to be `open(wx)` followed by a separate write of the pid, which left
+ * the lock file empty for the gap between them. A waiter that stat'd it in
+ * that window read no pid, and once the 250ms grace passed it broke a lock
+ * whose holder was very much alive — the exact interleaving this exists to
+ * prevent, from the code meant to prevent it. It cost 3 surprises of 45 across
+ * three processes, caught on a loaded CI runner where a gap between two
+ * adjacent awaits is easy to reach.
  */
 async function withFileLock<T>(lockPath: string, work: () => Promise<T>): Promise<T> {
   const giveUpAt = Date.now() + lockWaitBudgetMs();
   let brokeLock = false;
   for (;;) {
     try {
-      const handle = await open(lockPath, "wx");
+      // Whoever waits next needs to know if this holder is still alive, and
+      // needs to know it from the moment the lock exists — hence link rather
+      // than create-then-write.
+      const staged = `${lockPath}.${process.pid}.${randomUUID()}`;
+      await writeFile(staged, String(process.pid), "utf-8");
       try {
-        // Whoever waits next needs to know if this holder is still alive.
-        await handle.writeFile(String(process.pid), "utf-8");
+        await link(staged, lockPath);
+      } catch (err) {
+        await rm(staged, { force: true }).catch(() => {});
+        throw err;
+      }
+      // The staged copy has served its purpose; the link is the lock.
+      await rm(staged, { force: true }).catch(() => {});
+      try {
         return await work();
       } finally {
-        await handle.close();
         await rm(lockPath, { force: true });
       }
     } catch (err) {
