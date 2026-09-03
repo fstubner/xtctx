@@ -320,26 +320,10 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
         // response_item events with role "user" are system-injected context
         // (AGENTS.md, permissions, environment) and are intentionally skipped.
         if (eventType === "event_msg") {
-          const payload = parsed.payload;
-          if (!isRecord(payload)) {
-            warnDrift(
-              filePath,
-              `event_msg payload is not an object (got ${describeType(payload)})`,
-            );
+          const content = userMessageContent(parsed.payload, filePath);
+          if (content === undefined) {
             continue;
           }
-          if (payload.type !== "user_message") {
-            // Could be a new message sub-type — warn so drift is visible.
-            if (!("type" in payload)) {
-              warnDrift(
-                filePath,
-                "event_msg payload missing 'type' key — likely renamed",
-              );
-            }
-            continue;
-          }
-
-          const content = toStringValue(payload.message);
           if (!content) {
             messageIndex++;
             continue;
@@ -370,33 +354,29 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
         // removed from the active context window to save space. They represent
         // a higher-abstraction view of the conversation (layer 1).
         if (eventType === "compacted") {
-          const payload = parsed.payload;
-          const content = isRecord(payload)
-            ? (toStringValue(payload.summary) ??
-              toStringValue(payload.content) ??
-              toStringValue(payload.text))
-            : undefined;
-
-          if (content) {
-            const timestamp = toDate(parsed.timestamp ?? parsed.created_at ?? parsed.createdAt);
-            if (since.getTime() === 0 || timestamp > since) {
-              yield this.parseRaw({
-                sessionId,
-                messageIndex,
-                timestamp,
-                role: "assistant",
-                content,
-                approvalMode,
-                sandboxed,
-                gitBranch,
-                gitCommit,
-                layer: 1,
-              });
-            }
-            // Consume the index below the cutoff too, so chunk identity is
-            // stable between full and incremental scrapes.
-            messageIndex++;
+          const content = compactedSummary(parsed.payload);
+          if (!content) {
+            continue;
           }
+
+          const timestamp = toDate(parsed.timestamp ?? parsed.created_at ?? parsed.createdAt);
+          if (since.getTime() === 0 || timestamp > since) {
+            yield this.parseRaw({
+              sessionId,
+              messageIndex,
+              timestamp,
+              role: "assistant",
+              content,
+              approvalMode,
+              sandboxed,
+              gitBranch,
+              gitCommit,
+              layer: 1,
+            });
+          }
+          // Consume the index below the cutoff too, so chunk identity is
+          // stable between full and incremental scrapes.
+          messageIndex++;
           continue;
         }
 
@@ -612,4 +592,52 @@ const TYPE_PEEK_CHARS = 200;
 export function isKnownBulkyRecord(line: string): boolean {
   const type = /"type"\s*:\s*"([^"]+)"/.exec(line.slice(0, TYPE_PEEK_CHARS))?.[1];
   return type !== undefined && BULKY_RESTATEMENT_TYPES.has(type);
+}
+
+/**
+ * The text of a `user_message` event, or nothing when this record is not one.
+ *
+ * Three outcomes, and the caller needs to tell them apart: `undefined` means
+ * the record is not a user message at all and should be skipped without
+ * consuming a message index; `""` means it is one but carries no text, which
+ * still consumes an index so chunk identity stays stable between a full and
+ * an incremental scrape; anything else is the message.
+ *
+ * `response_item` events with role "user" are deliberately not handled here:
+ * they are system-injected context (AGENTS.md, permissions, environment),
+ * not something the person typed.
+ */
+function userMessageContent(payload: unknown, filePath: string): string | undefined {
+  if (!isRecord(payload)) {
+    warnDrift(filePath, `event_msg payload is not an object (got ${describeType(payload)})`);
+    return undefined;
+  }
+
+  if (payload.type !== "user_message") {
+    // A payload with no `type` at all is drift worth seeing; a payload with a
+    // different one is just an event this scraper does not read.
+    if (!("type" in payload)) {
+      warnDrift(filePath, "event_msg payload missing 'type' key — likely renamed");
+    }
+    return undefined;
+  }
+
+  return toStringValue(payload.message) ?? "";
+}
+
+/**
+ * The summary text of a `compacted` event, under whichever key it arrives.
+ *
+ * Compacted events hold AI-generated summaries of turns dropped from the
+ * active context window, so they are a higher-abstraction view of the same
+ * conversation (layer 1 at the call site).
+ */
+function compactedSummary(payload: unknown): string | undefined {
+  if (!isRecord(payload)) {
+    return undefined;
+  }
+
+  return (
+    toStringValue(payload.summary) ?? toStringValue(payload.content) ?? toStringValue(payload.text)
+  );
 }
