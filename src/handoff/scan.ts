@@ -54,25 +54,37 @@ export interface ScanToolDeps {
   stmts: PreparedStatements;
   /** Canonical and normalized; see `canonicalRoot` in sqlite-index. */
   scopedRoot: string;
+}
+
+export interface ScanToolResult {
   /** Every session this scan wrote to; the caller rolls them up at the end. */
-  touchedSessions: Set<string>;
-  /** Tools read at least once this process; see `scannedTools` on the index. */
-  scannedTools: Set<string>;
+  touchedSessions: string[];
+  /**
+   * The tool that was read, in the sense of "looked at in this process" —
+   * reported whether or not the read succeeded; see `scannedTools` on the
+   * index.
+   */
+  tool: string;
 }
 
 /**
  * Read one tool's store into the index, advancing its cursor on success.
  *
- * Marks the tool as scanned whether or not the read succeeded, and records
+ * Reports the tool as scanned whether or not the read succeeded, and records
  * a failure under `last_error:<tool>` without moving the cursor.
  */
-export async function scanTool(scraper: ConversationScraper, deps: ScanToolDeps): Promise<void> {
-  const { db, stmts, scopedRoot, touchedSessions, scannedTools } = deps;
+export async function scanTool(
+  scraper: ConversationScraper,
+  deps: ScanToolDeps,
+): Promise<ScanToolResult> {
+  const { db, stmts, scopedRoot } = deps;
+  // Insertion-ordered and de-duplicated, so folding this into the caller's
+  // own set preserves the order the caller used to build it in.
+  const touchedSessions = new Set<string>();
   if (!(await safeDetect(scraper))) {
     // Not installed here, so there is nothing to wait for — read, rather
     // than outstanding forever.
-    scannedTools.add(scraper.tool);
-    return;
+    return { touchedSessions: [], tool: scraper.tool };
   }
 
   let latestTimestamp: Date | null = null;
@@ -131,12 +143,13 @@ export async function scanTool(scraper: ConversationScraper, deps: ScanToolDeps)
     if (openSession !== null) {
       stmts.sessionRollup.run(openSession);
     }
-    // Read, whether or not it succeeded: a tool whose scrape failed has
-    // an error recorded against it and is not something the caller should
-    // be told to wait for. "Outstanding" here means "not looked at yet in
-    // this process", nothing more.
-    scannedTools.add(scraper.tool);
   }
+
+  // Read, whether or not it succeeded: a tool whose scrape failed has
+  // an error recorded against it and is not something the caller should
+  // be told to wait for. "Outstanding" here means "not looked at yet in
+  // this process", nothing more.
+  return { touchedSessions: [...touchedSessions], tool: scraper.tool };
 }
 
 /** Writes one chunk; returns its session ref, or null for an empty chunk. */

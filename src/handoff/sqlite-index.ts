@@ -565,13 +565,15 @@ export class SqliteHandoffIndex implements SessionService {
     this.reconcileRetrievalUnits();
 
     for (const { scraper } of this.tools) {
-      await scanTool(scraper, {
+      const scanned = await scanTool(scraper, {
         db,
         stmts: this.prepared(),
         scopedRoot: this.scopedRoot,
-        touchedSessions,
-        scannedTools: this.scannedTools,
       });
+      for (const sessionRef of scanned.touchedSessions) {
+        touchedSessions.add(sessionRef);
+      }
+      this.scannedTools.add(scanned.tool);
     }
 
     for (const sessionRef of touchedSessions) {
