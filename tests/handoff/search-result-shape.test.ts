@@ -118,3 +118,58 @@ describe("the shape of a search result", () => {
     expect(preview).toContain("parser fallback");
   });
 });
+
+/**
+ * The keyword pass fetches windows and the ranker groups them into sessions
+ * afterwards, so the candidate budget has to be wide enough to span the
+ * sessions being asked for. Too narrow and a few long sessions spend the whole
+ * budget, and the answering session is cut before ranking ever sees it.
+ *
+ * Only the eval defended this. Cutting the budget to one window per requested
+ * session passed the whole unit suite, which is the gap this closes — the
+ * number stays the eval's to sweep, the breadth does not.
+ */
+describe("candidate breadth", () => {
+  let dir = "";
+  let index: SqliteHandoffIndex | undefined;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "xtctx-breadth-"));
+  });
+
+  afterEach(async () => {
+    await index?.close().catch(() => {});
+    index = undefined;
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("spans the requested number of sessions when each has many windows", async () => {
+    // Six sessions of 24 messages: at the default window size and stride each
+    // holds several overlapping windows, and every one matches the term. A
+    // budget that cannot see past the first session or two returns fewer
+    // distinct sessions than were asked for.
+    const chunks = Array.from({ length: 6 }, (_unused, session) =>
+      Array.from({ length: 24 }, (_ignored, message) => ({
+        tool: "codex",
+        sessionId: `session-${session}`,
+        timestamp: new Date(
+          Date.parse("2026-05-10T10:00:00.000Z") + session * 60_000 + message * 1000,
+        ),
+        role: message % 2 === 0 ? ("user" as const) : ("assistant" as const),
+        content: `notes about the tokenrefresh regression, session ${session} message ${message}`,
+        metadata: { messageIndex: message, tokenEstimate: 1, layer: 0 },
+      })),
+    ).flat();
+
+    index = new SqliteHandoffIndex(
+      join(dir, "xtctx.db"),
+      dir,
+      [{ tool: "codex", scraper: new FixtureScraper(chunks) }],
+      { refreshBudgetMs: 30_000 },
+    );
+
+    const results = await index.searchSessions("tokenrefresh", 5, undefined, "keyword");
+
+    expect(new Set(results.map((session) => session.session_ref)).size).toBe(5);
+  });
+});
