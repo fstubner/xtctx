@@ -40,11 +40,11 @@ jobs:
       - name: Install root dependencies
         run: npm ci
 
-      # Every job here loads the real embedding model, so each one pulls
-      # ~110MB from HuggingFace: four jobs a run, and HuggingFace starts
+      # Every job here loads the real embedding model, so each one pulls the
+      # 86MB MiniLM from HuggingFace: four jobs a run, and HuggingFace starts
       # answering 429. That blocked a merge on 2026-08-28 with nothing wrong
-      # in the code, and got worse when the default model moved from an 86MB
-      # MiniLM to mpnet.
+      # in the code. (The default briefly moved to the larger mpnet and was
+      # moved back on 2026-08-30; the cache is worth keeping either way.)
       #
       # transformers.js caches inside its own package directory and honours no
       # override for it, so this has to run *after* `npm ci` — which deletes
@@ -107,11 +107,11 @@ jobs:
       - name: Install landing dependencies
         run: npm --prefix landing ci
 
-      # Every job here loads the real embedding model, so each one pulls
-      # ~110MB from HuggingFace: four jobs a run, and HuggingFace starts
+      # Every job here loads the real embedding model, so each one pulls the
+      # 86MB MiniLM from HuggingFace: four jobs a run, and HuggingFace starts
       # answering 429. That blocked a merge on 2026-08-28 with nothing wrong
-      # in the code, and got worse when the default model moved from an 86MB
-      # MiniLM to mpnet.
+      # in the code. (The default briefly moved to the larger mpnet and was
+      # moved back on 2026-08-30; the cache is worth keeping either way.)
       #
       # transformers.js caches inside its own package directory and honours no
       # override for it, so this has to run *after* `npm ci` — which deletes
