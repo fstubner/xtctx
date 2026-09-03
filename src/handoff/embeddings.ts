@@ -32,6 +32,42 @@
  * fifty extra minutes of that. Measure throughput on real content before
  * moving this again; a per-embed figure taken on short strings says nothing
  * about it.
+ *
+ * A static model was measured against this on 2026-09-03 and rejected, which
+ * is worth writing down because the speed argument for one is overwhelming
+ * and the reason it loses is not obvious.
+ *
+ * Model2Vec statics (`minishlab/potion-base-8M`, 256 dimensions, 30MB) have no
+ * transformer forward pass: they look each token's vector up and mean-pool. On
+ * 291 real segments from this project's own index, mean 900 characters:
+ *
+ *   potion-base-8M   1.0ms per segment
+ *   MiniLM fp32     71.4ms per segment
+ *
+ * Seventy times faster, and it loads in about a second rather than minutes on
+ * a cold cache — which would remove the warm budget, the vector backlog and
+ * the disabled-embeddings switch the test suite needs. It still loses, badly:
+ * vector mode fell from mrr 0.246 to 0.016 and recall@5 from 0.350 to 0.033.
+ * Hybrid held up at 0.273 only because keyword carries it.
+ *
+ * Not a threshold artefact — swept at 0.15, 0.25 and 0.45 the vector numbers
+ * were identical to three decimals. The cause is length. Mean-pooling every
+ * token washes out as text grows, measured on one query against a target and
+ * a distractor padded with filler:
+ *
+ *   margin at ~0 chars     potion 0.714   MiniLM 0.723
+ *   margin at ~500 chars   potion 0.148   MiniLM 0.471
+ *   margin at ~3000 chars  potion 0.023   MiniLM 0.000
+ *
+ * Both collapse eventually; potion collapses at the length this project
+ * actually embeds. A window here is eight messages.
+ *
+ * So the door is not closed, but it opens the other way round: a static model
+ * is worth revisiting only alongside much shorter windows, where its margin
+ * survives. Decoupled fine windows were measured on 2026-09-02 and rejected
+ * because hybrid regressed; embedding cost was the reason they had to stay
+ * coarse, and a 70x cheaper model removes that constraint. Neither change
+ * stands alone.
  */
 export const DEFAULT_EMBEDDING_MODEL = "Xenova/all-MiniLM-L6-v2";
 /**
