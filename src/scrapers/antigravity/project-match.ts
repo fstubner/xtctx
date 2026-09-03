@@ -1,6 +1,37 @@
 import { basename } from "node:path";
-import { extractWorkspaceUris } from "./parse.js";
+import { isRecord } from "../base.js";
 import type { AntigravityArtifact, AntigravityRuntimeConversation } from "./shared.js";
+import { toStringValue } from "./values.js";
+
+/**
+ * The workspace directories a trajectory summary names, if it names any.
+ *
+ * Lives here rather than with the step reader because a workspace uri is only
+ * ever read to answer this module's question — whose session is this. Both the
+ * top-level field and the one under `trajectoryMetadata` are tried before
+ * concluding the summary names no workspace, which is a different answer from
+ * it naming someone else's.
+ */
+export function extractWorkspaceUris(summary: Record<string, unknown>): string[] {
+  const direct = extractWorkspaceUrisFromValue(summary.workspaces);
+  if (direct.length > 0) {
+    return direct;
+  }
+
+  const metadata = isRecord(summary.trajectoryMetadata) ? summary.trajectoryMetadata : {};
+  return extractWorkspaceUrisFromValue(metadata.workspaces);
+}
+
+function extractWorkspaceUrisFromValue(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter(isRecord)
+    .map((workspace) => toStringValue(workspace.workspaceFolderAbsoluteUri))
+    .filter((uri): uri is string => uri !== undefined);
+}
 
 /**
  * Whether a trajectory is worth fetching, decided from its summary alone.

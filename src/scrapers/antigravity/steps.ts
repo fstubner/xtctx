@@ -1,11 +1,17 @@
-import { extname } from "node:path";
 import { isRecord, toDate } from "../base.js";
 import type { AntigravityChunk } from "../../types/scraper.js";
-import {
-  type AntigravityArtifact,
-  type AntigravityRuntimeMessage,
-  warnDrift,
-} from "./shared.js";
+import { type AntigravityRuntimeMessage, warnDrift } from "./shared.js";
+import { decodeFileUrl, extractReferencedFiles, toStringArray, toStringValue } from "./values.js";
+
+/**
+ * Antigravity trajectory steps to messages.
+ *
+ * One job: read what the language server sends for a session and turn the
+ * steps this reader understands into transcript messages. The step-type sets
+ * and the rename tally live here too — they are not separable bookkeeping, they
+ * are how this reader knows whether its own extraction still matches what
+ * Antigravity sends, and the tally is written inside the same loop.
+ */
 
 /**
  * Step types Antigravity emits that this reader knowingly does not extract.
@@ -601,43 +607,6 @@ function runtimeMessage(
   };
 }
 
-export function formatArtifactContent(artifact: AntigravityArtifact): string {
-  const header = [
-    `Antigravity artifact: ${artifact.artifactName}`,
-    `Source: ${artifact.sourcePath}`,
-    artifact.artifactType ? `Type: ${artifact.artifactType}` : undefined,
-    artifact.summary ? `Summary: ${artifact.summary}` : undefined,
-  ].filter((line): line is string => Boolean(line));
-
-  return `${header.join("\n")}\n\n${artifact.body.trim()}`;
-}
-
-export function extractWorkspaceUris(summary: Record<string, unknown>): string[] {
-  const direct = extractWorkspaceUrisFromValue(summary.workspaces);
-  if (direct.length > 0) {
-    return direct;
-  }
-
-  const metadata = isRecord(summary.trajectoryMetadata) ? summary.trajectoryMetadata : {};
-  return extractWorkspaceUrisFromValue(metadata.workspaces);
-}
-
-function extractWorkspaceUrisFromValue(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value
-    .filter(isRecord)
-    .map((workspace) => toStringValue(workspace.workspaceFolderAbsoluteUri))
-    .filter((uri): uri is string => uri !== undefined);
-}
-
-export function extractReferencedFiles(content: string): string[] {
-  const matches = content.match(/file:\/\/\/[^\s)\]>"]+/g) ?? [];
-  return [...new Set(matches.map(decodeFileUrl).filter((value) => value.length > 0))];
-}
-
 function referencesFromValues(values: Array<string | undefined>): string[] {
   return values.flatMap((value) => value ? extractReferencedFiles(value) : []);
 }
@@ -673,14 +642,6 @@ function diffLinePrefix(type?: string): string {
   }
 }
 
-function decodeFileUrl(value: string): string {
-  try {
-    return decodeURIComponent(value.replace(/^file:\/\/\//, ""));
-  } catch {
-    return value.replace(/^file:\/\/\//, "");
-  }
-}
-
 function firstStringField(record: Record<string, unknown>, fields: string[]): string | undefined {
   for (const field of fields) {
     const value = toStringValue(record[field]);
@@ -691,43 +652,8 @@ function firstStringField(record: Record<string, unknown>, fields: string[]): st
   return undefined;
 }
 
-export function isReadableArtifactName(name: string): boolean {
-  const extension = extname(name).toLowerCase();
-  return (extension === ".md" || extension === ".txt") &&
-    !name.endsWith(".metadata.json") &&
-    !name.includes(".resolved");
-}
-
 function validDate(value: Date): Date | undefined {
   return value.getTime() > 0 && !Number.isNaN(value.getTime()) ? value : undefined;
-}
-
-export function normalizeRole(value?: string): AntigravityChunk["role"] {
-  switch (value) {
-    case "user":
-    case "assistant":
-    case "system":
-    case "tool":
-      return value;
-    default:
-      return "assistant";
-  }
-}
-
-export function toStringValue(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined;
-}
-
-export function toPositiveInteger(value: unknown): number | undefined {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : undefined;
-}
-
-export function toStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return value.filter((item): item is string => typeof item === "string");
 }
 
 function describeValue(value: unknown): string {

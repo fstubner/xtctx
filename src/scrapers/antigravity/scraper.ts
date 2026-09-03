@@ -3,20 +3,12 @@ import { basename, join } from "node:path";
 import type { AntigravityChunk } from "../../types/scraper.js";
 import { AbstractScraper, estimateTokens, toDate, toMessageIndex } from "../base.js";
 import { withDriftReport } from "../drift-log.js";
-import {
-  extractReferencedFiles,
-  formatArtifactContent,
-  isReadableArtifactName,
-  normalizeRole,
-  toStringArray,
-  toStringValue,
-} from "./parse.js";
+import { formatArtifactContent, isReadableArtifactName } from "./artifacts.js";
 import { artifactMatchesProject, runtimeConversationMatchesProject } from "./project-match.js";
 import { AntigravityLanguageServerClient } from "./runtime-client.js";
 import {
   type AntigravityArtifact,
   type AntigravityRuntimeClient,
-  type AntigravityRuntimeConversation,
   type AntigravityRuntimeListing,
   SCRAPER_NAME,
   warnDrift,
@@ -29,12 +21,12 @@ import {
   readArtifactMetadata,
   readTextIfExists,
 } from "./store.js";
-
-function normalizeListing(
-  value: AntigravityRuntimeConversation[] | AntigravityRuntimeListing,
-): AntigravityRuntimeListing {
-  return Array.isArray(value) ? { conversations: value } : value;
-}
+import {
+  extractReferencedFiles,
+  normalizeRole,
+  toStringArray,
+  toStringValue,
+} from "./values.js";
 
 export class AntigravityScraper extends AbstractScraper<AntigravityChunk> {
   readonly tool = "antigravity";
@@ -264,9 +256,7 @@ export class AntigravityScraper extends AbstractScraper<AntigravityChunk> {
 
   private async safeListRuntimeConversations(): Promise<AntigravityRuntimeListing> {
     try {
-      return normalizeListing(
-        await this.runtimeClient.listConversations(join(this.antigravityRoot, "conversations")),
-      );
+      return await this.runtimeClient.listConversations(join(this.antigravityRoot, "conversations"));
     } catch (err) {
       // The listing threw rather than returning nothing, which is a failure to
       // read Antigravity — not evidence that Antigravity has nothing to read.

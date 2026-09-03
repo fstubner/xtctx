@@ -12,7 +12,7 @@ import {
   KNOWN_UNHANDLED_STEP_TYPES,
   parseAntigravityRuntimeSteps,
   reportHandledStepRenames,
-} from "@xtctx/scrapers/antigravity/parse";
+} from "@xtctx/scrapers/antigravity/steps";
 import { shouldFetchTrajectory } from "@xtctx/scrapers/antigravity/project-match";
 import {
   describeUnreachableServer,
@@ -455,7 +455,7 @@ function emptyRuntimeClient(): AntigravityRuntimeClient {
 function runtimeClient(conversations: AntigravityRuntimeConversation[]): AntigravityRuntimeClient {
   return {
     async listConversations() {
-      return conversations;
+      return { conversations };
     },
   };
 }
@@ -1268,7 +1268,7 @@ describe("antigravity degraded runtime scans", () => {
   it("reports falling back to brain artifacts when the server returns nothing", async () => {
     const scraper = new AntigravityScraper(rootDir, stateDir, projectRoot, {
       // A bare array: the listing succeeded and had nothing to give.
-      listConversations: async () => [],
+      listConversations: async () => ({ conversations: [] }),
     });
 
     const chunks = await collect(scraper);
