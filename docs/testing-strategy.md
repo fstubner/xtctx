@@ -65,6 +65,27 @@ each suite against each mutation:
 | resume cursor overlap to 0 | **survived** | **survived** | gap — now closed |
 | preview source chars to 1 | **survived** | **survived** | gap — now closed |
 
+A fourth sweep on 2026-09-03 covered `src/{cli,runtime,utils,tools}`:
+
+| Mutation | Outcome |
+|---|---|
+| project boundary: dotfile traversal guard off | killed |
+| atomic write: containment check off | killed |
+| `inlineSafe` stops fencing untrusted text | killed (4 tests) |
+| redirected store never reported | killed |
+| duration: unparseable reads as zero | killed |
+| hook trusts a payload naming any project | killed by **smoke only** |
+| `status` always reports "never scanned" | **survived** — now closed |
+| `normalizeTools` shape guard removed | **survived** — not a gap, see below |
+
+The `normalizeTools` survivor is a redundant early return rather than missing
+coverage: a string, an array, a number and `null` all produce the same result
+with or without it, because the per-entry check below already rejects them.
+Left in place as intent, like the unreachable quote escape in `toFtsQuery`.
+
+The hook row is the suite split working, not a gap — that guard is a wiring
+question and the smoke suite is where wiring is tested.
+
 Two further gaps were found the same way and closed: deleting the evidence
 filter left the whole suite green, because the nonsense-query tests are
 actually satisfied by the confidence gate below it; and the vector backlog an
