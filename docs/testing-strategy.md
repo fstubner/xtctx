@@ -57,9 +57,9 @@ each suite against each mutation:
 | confidence gate to 0 | killed | — | covered |
 | result limit clamped to 1 | killed | — | covered |
 | retrieval-unit reconcile disabled | killed | — | covered |
-| corroboration weight to 0 | **survived** | killed | eval-only |
-| tie-break weight to 0.9 | **survived** | killed | eval-only |
-| window stride to no overlap | **survived** | killed | eval-only |
+| corroboration weight to 0 | **survived** | killed | eval-only — now also unit |
+| tie-break weight to 0.9 | **survived** | killed | eval-only — now also unit |
+| window stride to no overlap | **survived** | killed | eval-only — now also unit |
 | candidate windows per session to 1 | **survived** | killed | eval-only |
 | matches per session to 1 | **survived** | **survived** | gap — now closed |
 | resume cursor overlap to 0 | **survived** | **survived** | gap — now closed |
@@ -76,11 +76,15 @@ read, and any message sharing that timestamp is never yielded again.
 
 ## Known and accepted
 
-- **Ranking constants are defended by the eval, not by unit tests.** Four of
-  them are only caught by the quality baseline. That is the right layer — a
-  weight is a quality decision, and pinning a number in a unit test would
-  fight every future sweep — but it means `npm test` gives no ranking signal.
-  Run `npm run test:eval` when touching `handoff/ranking.ts`.
+- **Ranking numbers are the eval's; ranking behaviour is not.** A weight is a
+  quality decision swept against a corpus, so pinning 0.5 in a unit test would
+  fight the next sweep — the eval owns the values, and you should still run
+  `npm run test:eval` when touching `handoff/ranking.ts`.
+  `tests/handoff/ranking-contract.test.ts` covers the separate question of
+  whether the behaviour exists at all: corroboration helps, the tie-break only
+  breaks ties, windows overlap, one session cannot fill the answer. Those
+  assert shape rather than value, so a re-sweep passes and a deletion does not.
+  Verified against four mutations that previously only the eval caught.
 - **The embedding model is disabled in most of the suite.** Several vitest
   workers each loading a ~100MB ONNX model exhausted memory and produced
   failures in unrelated tests. `tests/setup.ts` sets
