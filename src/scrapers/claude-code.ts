@@ -1,7 +1,7 @@
 import { stat, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { ChunkMetadata, ClaudeCodeChunk } from "../types/scraper.js";
-import { AbstractScraper, estimateTokens } from "./base.js";
+import { AbstractScraper, describeType, estimateTokens, fileSize, isRecord } from "./base.js";
 import { encodePathForToolDirectory, pathMatchesProject } from "../utils/project-scope.js";
 import { recordDrift, withDriftReport } from "./drift-log.js";
 import { MAX_LINE_BYTES } from "./limits.js";
@@ -586,23 +586,4 @@ function stringifyContent(value: unknown): string {
 /** A non-empty string, or nothing. An empty branch is no branch. */
 function toOptionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value : undefined;
-}
-
-function describeType(value: unknown): string {
-  if (value === null) return "null";
-  if (Array.isArray(value)) return "array";
-  return typeof value;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-/** Size in bytes, or null when it cannot be read — in which case do not resume. */
-async function fileSize(path: string): Promise<number | null> {
-  try {
-    return (await stat(path)).size;
-  } catch {
-    return null;
-  }
 }

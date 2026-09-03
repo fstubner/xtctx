@@ -2,8 +2,16 @@ import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { CopilotCliChunk } from "../types/scraper.js";
 import { pathMatchesProject } from "../utils/project-scope.js";
-import { AbstractScraper, estimateTokens, toDate } from "./base.js";
-import { recordDrift, withDriftReport } from "./drift-log.js";
+import {
+  AbstractScraper,
+  describeType,
+  driftWarner,
+  estimateTokens,
+  fileSize,
+  isRecord,
+  toDate,
+} from "./base.js";
+import { withDriftReport } from "./drift-log.js";
 import { fileHeadHash, resumeOffset } from "./base.js";
 import { readJsonlLines } from "./jsonl-reader.js";
 import type { FileCursor } from "../types/scraper.js";
@@ -61,9 +69,7 @@ const EVENT_TYPE_ROLE_MAP: Record<string, CopilotCliChunk["role"]> = {
  */
 const KNOWN_NON_CONVERSATION_TYPES = new Set(["system.notification"]);
 
-function warnDrift(sourcePath: string, surprise: string, _recordsAffected: number): void {
-  recordDrift(SCRAPER_NAME, sourcePath, surprise);
-}
+const warnDrift = driftWarner(SCRAPER_NAME);
 
 export class CopilotCliScraper extends AbstractScraper<CopilotCliChunk> {
   /** Resume points from the last scan; empty on a full sync. */
@@ -149,7 +155,7 @@ export class CopilotCliScraper extends AbstractScraper<CopilotCliChunk> {
         yield* this.readEventsFile(eventsPath, sessionId, since);
       } catch (err) {
         // One unreadable session must not abort the remaining sessions.
-        warnDrift(eventsPath, `unreadable transcript file: ${(err as Error).message}`, 0);
+        warnDrift(eventsPath, `unreadable transcript file: ${(err as Error).message}`);
       }
     }
   }
@@ -186,7 +192,7 @@ export class CopilotCliScraper extends AbstractScraper<CopilotCliChunk> {
       lineNo++;
       const line = entry.line;
       if (line === null) {
-        warnDrift(filePath, `line exceeds the cap; skipped`, lineNo);
+        warnDrift(filePath, `line exceeds the cap; skipped`);
         continue;
       }
       if (!line.trim()) {
@@ -201,7 +207,6 @@ export class CopilotCliScraper extends AbstractScraper<CopilotCliChunk> {
         warnDrift(
           `${filePath}:${lineNo}`,
           `events.jsonl line is not valid JSON: ${(err as Error).message}`,
-          1,
         );
         continue;
       }
@@ -210,7 +215,6 @@ export class CopilotCliScraper extends AbstractScraper<CopilotCliChunk> {
         warnDrift(
           `${filePath}:${lineNo}`,
           `events.jsonl line is not an object (got ${describeType(event)})`,
-          1,
         );
         continue;
       }
@@ -261,7 +265,6 @@ export class CopilotCliScraper extends AbstractScraper<CopilotCliChunk> {
             warnDrift(
               `${filePath}:${lineNo}`,
               "event has content but no readable role — likely role-field rename",
-              1,
             );
           }
         }
@@ -279,7 +282,6 @@ export class CopilotCliScraper extends AbstractScraper<CopilotCliChunk> {
           warnDrift(
             `${filePath}:${lineNo}`,
             `event has role but 'content' is unexpected type ${describeType(event.content)}`,
-            1,
           );
         } else if (
           // The same check for where the text actually lives in the current
@@ -294,7 +296,6 @@ export class CopilotCliScraper extends AbstractScraper<CopilotCliChunk> {
           warnDrift(
             `${filePath}:${lineNo}`,
             `event has role but 'data.content' is unexpected type ${describeType(event.data.content)}`,
-            1,
           );
         } else if (
           typeof event.type === "string" &&
@@ -312,7 +313,6 @@ export class CopilotCliScraper extends AbstractScraper<CopilotCliChunk> {
           warnDrift(
             `${filePath}:${lineNo}`,
             `${event.type} has no 'data' payload — the field may have been renamed`,
-            1,
           );
         }
         // ACCEPTED_DEGRADATIONS.noContent
@@ -329,7 +329,6 @@ export class CopilotCliScraper extends AbstractScraper<CopilotCliChunk> {
         warnDrift(
           filePath,
           "session has no session.start context; cannot attribute to a project — skipped under project scoping",
-          1,
         );
         return;
       }
@@ -509,23 +508,4 @@ function extractContent(event: Record<string, unknown>): string | undefined {
 /** A non-empty string, or nothing. An empty branch is no branch. */
 function toOptionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value : undefined;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function describeType(value: unknown): string {
-  if (value === null) return "null";
-  if (Array.isArray(value)) return "array";
-  return typeof value;
-}
-
-/** Size in bytes, or null when it cannot be read — in which case do not resume. */
-async function fileSize(path: string): Promise<number | null> {
-  try {
-    return (await stat(path)).size;
-  } catch {
-    return null;
-  }
 }

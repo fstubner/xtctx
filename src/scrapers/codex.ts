@@ -2,9 +2,18 @@ import { stat } from "node:fs/promises";
 import { basename } from "node:path";
 import { glob } from "glob";
 import type { CodexChunk } from "../types/scraper.js";
-import { AbstractScraper, estimateTokens, toDate } from "./base.js";
+import {
+  AbstractScraper,
+  describeType,
+  driftWarner,
+  estimateTokens,
+  fileSize,
+  isRecord,
+  toDate,
+  toMessageIndex,
+} from "./base.js";
 import { pathMatchesProject } from "../utils/project-scope.js";
-import { recordDrift, withDriftReport } from "./drift-log.js";
+import { withDriftReport } from "./drift-log.js";
 import { MAX_LINE_BYTES, isWithinLineLimit } from "./limits.js";
 import { fileHeadHash, resumeOffset } from "./base.js";
 import { readJsonlLines } from "./jsonl-reader.js";
@@ -41,9 +50,7 @@ const KNOWN_EVENT_TYPES = new Set([
   "world_state",
 ]);
 
-function warnDrift(sourcePath: string, surprise: string, _recordsAffected: number): void {
-  recordDrift(SCRAPER_NAME, sourcePath, surprise);
-}
+const warnDrift = driftWarner(SCRAPER_NAME);
 
 const ROLE_MAP: Record<string, CodexChunk["role"]> = {
   user: "user",
@@ -198,7 +205,7 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
           // Read from the head of the line rather than by parsing it, because
           // parsing is the cost the cap exists to avoid.
           if (!isKnownBulkyRecord(line)) {
-            warnDrift(filePath, `JSONL line exceeds ${MAX_LINE_BYTES} chars; skipped`, 0);
+            warnDrift(filePath, `JSONL line exceeds ${MAX_LINE_BYTES} chars; skipped`);
           }
           continue;
         }
@@ -210,7 +217,6 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
           warnDrift(
             filePath,
             `JSONL line not parseable: ${(err as Error).message}`,
-            1,
           );
           continue;
         }
@@ -225,7 +231,6 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
           warnDrift(
             filePath,
             `event has no readable 'type' field (got ${describeType(parsed.type)})`,
-            1,
           );
           continue;
         }
@@ -235,7 +240,7 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
           // codex version. Warn so drift is observable; continue reading.
           // JSON.stringify, not raw interpolation: the value comes from a
           // transcript, and the other readers quote it the same way.
-          warnDrift(filePath, `unknown event type ${JSON.stringify(eventType)}`, 1);
+          warnDrift(filePath, `unknown event type ${JSON.stringify(eventType)}`);
           continue;
         }
 
@@ -306,7 +311,6 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
             warnDrift(
               filePath,
               "no record names a project directory; transcript excluded from this project",
-              0,
             );
           }
           continue;
@@ -321,7 +325,6 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
             warnDrift(
               filePath,
               `event_msg payload is not an object (got ${describeType(payload)})`,
-              1,
             );
             continue;
           }
@@ -331,7 +334,6 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
               warnDrift(
                 filePath,
                 "event_msg payload missing 'type' key — likely renamed",
-                1,
               );
             }
             continue;
@@ -406,7 +408,6 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
           warnDrift(
             filePath,
             `response_item payload is not an object (got ${describeType(payload)})`,
-            1,
           );
           continue;
         }
@@ -415,7 +416,6 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
             warnDrift(
               filePath,
               "response_item payload missing 'type' key — likely renamed",
-              1,
             );
           }
           continue;
@@ -428,7 +428,6 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
             warnDrift(
               filePath,
               "response_item message payload missing 'role' key",
-              1,
             );
           }
           messageIndex++;
@@ -485,7 +484,7 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
         // One unreadable file must not abort the remaining session files, and
         // no cursor is recorded for it — the next scan reads it again from
         // wherever it last succeeded.
-        warnDrift(filePath, `unreadable transcript file: ${(err as Error).message}`, 0);
+        warnDrift(filePath, `unreadable transcript file: ${(err as Error).message}`);
       }
     }
 
@@ -586,15 +585,6 @@ function toStringValue(value: unknown): string | undefined {
   return value;
 }
 
-function toMessageIndex(value: unknown): number {
-  const parsed = Number(value);
-  if (Number.isFinite(parsed) && parsed >= 0) {
-    return Math.floor(parsed);
-  }
-
-  return 0;
-}
-
 function toBoolean(value: unknown): boolean {
   if (typeof value === "boolean") {
     return value;
@@ -605,16 +595,6 @@ function toBoolean(value: unknown): boolean {
   }
 
   return false;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function describeType(value: unknown): string {
-  if (value === null) return "null";
-  if (Array.isArray(value)) return "array";
-  return typeof value;
 }
 
 /**
@@ -632,13 +612,4 @@ const TYPE_PEEK_CHARS = 200;
 export function isKnownBulkyRecord(line: string): boolean {
   const type = /"type"\s*:\s*"([^"]+)"/.exec(line.slice(0, TYPE_PEEK_CHARS))?.[1];
   return type !== undefined && BULKY_RESTATEMENT_TYPES.has(type);
-}
-
-/** Size in bytes, or null when it cannot be read — in which case do not resume. */
-async function fileSize(path: string): Promise<number | null> {
-  try {
-    return (await stat(path)).size;
-  } catch {
-    return null;
-  }
 }
