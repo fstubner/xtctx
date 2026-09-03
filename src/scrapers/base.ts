@@ -1,7 +1,8 @@
-import { open, readFile } from "node:fs/promises";
+import { open, readFile, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { writeFileAtomic } from "../utils/atomic-file.js";
+import { recordDrift } from "./drift-log.js";
 import type {
   ConversationChunk,
   ConversationScraper,
@@ -239,4 +240,46 @@ export async function fileHeadHash(path: string, upTo: number): Promise<string |
   } catch {
     return null;
   }
+}
+
+/** A plain object: not null, not an array. The shape every parsed record is checked against first. */
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+/** `typeof` with the two cases it gets wrong for drift messages spelled out. */
+export function describeType(value: unknown): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "array";
+  return typeof value;
+}
+
+/** Size in bytes, or null when it cannot be read — in which case do not resume. */
+export async function fileSize(path: string): Promise<number | null> {
+  try {
+    return (await stat(path)).size;
+  } catch {
+    return null;
+  }
+}
+
+/** A non-negative integer position, or 0 for anything that is not one. */
+export function toMessageIndex(value: unknown): number {
+  const parsed = Number(value);
+  if (Number.isFinite(parsed) && parsed >= 0) {
+    return Math.floor(parsed);
+  }
+
+  return 0;
+}
+
+/**
+ * A drift reporter bound to one scraper, so call sites name only the source
+ * and the surprise. Each scraper keeps a module-level
+ * `const warnDrift = driftWarner(SCRAPER_NAME)`.
+ */
+export function driftWarner(scraperName: string): (sourcePath: string, surprise: string) => void {
+  return (sourcePath, surprise) => {
+    recordDrift(scraperName, sourcePath, surprise);
+  };
 }

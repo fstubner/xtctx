@@ -1,8 +1,8 @@
 import { stat } from "node:fs/promises";
 import type { OpenCodeChunk } from "../types/scraper.js";
 import { pathMatchesProject } from "../utils/project-scope.js";
-import { AbstractScraper, estimateTokens, toDate } from "./base.js";
-import { recordDrift, withDriftReport } from "./drift-log.js";
+import { AbstractScraper, describeType, driftWarner, estimateTokens, isRecord, toDate } from "./base.js";
+import { withDriftReport } from "./drift-log.js";
 
 const SCRAPER_NAME = "opencode";
 
@@ -29,9 +29,7 @@ export const ACCEPTED_DEGRADATIONS = {
   malformedPartData: "Part.data not parseable JSON",
 };
 
-function warnDrift(sourcePath: string, surprise: string, _recordsAffected: number): void {
-  recordDrift(SCRAPER_NAME, sourcePath, surprise);
-}
+const warnDrift = driftWarner(SCRAPER_NAME);
 
 interface SessionRow {
   id: string;
@@ -175,7 +173,7 @@ export class OpenCodeScraper extends AbstractScraper<OpenCodeChunk> {
             `[${SCRAPER_NAME}] opencode database at ${this.opencodeDbPath} is unreadable: ${message}`,
           );
         }
-        warnDrift(this.opencodeDbPath, `session table query failed: ${message}`, 0);
+        warnDrift(this.opencodeDbPath, `session table query failed: ${message}`);
         return;
       }
     }
@@ -189,7 +187,6 @@ export class OpenCodeScraper extends AbstractScraper<OpenCodeChunk> {
         warnDrift(
           this.opencodeDbPath,
           "sessions without a 'directory' value cannot be attributed to a project; skipped under project scoping",
-          unattributable,
         );
       }
       sessions = sessions.filter(
@@ -215,7 +212,6 @@ export class OpenCodeScraper extends AbstractScraper<OpenCodeChunk> {
       warnDrift(
         this.opencodeDbPath,
         `message/part table prepare failed: ${(err as Error).message}`,
-        sessions.length,
       );
       return;
     }
@@ -228,7 +224,6 @@ export class OpenCodeScraper extends AbstractScraper<OpenCodeChunk> {
         warnDrift(
           `${this.opencodeDbPath}#session:${session.id}`,
           `message query failed: ${(err as Error).message}`,
-          0,
         );
         continue;
       }
@@ -242,7 +237,6 @@ export class OpenCodeScraper extends AbstractScraper<OpenCodeChunk> {
           warnDrift(
             `${this.opencodeDbPath}#message:${msg.id}`,
             `message.data not parseable JSON: ${(err as Error).message}`,
-            1,
           );
           continue;
         }
@@ -251,7 +245,6 @@ export class OpenCodeScraper extends AbstractScraper<OpenCodeChunk> {
           warnDrift(
             `${this.opencodeDbPath}#message:${msg.id}`,
             `message.data is not an object (got ${describeType(msgData)})`,
-            1,
           );
           continue;
         }
@@ -260,7 +253,6 @@ export class OpenCodeScraper extends AbstractScraper<OpenCodeChunk> {
           warnDrift(
             `${this.opencodeDbPath}#message:${msg.id}`,
             "message.data missing 'role' field — likely renamed",
-            1,
           );
           continue;
         }
@@ -268,7 +260,6 @@ export class OpenCodeScraper extends AbstractScraper<OpenCodeChunk> {
           warnDrift(
             `${this.opencodeDbPath}#message:${msg.id}`,
             `expected 'role' to be a string, got ${describeType(msgData.role)}`,
-            1,
           );
           continue;
         }
@@ -289,7 +280,6 @@ export class OpenCodeScraper extends AbstractScraper<OpenCodeChunk> {
           warnDrift(
             `${this.opencodeDbPath}#message:${msg.id}`,
             `part query failed: ${(err as Error).message}`,
-            0,
           );
           messageIndex++;
           continue;
@@ -304,7 +294,6 @@ export class OpenCodeScraper extends AbstractScraper<OpenCodeChunk> {
             warnDrift(
               `${this.opencodeDbPath}#part:${part.id}`,
               `part.data not parseable JSON: ${(err as Error).message}`,
-              1,
             );
             continue;
           }
@@ -313,7 +302,6 @@ export class OpenCodeScraper extends AbstractScraper<OpenCodeChunk> {
             warnDrift(
               `${this.opencodeDbPath}#part:${part.id}`,
               `part.data is not an object (got ${describeType(partData)})`,
-              1,
             );
             continue;
           }
@@ -377,14 +365,4 @@ function normalizeRole(value: unknown): OpenCodeChunk["role"] {
     default:
       return "system";
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function describeType(value: unknown): string {
-  if (value === null) return "null";
-  if (Array.isArray(value)) return "array";
-  return typeof value;
 }

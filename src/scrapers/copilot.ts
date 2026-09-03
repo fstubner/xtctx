@@ -3,9 +3,17 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { glob } from "glob";
 import type { CopilotChunk } from "../types/scraper.js";
-import { AbstractScraper, estimateTokens, toDate } from "./base.js";
+import {
+  AbstractScraper,
+  describeType,
+  driftWarner,
+  estimateTokens,
+  isRecord,
+  toDate,
+  toMessageIndex,
+} from "./base.js";
 import { pathMatchesProject } from "../utils/project-scope.js";
-import { recordDrift, withDriftReport } from "./drift-log.js";
+import { withDriftReport } from "./drift-log.js";
 import { MAX_FILE_BYTES, isWithinFileLimit } from "./limits.js";
 
 /** VS Code stores Copilot Chat history in workspaceStorage SQLite files. */
@@ -56,9 +64,7 @@ interface CopilotSession {
   requests?: CopilotRequest[];
 }
 
-function warnDrift(sourcePath: string, surprise: string, _recordsAffected: number): void {
-  recordDrift(SCRAPER_NAME, sourcePath, surprise);
-}
+const warnDrift = driftWarner(SCRAPER_NAME);
 
 export class CopilotScraper extends AbstractScraper<CopilotChunk> {
   readonly tool = "copilot";
@@ -211,14 +217,14 @@ export class CopilotScraper extends AbstractScraper<CopilotChunk> {
       // costs the long-lived server twice its size. These files are written by
       // another tool, so their size is not ours to trust.
       if (!(await isWithinFileLimit(filePath))) {
-        warnDrift(filePath, `chat session file exceeds ${MAX_FILE_BYTES} bytes; skipped`, 0);
+        warnDrift(filePath, `chat session file exceeds ${MAX_FILE_BYTES} bytes; skipped`);
         continue;
       }
       let raw: string;
       try {
         raw = await readFile(filePath, "utf-8");
       } catch (err) {
-        warnDrift(filePath, `chat session file unreadable: ${(err as Error).message}`, 0);
+        warnDrift(filePath, `chat session file unreadable: ${(err as Error).message}`);
         continue;
       }
 
@@ -244,7 +250,7 @@ export class CopilotScraper extends AbstractScraper<CopilotChunk> {
       rawValue = row?.value ?? null;
     } catch (err) {
       // Required table missing / shape changed — this is a real surprise.
-      warnDrift(dbPath, `ItemTable query failed: ${(err as Error).message}`, 0);
+      warnDrift(dbPath, `ItemTable query failed: ${(err as Error).message}`);
       return;
     }
 
@@ -260,7 +266,6 @@ export class CopilotScraper extends AbstractScraper<CopilotChunk> {
       warnDrift(
         dbPath,
         `interactive.sessions value is not valid JSON: ${(err as Error).message}`,
-        0,
       );
       return;
     }
@@ -279,7 +284,6 @@ export class CopilotScraper extends AbstractScraper<CopilotChunk> {
       warnDrift(
         dbPath,
         `expected interactive.sessions to be an object or array, got ${describeType(sessionsMap)}`,
-        0,
       );
       return;
     }
@@ -308,7 +312,6 @@ export class CopilotScraper extends AbstractScraper<CopilotChunk> {
       warnDrift(
         `${location}#${sessionKey}`,
         `session entry is not an object (got ${describeType(rawSession)})`,
-        0,
       );
       return;
     }
@@ -324,7 +327,6 @@ export class CopilotScraper extends AbstractScraper<CopilotChunk> {
       warnDrift(
         `${location}#${sessionKey}`,
         "session missing 'sessionId' field — using fallback 'unknown'",
-        0,
       );
     }
 
@@ -334,7 +336,6 @@ export class CopilotScraper extends AbstractScraper<CopilotChunk> {
       warnDrift(
         `${location}#${sessionId}`,
         `expected 'creationDate' to be a number, got ${describeType(session.creationDate)}`,
-        0,
       );
     }
 
@@ -356,7 +357,6 @@ export class CopilotScraper extends AbstractScraper<CopilotChunk> {
       warnDrift(
         `${location}#${sessionId}`,
         `expected 'requests' to be an array, got ${describeType(session.requests)}`,
-        0,
       );
       return;
     }
@@ -372,7 +372,6 @@ export class CopilotScraper extends AbstractScraper<CopilotChunk> {
         warnDrift(
           `${location}#${sessionId}`,
           `session has no 'requests' key; suspected rename to '${suspiciousRename[0]}'`,
-          0,
         );
       }
       return;
@@ -387,7 +386,6 @@ export class CopilotScraper extends AbstractScraper<CopilotChunk> {
         warnDrift(
           `${location}#${sessionId}`,
           `request entry is not an object (got ${describeType(req)})`,
-          0,
         );
         continue;
       }
@@ -438,7 +436,6 @@ export class CopilotScraper extends AbstractScraper<CopilotChunk> {
         warnDrift(
           this.workspaceStoragePath,
           "expected workspaceStorage to be a directory",
-          0,
         );
         return [];
       }
@@ -515,7 +512,7 @@ function replayChatSessionLog(raw: string, location: string): unknown {
     try {
       record = JSON.parse(line) as unknown;
     } catch (err) {
-      warnDrift(location, `chat session line is not valid JSON: ${(err as Error).message}`, 0);
+      warnDrift(location, `chat session line is not valid JSON: ${(err as Error).message}`);
       continue;
     }
     if (!isRecord(record)) continue;
@@ -542,7 +539,7 @@ function replayChatSessionLog(raw: string, location: string): unknown {
   }
 
   if (!state) {
-    warnDrift(location, "chat session log has no snapshot record to rebuild from", 0);
+    warnDrift(location, "chat session log has no snapshot record to rebuild from");
     return null;
   }
 
@@ -629,7 +626,7 @@ export function* parseChatSessionFile(
   try {
     yield JSON.parse(raw) as unknown;
   } catch (err) {
-    warnDrift(location, `chat session file is not valid JSON: ${(err as Error).message}`, 0);
+    warnDrift(location, `chat session file is not valid JSON: ${(err as Error).message}`);
   }
 }
 
@@ -678,31 +675,12 @@ function normalizeRole(value?: string): CopilotChunk["role"] {
   return ROLE_MAP[value.toLowerCase()] ?? "system";
 }
 
-function toMessageIndex(value: unknown): number {
-  const parsed = Number(value);
-  if (Number.isFinite(parsed) && parsed >= 0) {
-    return Math.floor(parsed);
-  }
-
-  return 0;
-}
-
 function toStringValue(value: unknown): string | undefined {
   if (typeof value !== "string") {
     return undefined;
   }
 
   return value;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function describeType(value: unknown): string {
-  if (value === null) return "null";
-  if (Array.isArray(value)) return "array";
-  return typeof value;
 }
 
 /**

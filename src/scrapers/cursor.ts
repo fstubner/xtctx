@@ -4,9 +4,9 @@ import { fileURLToPath } from "node:url";
 import type Database from "better-sqlite3";
 import { glob } from "glob";
 import type { CursorChunk } from "../types/scraper.js";
-import { AbstractScraper, estimateTokens, toDate } from "./base.js";
+import { AbstractScraper, describeType, driftWarner, estimateTokens, isRecord, toDate } from "./base.js";
 import { pathMatchesProject } from "../utils/project-scope.js";
-import { recordDrift, withDriftReport } from "./drift-log.js";
+import { withDriftReport } from "./drift-log.js";
 
 // Bubble type constants from Cursor's internal format.
 const BUBBLE_TYPE_USER = 1;
@@ -32,15 +32,7 @@ export const ACCEPTED_DEGRADATIONS = {
   unknownFieldsAlongside: "extra keys alongside known composer schema",
 };
 
-function warnDrift(sourcePath: string, surprise: string, _recordsAffected: number): void {
-  recordDrift(SCRAPER_NAME, sourcePath, surprise);
-}
-
-function describeType(value: unknown): string {
-  if (value === null) return "null";
-  if (Array.isArray(value)) return "array";
-  return typeof value;
-}
+const warnDrift = driftWarner(SCRAPER_NAME);
 
 interface WorkspaceComposerRef {
   composerId: string;
@@ -178,7 +170,6 @@ export class CursorScraper extends AbstractScraper<CursorChunk> {
         warnDrift(
           globalPath,
           `globalStorage unreadable: ${(err as Error).message}`,
-          composerRefs.length,
         );
       } finally {
         globalDb?.close();
@@ -304,7 +295,6 @@ export class CursorScraper extends AbstractScraper<CursorChunk> {
       warnDrift(
         globalPath,
         `globalStorage unreadable while looking for unlisted conversations: ${(err as Error).message}`,
-        0,
       );
     } finally {
       globalDb.close();
@@ -341,7 +331,6 @@ export class CursorScraper extends AbstractScraper<CursorChunk> {
         warnDrift(
           wsDbPath,
           `composer.composerData value is not valid JSON: ${(err as Error).message}`,
-          0,
         );
         return [];
       }
@@ -350,7 +339,6 @@ export class CursorScraper extends AbstractScraper<CursorChunk> {
         warnDrift(
           wsDbPath,
           `expected 'allComposers' to be an array, got ${describeType(data.allComposers)}`,
-          0,
         );
         return [];
       }
@@ -361,7 +349,7 @@ export class CursorScraper extends AbstractScraper<CursorChunk> {
       // opened but a query against it failed, meaning Cursor's internal
       // format changed. Warn loudly, but do not abort the remaining
       // workspaces over one broken database.
-      warnDrift(wsDbPath, `ItemTable unreadable: ${(err as Error).message}`, 0);
+      warnDrift(wsDbPath, `ItemTable unreadable: ${(err as Error).message}`);
       return [];
     } finally {
       db?.close();
@@ -390,7 +378,6 @@ export class CursorScraper extends AbstractScraper<CursorChunk> {
         warnDrift(
           `${wsPathForWarn}#composerData:${ref.composerId}`,
           "workspace references a composer that is missing from globalStorage",
-          0,
         );
         continue;
       }
@@ -402,7 +389,6 @@ export class CursorScraper extends AbstractScraper<CursorChunk> {
         warnDrift(
           `${wsPathForWarn}#composerData:${ref.composerId}`,
           `composer JSON not parseable: ${(err as Error).message}`,
-          0,
         );
         continue;
       }
@@ -423,7 +409,6 @@ export class CursorScraper extends AbstractScraper<CursorChunk> {
           suspiciousRename
             ? `'fullConversationHeadersOnly' missing; suspected rename to '${suspiciousRename[0]}'`
             : "'fullConversationHeadersOnly' missing — composer has no turn list",
-          0,
         );
         continue;
       }
@@ -433,7 +418,6 @@ export class CursorScraper extends AbstractScraper<CursorChunk> {
           `${wsPathForWarn}#composerData:${ref.composerId}`,
           `expected 'fullConversationHeadersOnly' to be an array, got ` +
             describeType(composer.fullConversationHeadersOnly),
-          0,
         );
         continue;
       }
@@ -443,13 +427,11 @@ export class CursorScraper extends AbstractScraper<CursorChunk> {
         warnDrift(
           `${wsPathForWarn}#composerData:${ref.composerId}`,
           `expected 'modelConfig' to be object or absent, got ${describeType(composer.modelConfig)}`,
-          0,
         );
       } else if (composer.modelConfig === null) {
         warnDrift(
           `${wsPathForWarn}#composerData:${ref.composerId}`,
           "'modelConfig' is null — falling back to composerId as model label",
-          0,
         );
       }
 
@@ -687,10 +669,6 @@ function normalizeRole(value?: number | string): CursorChunk["role"] {
 
 function normalizeComposerMode(value?: string): CursorChunk["metadata"]["composerMode"] {
   return value === "agent" ? "agent" : "normal";
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function toNonEmptyString(value: unknown): string | undefined {
