@@ -63,7 +63,7 @@ const ROLE_MAP: Record<string, CodexChunk["role"]> = {
 type ApprovalMode = CodexChunk["metadata"]["approvalMode"];
 
 export class CodexCliScraper extends AbstractScraper<CodexChunk> {
-  readonly tool = "codex";
+  readonly tool = SCRAPER_NAME;
 
   constructor(
     private readonly codexSessionsPath: string,

@@ -77,7 +77,7 @@ export class CopilotCliScraper extends AbstractScraper<CopilotCliChunk> {
   private updatedCursors: Record<string, FileCursor> = {};
   private resuming = false;
 
-  readonly tool = "copilot-cli";
+  readonly tool = SCRAPER_NAME;
 
   constructor(
     private readonly sessionStateDir: string,

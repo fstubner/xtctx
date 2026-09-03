@@ -1,6 +1,6 @@
 import { readdir, readFile, stat } from "node:fs/promises";
+import { workspaceMatchesProject } from "../vscode-workspace.js";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { glob } from "glob";
 import type { CopilotChunk } from "../../types/scraper.js";
 import {
@@ -11,7 +11,6 @@ import {
   toDate,
   toMessageIndex,
 } from "../base.js";
-import { pathMatchesProject } from "../../utils/project-scope.js";
 import { withDriftReport } from "../drift-log.js";
 import { MAX_FILE_BYTES, isWithinFileLimit } from "../limits.js";
 import { parseChatSessionFile } from "./journal.js";
@@ -64,7 +63,7 @@ interface CopilotSession {
 }
 
 export class CopilotScraper extends AbstractScraper<CopilotChunk> {
-  readonly tool = "copilot";
+  readonly tool = SCRAPER_NAME;
 
   constructor(
     /** Path to %APPDATA%/Code/User/workspaceStorage (or a test stand-in). */
@@ -460,23 +459,6 @@ export class CopilotScraper extends AbstractScraper<CopilotChunk> {
   }
 }
 
-async function workspaceMatchesProject(
-  workspaceDbPath: string,
-  projectRoot: string,
-): Promise<boolean> {
-  try {
-    const raw = await readFile(join(dirname(workspaceDbPath), "workspace.json"), "utf-8");
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    const folder = typeof parsed.folder === "string" ? parsed.folder : undefined;
-    if (!folder) {
-      return false;
-    }
-    const folderPath = folder.startsWith("file:") ? fileURLToPath(folder) : folder;
-    return pathMatchesProject(folderPath, projectRoot);
-  } catch {
-    return false;
-  }
-}
 
 /** Concatenates all text parts from a user message. */
 function extractUserText(req: CopilotRequest): string | undefined {

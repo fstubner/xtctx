@@ -67,7 +67,7 @@ interface PartData {
 }
 
 export class OpenCodeScraper extends AbstractScraper<OpenCodeChunk> {
-  readonly tool = "opencode";
+  readonly tool = SCRAPER_NAME;
 
   constructor(
     private readonly opencodeDbPath: string,
