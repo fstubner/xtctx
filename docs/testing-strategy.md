@@ -60,7 +60,7 @@ each suite against each mutation:
 | corroboration weight to 0 | **survived** | killed | eval-only — now also unit |
 | tie-break weight to 0.9 | **survived** | killed | eval-only — now also unit |
 | window stride to no overlap | **survived** | killed | eval-only — now also unit |
-| candidate windows per session to 1 | **survived** | killed | eval-only |
+| candidate windows per session to 1 | **survived** | killed | eval-only — now also unit |
 | matches per session to 1 | **survived** | **survived** | gap — now closed |
 | resume cursor overlap to 0 | **survived** | **survived** | gap — now closed |
 | preview source chars to 1 | **survived** | **survived** | gap — now closed |
