@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { inspectManagedFile, pathExists } from "../config/setup.js";
-import { inspectMcpWiring } from "../config/mcp-config.js";
+import { inspectMcpWiring, type McpWiringState } from "../config/mcp-config.js";
 import { inspectSkillStatus } from "../config/skills.js";
 import { createProjectServices, type ProjectServices } from "../runtime/services.js";
 import { estimateVectorBacklog, formatDuration } from "../utils/duration.js";
@@ -83,7 +83,7 @@ export async function renderStatusBlock(
     lines.push(`         No transcripts are being read until this is fixed.`);
   }
   lines.push(`Index    ${services.dbPath}`);
-  lines.push(`MCP      npx -y xtctx`);
+  lines.push(`MCP      ${describeMcpCommand(mcpWiring)}`);
   const scanTook = formatDuration(status.last_scan_ms);
   lines.push(
     `Scan     ${status.last_scan_at ?? "never"}${scanTook ? ` (took ${scanTook})` : ""}`,
@@ -184,8 +184,11 @@ export async function renderStatusBlock(
     for (const entry of mcpWiring) {
       const scope = entry.scope === "global" ? " (global config)" : "";
       const detail = entry.detail ? ` — ${entry.detail}` : "";
+      // The command, per tool, because they can legitimately differ and
+      // because "wired" alone never said what would actually run.
+      const command = entry.command ? `\n${" ".repeat(28)}${entry.command}` : "";
       lines.push(
-        `  ${(entry.wired ? "wired" : "not wired").padEnd(12)} ${entry.tool.padEnd(13)} ${entry.path}${scope}${detail}`,
+        `  ${(entry.wired ? "wired" : "not wired").padEnd(12)} ${entry.tool.padEnd(13)} ${entry.path}${scope}${detail}${command}`,
       );
     }
   }
@@ -247,6 +250,35 @@ export async function renderStatusBlock(
   }
 
   return lines.join("\n");
+}
+
+/**
+ * The one-line answer to "what runs xtctx here", read from the configs.
+ *
+ * This line was the string literal `npx -y xtctx`, printed regardless of what
+ * any config said. Status is the one place a person looks to find out what
+ * their handoff is wired to, so a line that always says the same thing is
+ * worse than no line: it reads as an answer. A project deliberately pointed at
+ * a local build — because the published package was too old to work — was told
+ * it was running the published package.
+ *
+ * Seven configs can disagree, and legitimately do, so there is not always one
+ * answer. Saying so and pointing at the per-tool list beats picking a winner.
+ */
+export function describeMcpCommand(wiring: McpWiringState[]): string {
+  const commands = [
+    ...new Set(
+      wiring.filter((entry) => entry.wired && entry.command).map((entry) => entry.command as string),
+    ),
+  ];
+
+  if (commands.length === 1) {
+    return commands[0];
+  }
+  if (commands.length === 0) {
+    return "nothing wired (run xtctx setup)";
+  }
+  return "varies by tool - see MCP wiring below";
 }
 
 function plural(count: number, noun: string): string {

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { renderStatusBlock, storePathNotes } from "@xtctx/cli/status";
+import { describeMcpCommand, renderStatusBlock, storePathNotes } from "@xtctx/cli/status";
 import { setupProject } from "@xtctx/config/setup";
 import { createProjectServices } from "@xtctx/runtime/services";
 
@@ -148,6 +148,46 @@ describe("status", () => {
     }
   });
 
+  /**
+   * That `describeMcpCommand` is right proves nothing about status: the bug
+   * was a hard-coded literal at the call site, and a unit test of the helper
+   * stays green while the report keeps printing `npx -y xtctx`. Verified by
+   * mutation — reverting the line to the literal passed every helper test.
+   *
+   * So this asserts through the rendered report, against a config edited to
+   * something the default never produces.
+   */
+  it("reports the command the configs name, not the published default", async () => {
+    await setupProject({ projectPath: projectRoot, homeDir, yes: true });
+    const localBuild = "node /some/checkout/dist/src/cli/index.js";
+    await writeFile(
+      join(projectRoot, ".mcp.json"),
+      JSON.stringify({
+        mcpServers: {
+          xtctx: {
+            type: "stdio",
+            command: "node",
+            args: ["/some/checkout/dist/src/cli/index.js"],
+          },
+        },
+      }),
+      "utf-8",
+    );
+
+    const services = await createProjectServices(projectRoot);
+    try {
+      const status = await renderStatusBlock(services, { homeDir });
+
+      // The per-tool line carries it...
+      expect(status).toContain(localBuild);
+      // ...and the summary line no longer claims the published package, which
+      // is not what would start here.
+      expect(status).not.toMatch(/MCP\s+npx -y xtctx/);
+    } finally {
+      await services.sessions.close();
+    }
+  });
+
   it("reports synced skill inventory and target drift", async () => {
     await setupProject({ projectPath: projectRoot, homeDir, yes: true });
     await writeFile(
@@ -197,6 +237,57 @@ describe("status", () => {
     expect(stdout).toContain(`Project  ${projectRoot}`);
     expect(stdout).not.toContain(`Project  ${process.cwd()}`);
   }, 15_000);
+});
+
+/**
+ * The `MCP` line was the string literal `npx -y xtctx`, printed regardless of
+ * what any config held. Status is the one place a person looks to find out
+ * what their handoff runs, so a line that always says the same thing reads as
+ * an answer while being one.
+ *
+ * Found by pointing three real projects at a local build — the published
+ * package was too old to work — and watching status insist they were running
+ * the published package.
+ */
+describe("describeMcpCommand", () => {
+  const wired = (command?: string, tool = "claude-code") =>
+    ({
+      tool,
+      path: `/p/${tool}`,
+      scope: "project" as const,
+      wired: command !== undefined,
+      configExists: true,
+      command,
+    });
+
+  it("reports the command the configs actually agree on", () => {
+    expect(describeMcpCommand([wired("node /checkout/dist/src/cli/index.js")])).toBe(
+      "node /checkout/dist/src/cli/index.js",
+    );
+  });
+
+  it("says so rather than picking one when tools disagree", () => {
+    // Seven configs can legitimately differ — a global one is deliberately not
+    // allowed to carry a project path. Naming a winner would be a guess.
+    const line = describeMcpCommand([
+      wired("npx -y xtctx"),
+      wired("node /checkout/dist/src/cli/index.js", "cursor"),
+    ]);
+
+    expect(line).toMatch(/varies/i);
+    expect(line).not.toContain("npx -y xtctx");
+  });
+
+  it("does not invent a command when nothing is wired", () => {
+    expect(describeMcpCommand([])).toMatch(/nothing wired/i);
+    expect(describeMcpCommand([wired(undefined)])).toMatch(/nothing wired/i);
+  });
+
+  it("ignores an entry that exists but is not wired", () => {
+    const unwired = { ...wired("npx -y xtctx"), wired: false };
+
+    expect(describeMcpCommand([unwired])).toMatch(/nothing wired/i);
+  });
 });
 
 /**
