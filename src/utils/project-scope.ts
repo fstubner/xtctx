@@ -15,13 +15,35 @@ export function pathMatchesProject(candidatePath: string, projectRoot: string): 
 
 /**
  * Encode a project root the way Claude Code names its store directories:
- * every `:`, `\` and `/` becomes `-`. The leading separator is part of that
- * encoding on POSIX (`/Users/me/app` -> `-Users-me-app`); stripping it meant
- * the name never matched the directory on disk, so macOS and Linux projects
- * scraped nothing. Windows paths start with a drive letter and are unaffected.
+ * every `.`, `:`, `\`, `/` and `_` becomes `-`. The leading separator is part
+ * of that encoding on POSIX (`/Users/me/app` -> `-Users-me-app`); stripping it
+ * meant the name never matched the directory on disk, so macOS and Linux
+ * projects scraped nothing. Windows paths start with a drive letter and are
+ * unaffected.
+ *
+ * `.` and `_` were missing until 2026-09-04, and their absence silently cost a
+ * project its entire Claude Code history: `QueHay_Net` was looked for under
+ * `...-quehay_net` while the tool had written `...-quehay-net`, so
+ * `filterProjectDirs` never opened the directory and the per-record `cwd`
+ * check that attributes correctly never got the chance to run. Underscores in
+ * repository names are common; xtctx's own directory happens to have none,
+ * which is why nothing caught this.
+ *
+ * The set is measured rather than inferred from the tool's source: 134
+ * directories in a real `~/.claude/projects`, each compared against the `cwd`
+ * recorded inside its own transcripts, differ in exactly these characters plus
+ * case. Long paths are a separate case this does not handle — Claude Code
+ * truncates those and appends a random suffix, which nothing can reconstruct;
+ * `projectStoreDir`, taken from the hook payload, is the answer there.
+ *
+ * Collapsing more characters makes the encoded name less distinctive, so two
+ * projects (`my_app` and `my-app`) can share one. That collision already
+ * existed for `:` `\` `/` and is safe for the same reason: this name only
+ * decides which directories are worth opening, and each record's own `cwd`
+ * decides whose it is.
  */
 export function encodePathForToolDirectory(projectRoot: string): string {
-  return projectRoot.replace(/[:\\/]/g, "-").replace(/-+$/g, "");
+  return projectRoot.replace(/[.:\\/_]/g, "-").replace(/-+$/g, "");
 }
 
 function normalizeProjectPath(value: string): string {
