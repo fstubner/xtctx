@@ -19,6 +19,7 @@ import {
   mapWithConcurrency,
   parsePosixListeningPorts,
   parseWindowsListeningPorts,
+  summarizeDegradation,
 } from "@xtctx/scrapers/antigravity/runtime-client";
 import { listConversationFileIds } from "@xtctx/scrapers/antigravity/store";
 import { readDriftLog } from "@xtctx/scrapers/drift-log";
@@ -638,6 +639,64 @@ describe("shouldFetchTrajectory", () => {
       };
       expect(shouldFetchTrajectory(both, projectRoot)).toBe(true);
     });
+  });
+});
+
+/**
+ * Whether a scan admits it was incomplete.
+ *
+ * The counters behind this decide whether the scan throws instead of advancing
+ * its cursor, so a wrong answer turns transcripts that were merely unread this
+ * time into ones that are never read again. It was untestable until the logic
+ * came out of `listConversations`, which needs a live language server on
+ * localhost to reach it — a mutation sweep could hard-wire either count,
+ * invert either guard, or drop a reason entirely with the suite green.
+ */
+describe("summarizeDegradation", () => {
+  it("says nothing when every endpoint answered and every trajectory arrived", () => {
+    expect(
+      summarizeDegradation({ unanswered: 0, endpoints: 3, unfetched: 0, attempted: 40 }),
+    ).toBeUndefined();
+  });
+
+  it("reports endpoints that stopped answering, with both counts", () => {
+    const reason = summarizeDegradation({
+      unanswered: 2,
+      endpoints: 3,
+      unfetched: 0,
+      attempted: 40,
+    });
+
+    expect(reason).toContain("2 of 3");
+    expect(reason).toContain("endpoints stopped answering");
+    expect(reason).not.toContain("trajectories");
+  });
+
+  it("reports trajectories that could not be fetched, with both counts", () => {
+    const reason = summarizeDegradation({
+      unanswered: 0,
+      endpoints: 3,
+      unfetched: 7,
+      attempted: 40,
+    });
+
+    expect(reason).toContain("7 of 40");
+    expect(reason).toContain("trajectories could not be fetched");
+    expect(reason).not.toContain("endpoints");
+  });
+
+  it("reports both when both went wrong, rather than only the first", () => {
+    // A dead endpoint is a plausible cause of failed fetches, so these arrive
+    // together often. Reporting one hides how much of the scan is missing.
+    const reason = summarizeDegradation({
+      unanswered: 1,
+      endpoints: 2,
+      unfetched: 5,
+      attempted: 9,
+    });
+
+    expect(reason).toContain("1 of 2");
+    expect(reason).toContain("5 of 9");
   });
 });
 

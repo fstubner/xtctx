@@ -171,18 +171,48 @@ export class AntigravityLanguageServerClient implements AntigravityRuntimeClient
 
     reportHandledStepRenames(handledTally, `antigravity-ls:${conversationsDir}`);
 
-    const reasons: string[] = [];
-    if (unanswered > 0) {
-      reasons.push(`${unanswered} of ${endpoints.length} language server endpoints stopped answering`);
-    }
-    if (unfetched > 0) {
-      reasons.push(`${unfetched} of ${worthFetching.length} trajectories could not be fetched`);
-    }
+    const degradation = summarizeDegradation({
+      unanswered,
+      endpoints: endpoints.length,
+      unfetched,
+      attempted: worthFetching.length,
+    });
 
-    return reasons.length > 0
-      ? { conversations, degradation: reasons.join("; ") }
-      : { conversations };
+    return degradation ? { conversations, degradation } : { conversations };
   }
+}
+
+/**
+ * What an incomplete scan should say about itself, or nothing if it was whole.
+ *
+ * Extracted from `listConversations` because that method needs a live
+ * Antigravity language server on localhost to reach this point, which put the
+ * counters beyond any test: a mutation sweep could set either count to a
+ * constant, drop a reason, or invert the guards, and the suite stayed green.
+ * The value decides whether the scan throws rather than advancing its cursor
+ * (see `failIfDegraded`), so getting it wrong silently converts unread
+ * transcripts into permanently skipped ones.
+ *
+ * Both reasons are reported when both apply — they are different failures and
+ * a scan can suffer both at once.
+ */
+export function summarizeDegradation(counts: {
+  unanswered: number;
+  endpoints: number;
+  unfetched: number;
+  attempted: number;
+}): string | undefined {
+  const reasons: string[] = [];
+  if (counts.unanswered > 0) {
+    reasons.push(
+      `${counts.unanswered} of ${counts.endpoints} language server endpoints stopped answering`,
+    );
+  }
+  if (counts.unfetched > 0) {
+    reasons.push(`${counts.unfetched} of ${counts.attempted} trajectories could not be fetched`);
+  }
+
+  return reasons.length > 0 ? reasons.join("; ") : undefined;
 }
 
 /**
