@@ -465,7 +465,8 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
   /**
    * Coarse pre-filter over encoded store directory names.
    *
-   * Encoded names are ambiguous — `-` stands for `:`, `\` and `/` alike — so
+   * Encoded names are ambiguous — `-` stands for `.`, `:`, `\`, `/` and `_`
+   * alike — so
    * this only decides which directories are worth opening. Each record's own
    * `cwd` is what actually attributes it — the per-file ownership check in
    * `readSessionFile` — which
