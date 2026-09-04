@@ -565,6 +565,24 @@ async function pathExists(path: string): Promise<boolean> {
  */
 const COMPOSER_PATH_FIELDS = new Set(["fsPath", "external", "toolDisplayPath", "repoPath", "path"]);
 
+/**
+ * Only a *string* under one of those keys counts, which reads like a gap: an
+ * array of paths under `path` would be walked into and every element ignored,
+ * because the recursion below only descends into records.
+ *
+ * Measured before deciding it was one. Every composer in a real Cursor
+ * globalStorage (603 of them, 2026-09-04) holds these fields as strings and
+ * nothing else — 8,881 `toolDisplayPath`, 8,860 `path`, 8,853 `external`,
+ * 6,479 `fsPath`, 42 `repoPath`, zero arrays among them. So the array branch
+ * would be code written for a shape Cursor does not emit, and it fails closed
+ * regardless: an unmatched composer is left unattributed, never misfiled under
+ * someone else's project.
+ *
+ * If Cursor starts emitting one, the symptom is conversations quietly missing
+ * from a project rather than anything visibly broken — so this note is here to
+ * be found by whoever goes looking.
+ */
+
 /** How deep to walk a composer looking for recorded file locations. */
 const COMPOSER_PATH_DEPTH = 6;
 
