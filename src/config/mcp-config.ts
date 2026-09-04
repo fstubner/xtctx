@@ -54,7 +54,7 @@ interface McpRemoveSummary {
   results: McpRemoveResult[];
 }
 
-interface McpWiringState {
+export interface McpWiringState {
   tool: string;
   path: string;
   scope: "project" | "global";
@@ -68,8 +68,48 @@ interface McpWiringState {
    * exists without our entry is wiring that has been lost.
    */
   configExists: boolean;
+  /**
+   * What the entry says to run, as a single readable line — `npx -y xtctx`, or
+   * the URL for a remote server.
+   *
+   * Reported because nothing did: `status` printed a hard-coded `npx -y xtctx`
+   * whatever the configs held, so a project deliberately pointed at a local
+   * build was told it was running the published package. Different tools can
+   * legitimately name different commands, which is the other reason this
+   * belongs per-entry rather than as one line.
+   */
+  command?: string;
   /** Why it is not wired, when that is worth saying. */
   detail?: string;
+}
+
+/**
+ * The command an entry names, flattened for display.
+ *
+ * Two shapes exist: `command` + `args` for most tools, and opencode's single
+ * combined array. A remote server names a `url` and no command at all, which
+ * is a valid entry rather than a broken one.
+ */
+export function describeMcpEntryCommand(entry: unknown): string | undefined {
+  if (!isRecord(entry)) return undefined;
+
+  if (Array.isArray(entry.command)) {
+    const parts = entry.command.filter((part): part is string => typeof part === "string");
+    return parts.length > 0 ? parts.join(" ") : undefined;
+  }
+
+  if (typeof entry.command === "string" && entry.command.length > 0) {
+    const args = Array.isArray(entry.args)
+      ? entry.args.filter((arg): arg is string => typeof arg === "string")
+      : [];
+    return [entry.command, ...args].join(" ");
+  }
+
+  if (typeof entry.url === "string" && entry.url.length > 0) {
+    return entry.url;
+  }
+
+  return undefined;
 }
 
 /**
@@ -131,14 +171,24 @@ export async function inspectMcpWiring(
 
     const rootKey = renderer.rootKey ?? "mcpServers";
     const root = parsed[rootKey];
-    const wired = isRecord(root) && serverName in root;
+    const present = isRecord(root) && serverName in root;
+    // An entry naming nothing to run cannot start a server under any
+    // circumstances, so it is not wiring. This used to read as healthy — the
+    // same silence that once let a deleted `.mcp.json` report as fine.
+    const command = present ? describeMcpEntryCommand(root[serverName]) : undefined;
+    const wired = present && command !== undefined;
     states.push({
       tool,
       path: configPath,
       scope,
       configExists: true,
       wired,
-      detail: wired ? undefined : `no ${serverName} entry under ${rootKey}`,
+      command,
+      detail: wired
+        ? undefined
+        : present
+          ? `${serverName} entry names no command or url`
+          : `no ${serverName} entry under ${rootKey}`,
     });
   }
 

@@ -555,3 +555,92 @@ describe("inspectMcpWiring on a config it cannot parse", () => {
     expect(state.wired).toBe(true);
   });
 });
+
+/**
+ * "Wired" meant an entry existed under the root key, and nothing looked at
+ * what it said. So an entry naming no command at all — which cannot start a
+ * server under any circumstances — read as healthy, and `status` said the tool
+ * was wired while the agent could reach nothing.
+ *
+ * The command is also reported now, because `status` printed the string
+ * `npx -y xtctx` as a hard-coded literal regardless of what the configs
+ * actually held. A project deliberately pointed at a local build was told it
+ * was running the published package.
+ */
+describe("inspectMcpWiring and the command an entry names", () => {
+  let projectDir = "";
+  let homeDir = "";
+
+  beforeEach(async () => {
+    projectDir = await mkdtemp(join(tmpdir(), "xtctx-mcp-cmd-"));
+    homeDir = await mkdtemp(join(tmpdir(), "xtctx-mcp-cmd-home-"));
+  });
+
+  afterEach(async () => {
+    await rm(projectDir, { recursive: true, force: true });
+    await rm(homeDir, { recursive: true, force: true });
+  });
+
+  async function inspect(entry: unknown, tool = "claude-code") {
+    await writeFile(
+      join(projectDir, ".mcp.json"),
+      JSON.stringify({ mcpServers: { xtctx: entry } }),
+      "utf-8",
+    );
+    const [state] = await inspectMcpWiring(projectDir, "xtctx", [tool], { homeDir });
+    return state;
+  }
+
+  it("reports the command and args an entry actually names", async () => {
+    const state = await inspect({ type: "stdio", command: "npx", args: ["-y", "xtctx"] });
+
+    expect(state.wired).toBe(true);
+    expect(state.command).toBe("npx -y xtctx");
+  });
+
+  it("reports a command that is not the published one, rather than the published one", async () => {
+    // The case that exposed this: three projects deliberately pointed at a
+    // local build because the published package was too old to work.
+    const state = await inspect({
+      type: "stdio",
+      command: "node",
+      args: ["H:/checkout/dist/src/cli/index.js"],
+    });
+
+    expect(state.command).toBe("node H:/checkout/dist/src/cli/index.js");
+  });
+
+  it("refuses to call an entry that names no command wired", async () => {
+    // Nothing can start from this. Reporting it as wired is the same silence
+    // that let a deleted .mcp.json read as healthy.
+    const state = await inspect({ type: "stdio" });
+
+    expect(state.wired).toBe(false);
+    expect(state.configExists).toBe(true);
+    expect(state.detail).toMatch(/command/i);
+  });
+
+  it("reads opencode's combined command array", async () => {
+    // opencode puts the executable and its args in one list, so a reader that
+    // only understands `command` + `args` reports nothing for it.
+    await writeFile(
+      join(projectDir, "opencode.json"),
+      JSON.stringify({
+        mcp: { xtctx: { type: "local", command: ["npx", "-y", "xtctx"], enabled: true } },
+      }),
+      "utf-8",
+    );
+
+    const [state] = await inspectMcpWiring(projectDir, "xtctx", ["opencode"], { homeDir });
+
+    expect(state.wired).toBe(true);
+    expect(state.command).toBe("npx -y xtctx");
+  });
+
+  it("accepts a remote entry, which names a url instead of a command", async () => {
+    const state = await inspect({ type: "streamable-http", url: "https://example.test/mcp" });
+
+    expect(state.wired).toBe(true);
+    expect(state.command).toBe("https://example.test/mcp");
+  });
+});
