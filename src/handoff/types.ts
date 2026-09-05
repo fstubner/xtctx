@@ -127,6 +127,14 @@ export interface SessionService {
    * wait for returns an already-resolved promise.
    */
   whenScanSettled(): Promise<void>;
+  /**
+   * Embed every window with no vector, with no time cap.
+   *
+   * Optional because only `xtctx scan --embed` needs it: searches vectorize a
+   * few seconds at a time, which never finishes a large history — nothing runs
+   * between commands to work the backlog down.
+   */
+  embedBacklog?(onProgress?: (embedded: number, total: number) => void): Promise<number>;
 }
 
 export interface IndexProgress {
