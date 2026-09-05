@@ -486,11 +486,6 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
     });
   }
 
-  /**
-   * Attribute a record to the project by the `cwd` Claude Code stamps on it.
-   * Records without a `cwd` fall back to the directory-name decision already
-   * made by `filterProjectDirs`.
-   */
 }
 
 /**

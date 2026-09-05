@@ -267,6 +267,14 @@ export class SqliteHandoffIndex implements SessionService {
    * stopped on its limit or budget. Undefined until one has run.
    */
   private lastLiteralWasExhaustive: boolean | undefined;
+  /**
+   * Tools whose store threw during the last literal pass.
+   *
+   * Kept apart from the flag above because the two need opposite advice:
+   * hitting the limit is fixed by narrowing the query, and an unreadable
+   * store is not fixed by retrying at all.
+   */
+  private lastLiteralUnreadable: string[] = [];
   private readonly embeddingWarmBudgetMs: number;
   private readonly vectorBudgetMs: number;
   private scanStartedMs = 0;
@@ -454,13 +462,14 @@ export class SqliteHandoffIndex implements SessionService {
     // Answered without the index, so it deliberately skips the refresh above
     // having settled and does not touch the database at all.
     if (normalizedMode === "literal") {
-      const { sessions, exhausted } = await literalSearch(
+      const { sessions, exhausted, unreadable } = await literalSearch(
         this.tools,
         trimmed,
         { limit: normalizeLimit(limit, DEFAULT_LIMIT), budgetMs: this.literalBudgetMs },
         toolFilter,
       );
       this.lastLiteralWasExhaustive = exhausted;
+      this.lastLiteralUnreadable = unreadable;
       return sessions;
     }
 
@@ -574,6 +583,9 @@ export class SqliteHandoffIndex implements SessionService {
       ...(this.lastLiteralWasExhaustive === undefined
         ? {}
         : { literalSearchStoppedEarly: !this.lastLiteralWasExhaustive }),
+      ...(this.lastLiteralUnreadable.length > 0
+        ? { literalUnreadableTools: [...this.lastLiteralUnreadable] }
+        : {}),
     });
   }
 
@@ -702,7 +714,12 @@ export class SqliteHandoffIndex implements SessionService {
    * is covered before the archive is, and the backlog drains over a few scans.
    */
   private reconcileRetrievalUnits(): void {
+    // Scoped to this project. One database can hold another project's
+    // sessions — a copied `.xtctx/`, or a root that was renamed — and
+    // rebuilding windows for those spends the scan's repair budget, and the
+    // embedding that follows, on rows no read here will ever return.
     const drifted = this.prepared().selectSessionsMissingUnits.all(
+      this.scopedRoot,
       RETRIEVAL_UNIT_RECONCILE_LIMIT,
     ) as Array<{ session_ref: string }>;
 

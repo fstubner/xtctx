@@ -198,6 +198,53 @@ describe("literal search", () => {
     expect(exhausted).toBe(false);
   });
 
+  /**
+   * Naming the store is the difference between a retry that can work and one
+   * that never will.
+   *
+   * A broken store and an exhausted budget both set `exhausted: false`, and
+   * that was all the caller got — so it told the user the pass "stopped at its
+   * limit or time budget" and advised narrowing the query. Against a store
+   * that throws, every narrower query returns the same nothing, and the tool
+   * that is actually broken is never mentioned.
+   */
+  it("names the store it could not read", async () => {
+    const { unreadable } = await literalSearch(
+      [
+        {
+          tool: "codex",
+          scraper: new FixtureScraper("codex", [chunk("codex", "a", 0, "found this one")]),
+        },
+        { tool: "cursor", scraper: new BrokenScraper() },
+      ],
+      "found this",
+      budget,
+    );
+
+    expect(unreadable).toEqual(["cursor"]);
+  });
+
+  it("names no store when the pass merely ran out of budget", async () => {
+    // The other half: hitting a limit is not a broken store, and reporting one
+    // would send the reader to check a tool that is working.
+    const { exhausted, unreadable } = await literalSearch(
+      [
+        {
+          tool: "codex",
+          scraper: new FixtureScraper("codex", [
+            chunk("codex", "a", 0, "found this one"),
+            chunk("codex", "b", 0, "found this too"),
+          ]),
+        },
+      ],
+      "found this",
+      { limit: 1, budgetMs: budget.budgetMs },
+    );
+
+    expect(exhausted).toBe(false);
+    expect(unreadable).toEqual([]);
+  });
+
   it("reads only the tools it was asked for", async () => {
     const codex = new FixtureScraper("codex", [chunk("codex", "a", 0, "shared term")]);
     const cursor = new FixtureScraper("cursor", [chunk("cursor", "b", 0, "shared term")]);

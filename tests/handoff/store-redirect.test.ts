@@ -6,14 +6,17 @@
  * indexes and serves those conversations as this project's context.
  *
  * Nothing writes it any more — setup deliberately stopped — so a `storePath`
- * outside the home directory arrived either from the operator or from a repo
- * they cloned, and they cannot tell which by looking at the transcripts they
- * get back.
+ * that is present arrived either from the operator or from a repo they cloned,
+ * and they cannot tell which by looking at the transcripts they get back.
+ * Reporting it is the mitigation: the reading still happens, but it stops
+ * being silent.
  *
- * `xtctx status` warned about this. Nothing else did, and status is the one
- * surface a plugin-first install may never reach: the MCP server answers
- * without setup ever being run. So the redirect has to be visible where the
- * reading happens.
+ * The boundary used to be the home directory, and that let through the exact
+ * attack the docstring describes. Every Claude Code project's transcripts live
+ * under `~/.claude/projects/`, so a config redirecting one project's scraper
+ * at another project's store names a path *inside* home — and was reported as
+ * nothing at all. The mitigation missed its own stated case. It now compares
+ * against the tool's own default store instead.
  *
  * The tool name is reported and the path is not. Store paths are redacted from
  * the model-facing surface because they carry the machine's home-directory
@@ -21,24 +24,32 @@
  */
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createProjectServices } from "@xtctx/runtime/services";
+import { SUPPORTED_TOOLS } from "@xtctx/tools/sources";
+
+/** Where Claude Code actually keeps transcripts on this machine. */
+function claudeCodeDefaultStore(): string {
+  const definition = SUPPORTED_TOOLS.find((tool) => tool.id === "claude-code");
+  if (!definition) {
+    throw new Error("claude-code is not a supported tool any more; this test needs updating");
+  }
+  return definition.defaultStorePath();
+}
 
 describe("store path redirects are reported", () => {
   let root = "";
-  let home = "";
   let elsewhere = "";
 
   beforeEach(async () => {
     root = await mkdtemp(join(tmpdir(), "xtctx-redirect-"));
-    home = await mkdtemp(join(tmpdir(), "xtctx-redirect-home-"));
     elsewhere = await mkdtemp(join(tmpdir(), "xtctx-redirect-other-"));
     await mkdir(join(root, ".xtctx", "state"), { recursive: true });
   });
 
   afterEach(async () => {
-    for (const dir of [root, home, elsewhere]) {
+    for (const dir of [root, elsewhere]) {
       await rm(dir, { recursive: true, force: true });
     }
   });
@@ -47,39 +58,52 @@ describe("store path redirects are reported", () => {
     await writeFile(join(root, ".xtctx", "config.yaml"), body, "utf-8");
   }
 
-  async function statusFor(): Promise<{ redirected_tools: string[] }> {
-    const services = await createProjectServices(root, { homeDir: home });
+  async function redirected(): Promise<string[]> {
+    const services = await createProjectServices(root);
     try {
-      return await services.sessions.getStatus();
+      return (await services.sessions.getStatus()).redirected_tools;
     } finally {
       await services.sessions.close().catch(() => {});
     }
   }
 
-  it("names a tool whose store was redirected out of the home directory", async () => {
+  async function configureStore(storePath: string): Promise<void> {
     await writeConfig(
-      ["tools:", "  claude-code:", "    enabled: true", `    storePath: ${elsewhere}`, ""].join("\n"),
+      ["tools:", "  claude-code:", "    enabled: true", `    storePath: ${storePath}`, ""].join("\n"),
     );
+  }
 
-    expect((await statusFor()).redirected_tools).toEqual(["claude-code"]);
+  it("names a tool whose store was moved somewhere else entirely", async () => {
+    await configureStore(elsewhere);
+
+    expect(await redirected()).toEqual(["claude-code"]);
   });
 
-  it("says nothing about a store inside the home directory", async () => {
-    // The ordinary case: an operator pointing at a store that simply is not in
-    // its default place. Warning here would train people to ignore the warning.
-    const inHome = join(home, ".claude", "projects");
-    await mkdir(inHome, { recursive: true });
-    await writeConfig(
-      ["tools:", "  claude-code:", "    enabled: true", `    storePath: ${inHome}`, ""].join("\n"),
-    );
+  /**
+   * The case the old home-directory boundary missed, and the one the mitigation
+   * exists for: a sibling directory beside the real store holds a *different*
+   * project's transcripts. It is inside the home directory, so it used to be
+   * reported as nothing.
+   */
+  it("names a redirect at a sibling of the real store, which is inside home", async () => {
+    const sibling = join(dirname(claudeCodeDefaultStore()), "projects-someone-elses");
+    await configureStore(sibling);
 
-    expect((await statusFor()).redirected_tools).toEqual([]);
+    expect(await redirected()).toEqual(["claude-code"]);
+  });
+
+  it("says nothing when the store path is the tool's own default", async () => {
+    // Writing the default explicitly is legal and means nothing has moved, so
+    // warning about it would be the noise that trains people to ignore this.
+    await configureStore(claudeCodeDefaultStore());
+
+    expect(await redirected()).toEqual([]);
   });
 
   it("says nothing when no store path is configured at all", async () => {
     await writeConfig(["tools:", "  claude-code:", "    enabled: true", ""].join("\n"));
 
-    expect((await statusFor()).redirected_tools).toEqual([]);
+    expect(await redirected()).toEqual([]);
   });
 
   it("ignores a redirect on a tool that is switched off", async () => {
@@ -88,6 +112,6 @@ describe("store path redirects are reported", () => {
       ["tools:", "  claude-code:", "    enabled: false", `    storePath: ${elsewhere}`, ""].join("\n"),
     );
 
-    expect((await statusFor()).redirected_tools).toEqual([]);
+    expect(await redirected()).toEqual([]);
   });
 });
