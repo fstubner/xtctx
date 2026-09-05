@@ -896,6 +896,38 @@ export class SqliteHandoffIndex implements SessionService {
       ) as RetrievalUnitRow[];
   }
 
+  /**
+   * Embed every window that has no vector, with no time cap, and report
+   * progress as it goes.
+   *
+   * Searches vectorize incrementally — six seconds per call, roughly sixteen
+   * windows — on the reasoning that recall improves call over call and nobody
+   * waits for the whole corpus. That holds at the scale it was designed
+   * against and stops holding well before a real history: measured on a
+   * 9,232-window project, an ordinary session would need on the order of 570
+   * searches to finish, so semantic search there is keyword-only in practice
+   * and every search pays the six seconds anyway.
+   *
+   * There is no daemon, so nothing works the backlog down between commands.
+   * This is the piece that does, and it is deliberately not what a scan does
+   * by default: the session-start hook launches `scan` detached, and draining
+   * there would start hours of embedding every time an agent opens a large
+   * project.
+   */
+  async embedBacklog(onProgress?: (embedded: number, total: number) => void): Promise<number> {
+    await this.whenScanSettled();
+    // No `isReady` check and no degrading to keyword: `embedBatch` loads the
+    // model itself and this command has nothing else it could be asking for,
+    // so it waits however long that takes.
+    return ensureVectors({
+      db: this.getDb(),
+      embeddingProvider: this.embeddingProvider,
+      filters: [],
+      vectorBudgetMs: 0,
+      onProgress,
+    });
+  }
+
   private async ensureVectors(toolFilter?: string[]): Promise<void> {
     if (this.freezeVectors) {
       return;

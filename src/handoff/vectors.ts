@@ -80,6 +80,23 @@ export function countUnvectorizedUnits(db: DatabaseHandle, model: string): numbe
   return row?.count ?? 0;
 }
 
+/**
+ * Windows read from the index at a time.
+ *
+ * Bounds the memory a pass holds: the rows carry each window's full content,
+ * which averaged 46KB in a real index, so the whole backlog in one array came
+ * to 104MB at 9,013 windows. Larger than the embedding batch on purpose — the
+ * page is about memory, the batch is about how often the time budget can bite
+ * — so the query runs once per 256 windows rather than once per 8.
+ */
+const UNIT_PAGE_SIZE = 256;
+
+interface UnitRow {
+  unit_id: string;
+  content: string;
+  content_hash: string;
+}
+
 interface EnsureVectorsOptions {
   db: DatabaseHandle;
   embeddingProvider: EmbeddingProvider;
@@ -87,6 +104,16 @@ interface EnsureVectorsOptions {
   filters: string[];
   /** How long to spend before answering with what exists; `0` for no cap. */
   vectorBudgetMs: number;
+  /**
+   * Called after each batch commits, with how many windows this pass has
+   * embedded and how many it set out to.
+   *
+   * Only meaningful for an uncapped pass, which is the one that runs for
+   * hours: `xtctx scan --embed` on a large history has thousands of windows
+   * to get through, and a command that prints nothing for two hours is
+   * indistinguishable from one that has hung.
+   */
+  onProgress?: (embedded: number, total: number) => void;
 }
 
 /**
@@ -100,27 +127,40 @@ export async function ensureVectors({
   embeddingProvider,
   filters,
   vectorBudgetMs,
+  onProgress,
 }: EnsureVectorsOptions): Promise<number> {
   const toolWhere = filters.length > 0 ? `AND u.tool IN (${placeholders(filters.length)})` : "";
-  const rows = db
-    .prepare(
-      `SELECT u.id AS unit_id, u.content, u.content_hash
-       FROM retrieval_units u
+  const outstanding = `FROM retrieval_units u
        LEFT JOIN retrieval_unit_vectors v
          ON v.unit_id = u.id
         AND v.model = ?
         AND v.content_hash = u.content_hash
-       WHERE v.unit_id IS NULL ${toolWhere}
-       ORDER BY u.ended_at DESC`,
-    )
-    .all(embeddingProvider.model, ...filters) as Array<{
-      unit_id: string;
-      content: string;
-      content_hash: string;
-    }>;
+       WHERE v.unit_id IS NULL ${toolWhere}`;
+
+  const countStatement = db.prepare(`SELECT COUNT(*) AS count ${outstanding}`);
+  // A page, not the corpus. This selected every outstanding window's *full*
+  // content in one array before embedding any of it, which is fine for the
+  // handful a search gets through and is not fine for the whole backlog:
+  // measured on a real 9,013-window index, that single allocation was 104MB.
+  // `scan --embed` runs exactly this path at exactly that size.
+  //
+  // No OFFSET, deliberately. Every page commits its vectors before the next
+  // query runs, so the embedded rows drop out of the WHERE and the same
+  // `LIMIT` returns the next ones. Paging by offset over a result set that
+  // shrinks underneath you skips rows.
+  const pageStatement = db.prepare(
+    `SELECT u.id AS unit_id, u.content, u.content_hash ${outstanding}
+     ORDER BY u.ended_at DESC
+     LIMIT ${UNIT_PAGE_SIZE}`,
+  );
+  const readPage = (): UnitRow[] =>
+    pageStatement.all(embeddingProvider.model, ...filters) as UnitRow[];
+
+  const total = (countStatement.get(embeddingProvider.model, ...filters) as CountRow | undefined)
+    ?.count ?? 0;
 
   let vectorBacklog = 0;
-  if (rows.length === 0) {
+  if (total === 0) {
     return vectorBacklog;
   }
 
@@ -147,9 +187,11 @@ export async function ensureVectors({
   const deadline = vectorBudgetMs > 0 ? Date.now() + vectorBudgetMs : Infinity;
   const passStartedAt = Date.now();
   let embedded = 0;
+  let rows = readPage();
+
   for (let start = 0; start < rows.length; start += unitBatchSize) {
     if (Date.now() >= deadline) {
-      vectorBacklog = rows.length - start;
+      vectorBacklog = total - embedded;
       break;
     }
     const batch = rows.slice(start, start + unitBatchSize);
@@ -182,6 +224,19 @@ export async function ensureVectors({
       });
     });
     transaction();
+    // After the commit, so the number reported is work that survives an
+    // interrupt rather than work in flight.
+    onProgress?.(embedded, total);
+
+    // Page exhausted: fetch the next one and restart the batch cursor. The
+    // committed rows no longer match, so this returns windows not yet seen.
+    if (start + unitBatchSize >= rows.length) {
+      rows = readPage();
+      start = -unitBatchSize;
+      if (rows.length === 0) {
+        break;
+      }
+    }
   }
 
   // Per window rather than per pass, so a pass that embedded eight and one
