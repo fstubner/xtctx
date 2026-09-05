@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { SqliteHandoffIndex } from "../handoff/sqlite-index.js";
 import type { SessionService } from "../handoff/types.js";
-import { createDefaultScrapers } from "../tools/sources.js";
+import { SUPPORTED_TOOLS, createDefaultScrapers } from "../tools/sources.js";
 
 interface ProjectConfig {
   tools: Record<string, { enabled?: boolean; storePath?: string }>;
@@ -69,11 +69,6 @@ interface ProjectServicesOptions {
    * reconstruct their locations as before.
    */
   storeDirs?: Record<string, string | undefined>;
-  /**
-   * Home directory to judge store-path redirects against. Tests pass one;
-   * everything else uses the real environment.
-   */
-  homeDir?: string;
 }
 
 export async function createProjectServices(
@@ -117,7 +112,7 @@ export async function createProjectServices(
       // An unconfigured project gets no index written into it. Reads run
       // against an in-memory database and report zeros, which is the truth.
       createIfMissing: options.createIfMissing ?? config.present,
-      redirectedTools: redirectedTools(config, options.homeDir),
+      redirectedTools: redirectedTools(config),
     },
   );
 
@@ -189,8 +184,8 @@ function normalizeTools(input: unknown): ProjectConfig["tools"] {
 }
 
 /**
- * Enabled tools whose transcript store this project's config redirects out of
- * the home directory.
+ * Enabled tools reading transcripts from somewhere other than that tool's
+ * own default store.
  *
  * `.xtctx/config.yaml` is committable — which tools a project uses belongs in
  * the repo — and it can also set `storePath`, the directory transcripts are
@@ -203,27 +198,47 @@ function normalizeTools(input: unknown): ProjectConfig["tools"] {
  * either way. Reporting it is the mitigation: the reading still happens, but
  * it stops being silent.
  *
- * Home is the boundary because every tool keeps its store under it by default.
- * A path elsewhere is unusual enough to be worth a line and common enough
- * inside home that warning there would only teach people to ignore it.
+ * The boundary is the tool's own default store, not the home directory.
+ *
+ * Home was the boundary first, on the reasoning that every tool keeps its
+ * store under it, so a path elsewhere is unusual and a path inside it is too
+ * ordinary to be worth a line. That let through the exact attack described
+ * above: every Claude Code project's transcripts live under
+ * `~/.claude/projects/`, so a config redirecting one project's scraper at
+ * another project's store names a path *inside* home and was never reported.
+ * The mitigation missed the case its own docstring names.
+ *
+ * Comparing against the default does not reintroduce the noise that reasoning
+ * was avoiding. Setup no longer writes `storePath` at all, so a config
+ * carrying one is already an override — the only thing this can report is a
+ * store someone deliberately moved, or a clone pointing somewhere of its
+ * choosing, and both are worth a line.
  */
-function redirectedTools(config: ProjectConfig, homeDir?: string): string[] {
-  const home = homeDir ?? process.env.USERPROFILE ?? process.env.HOME ?? "";
-  if (!home) {
-    return [];
-  }
-
+function redirectedTools(config: ProjectConfig): string[] {
   return Object.entries(config.tools)
     .filter(([, value]) => value.enabled !== false && value.storePath)
-    .filter(([, value]) => !isInsideDir(value.storePath as string, home))
+    .filter(([tool, value]) => {
+      const definition = SUPPORTED_TOOLS.find((candidate) => candidate.id === tool);
+      if (!definition) {
+        // A tool this build does not know: nothing to compare against, and a
+        // store being read for it is worth saying out loud rather than
+        // dropping silently.
+        return true;
+      }
+      let fallback: string;
+      try {
+        fallback = definition.defaultStorePath();
+      } catch {
+        return true;
+      }
+      return !isSamePath(value.storePath as string, fallback);
+    })
     .map(([tool]) => tool)
     .sort();
 }
 
-function isInsideDir(candidate: string, root: string): boolean {
-  const c = normalizeForCompare(candidate);
-  const r = normalizeForCompare(root);
-  return c === r || c.startsWith(`${r}/`);
+function isSamePath(a: string, b: string): boolean {
+  return normalizeForCompare(a) === normalizeForCompare(b);
 }
 
 function normalizeForCompare(value: string): string {

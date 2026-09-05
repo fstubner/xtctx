@@ -170,4 +170,83 @@ describe("retrieval unit recovery after an interrupted scan", () => {
 
     expect(after).toEqual(before);
   });
+
+  /**
+   * The repair is scoped to this project, like every read is.
+   *
+   * One database can hold another project's sessions — the index elsewhere
+   * already contemplates a copied `.xtctx/` or a root that was renamed — and
+   * the reconcile query was the one place that selected sessions without
+   * asking whose they were. Rebuilding windows for a foreign session spends
+   * the scan's repair budget, and the embedding that follows it, on rows no
+   * read here can ever return: every search filters on `project_root`.
+   *
+   * The repair is capped at a handful of sessions per scan, so foreign rows do
+   * not merely waste work — they crowd out the real ones, and this project's
+   * own gap never closes.
+   */
+  it("leaves another project's sessions alone", async () => {
+    const chunks = Array.from({ length: 24 }, (_, i) => chunk(i));
+
+    const first = new SqliteHandoffIndex(dbPath, tempDir, [
+      { tool: "codex", scraper: new CursoredScraper(chunks) },
+    ]);
+    await first.listRecentSessions(5);
+    await first.whenScanSettled?.();
+    await first.close();
+
+    // A session belonging to somewhere else entirely, with messages and no
+    // windows — exactly the shape the reconcile query looks for.
+    const foreignRef = "codex:foreign";
+    const raw = new Database(dbPath);
+    try {
+      const at = "2026-05-10T10:00:00.000Z";
+      raw
+        .prepare(
+          `INSERT INTO sessions
+             (session_ref, tool, source_session_id, project_root, started_at,
+              last_activity_at, message_count, updated_at)
+           VALUES (?, 'codex', 'foreign', ?, ?, ?, ?, ?)`,
+        )
+        .run(foreignRef, join(tempDir, "some-other-project"), at, at, 4, at);
+      for (let i = 0; i < 4; i++) {
+        raw
+          .prepare(
+            `INSERT INTO messages
+               (id, session_ref, tool, source_session_id, timestamp, role, content,
+                message_index, content_hash, metadata_json, indexed_at)
+             VALUES (?, ?, 'codex', 'foreign', ?, 'user', ?, ?, ?, '{}', ?)`,
+          )
+          .run(`${foreignRef}#${i}`, foreignRef, at, `foreign message ${i}`, i, `hash${i}`, at);
+      }
+      // And damage this project's session, so there is real work to prefer.
+      raw.prepare("DELETE FROM retrieval_units WHERE session_ref = ? AND message_end_index > 7").run(REF);
+    } finally {
+      raw.close();
+    }
+
+    const second = new SqliteHandoffIndex(dbPath, tempDir, [
+      { tool: "codex", scraper: new CursoredScraper(chunks) },
+    ]);
+    await second.listRecentSessions(5);
+    await second.whenScanSettled?.();
+    await second.close();
+
+    const check = new Database(dbPath, { readonly: true });
+    let foreignUnits = -1;
+    try {
+      foreignUnits = (
+        check.prepare("SELECT COUNT(*) AS c FROM retrieval_units WHERE session_ref = ?").get(foreignRef) as {
+          c: number;
+        }
+      ).c;
+    } finally {
+      check.close();
+    }
+
+    // This project's gap closed...
+    expect(coverageGap(dbPath, REF)).toBe(0);
+    // ...and the foreign session was never touched.
+    expect(foreignUnits).toBe(0);
+  });
 });

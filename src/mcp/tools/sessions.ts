@@ -205,9 +205,17 @@ function progressNote(service: SessionService): string {
   // stopped on its limit or its budget did not read every store, so "nothing
   // more matched" is not what it found — and unlike the notes above, asking
   // again on its own changes nothing. Narrowing or raising the limit does.
-  const literalNote = progress.literalSearchStoppedEarly
-    ? "\n\n_The literal pass stopped at its limit or time budget before reading every store, so there may be more matches. Narrow the query or raise `limit`._"
-    : "";
+  // A store that threw gets its own sentence. Both cases set the same
+  // "stopped early" flag, so this used to answer both with "stopped at its
+  // limit or time budget… narrow the query" — a cause it could not know, and
+  // advice that cannot work when the store is the problem. Narrowing a query
+  // against an unreadable store returns the same nothing, forever.
+  const unreadable = progress.literalUnreadableTools ?? [];
+  const literalNote = unreadable.length > 0
+    ? `\n\n_The literal pass could not read ${unreadable.map(inlineSafe).join(", ")}, so those transcripts were not searched at all. This is not a query problem — check that tool's store._`
+    : progress.literalSearchStoppedEarly
+      ? "\n\n_The literal pass stopped at its limit or time budget before reading every store, so there may be more matches. Narrow the query or raise `limit`._"
+      : "";
 
   const indexingNote =
     notes.length > 0

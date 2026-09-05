@@ -1,5 +1,6 @@
 import Database from "better-sqlite3";
 import type { Database as DatabaseHandle, Statement, Transaction } from "better-sqlite3";
+import { PROJECT_ROOT_SQL } from "./queries.js";
 
 export interface PreparedStatements {
   upsertSession: Statement;
@@ -240,7 +241,8 @@ export function prepareStatements(db: DatabaseHandle): PreparedStatements {
     selectSessionsMissingUnits: db.prepare(
       `SELECT s.session_ref
        FROM sessions s
-       WHERE COALESCE(
+       WHERE ${PROJECT_ROOT_SQL.replace("project_root", "s.project_root")} = ?
+         AND COALESCE(
                (SELECT MAX(u.message_end_index) FROM retrieval_units u
                 WHERE u.session_ref = s.session_ref), -1
              ) < COALESCE(

@@ -146,6 +146,16 @@ export interface IndexProgress {
    */
   literalSearchStoppedEarly?: boolean;
   /**
+   * Tools whose transcript store threw during the last literal pass.
+   *
+   * Reported separately from the flag above because the remedies are
+   * opposite. A pass that hit its limit finds more if the query is narrowed;
+   * a store that cannot be read yields nothing however the query is written,
+   * and telling the caller to narrow it sends them round a loop that cannot
+   * end.
+   */
+  literalUnreadableTools?: string[];
+  /**
    * Tools whose transcript store has not been read yet in this process.
    *
    * Named individually because "still scanning" does not tell a caller

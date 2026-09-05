@@ -42,6 +42,14 @@ export interface LiteralSearchResult {
    * project keeps finding elsewhere.
    */
   exhausted: boolean;
+  /**
+   * Tools whose store threw while being read.
+   *
+   * Separate from `exhausted` because the two call for opposite advice: a
+   * pass that hit its limit gets more by narrowing the query, and a pass that
+   * could not read a store gets nothing more however it is retried.
+   */
+  unreadable: string[];
 }
 
 /** Matches per session, mirroring the ranked modes' cap. */
@@ -58,7 +66,7 @@ export async function literalSearch(
 ): Promise<LiteralSearchResult> {
   const needle = query.trim().toLowerCase();
   if (!needle) {
-    return { sessions: [], exhausted: true };
+    return { sessions: [], exhausted: true, unreadable: [] };
   }
 
   const wanted = new Set((toolFilter ?? []).map((tool) => tool.toLowerCase()));
@@ -66,8 +74,9 @@ export async function literalSearch(
   const deadline = Date.now() + budget.budgetMs;
   const sessions = new Map<string, SessionSummary>();
   let exhausted = true;
+  const unreadable: string[] = [];
 
-  for (const { scraper } of selected) {
+  for (const { tool, scraper } of selected) {
     if (sessions.size >= budget.limit || Date.now() >= deadline) {
       exhausted = false;
       break;
@@ -101,13 +110,20 @@ export async function literalSearch(
       }
     } catch {
       // One unreadable store must not lose the matches already found in the
-      // others. The scan path records the error against the tool; this one is
-      // a read that can be repeated, so it stays silent and incomplete.
+      // others, so the pass continues and reports itself incomplete.
+      //
+      // Which is where this used to stop, and the incompleteness was then
+      // indistinguishable from having hit the limit — so the caller told the
+      // user the pass "stopped at its limit or time budget" and advised them
+      // to narrow the query, advice that cannot help when a store is broken.
+      // Naming the tool is the difference between a retry that works and one
+      // that never will.
+      unreadable.push(tool);
       exhausted = false;
     }
   }
 
-  return { sessions: [...sessions.values()], exhausted };
+  return { sessions: [...sessions.values()], exhausted, unreadable };
 }
 
 function newSummary(ref: string, chunk: ConversationChunk, needle: string): SessionSummary {
