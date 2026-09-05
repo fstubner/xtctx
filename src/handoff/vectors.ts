@@ -87,6 +87,16 @@ interface EnsureVectorsOptions {
   filters: string[];
   /** How long to spend before answering with what exists; `0` for no cap. */
   vectorBudgetMs: number;
+  /**
+   * Called after each batch commits, with how many windows this pass has
+   * embedded and how many it set out to.
+   *
+   * Only meaningful for an uncapped pass, which is the one that runs for
+   * hours: `xtctx scan --embed` on a large history has thousands of windows
+   * to get through, and a command that prints nothing for two hours is
+   * indistinguishable from one that has hung.
+   */
+  onProgress?: (embedded: number, total: number) => void;
 }
 
 /**
@@ -100,6 +110,7 @@ export async function ensureVectors({
   embeddingProvider,
   filters,
   vectorBudgetMs,
+  onProgress,
 }: EnsureVectorsOptions): Promise<number> {
   const toolWhere = filters.length > 0 ? `AND u.tool IN (${placeholders(filters.length)})` : "";
   const rows = db
@@ -182,6 +193,9 @@ export async function ensureVectors({
       });
     });
     transaction();
+    // After the commit, so the number reported is work that survives an
+    // interrupt rather than work in flight.
+    onProgress?.(embedded, rows.length);
   }
 
   // Per window rather than per pass, so a pass that embedded eight and one

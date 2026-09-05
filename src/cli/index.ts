@@ -141,10 +141,18 @@ export async function main(argv = process.argv): Promise<void> {
   program
     .command("scan")
     .option("-p, --project <path>", "Project root (defaults to cwd)")
+    .option(
+      "--embed",
+      "Also embed every window, so semantic search covers the whole history (slow: hours on a large one)",
+      false,
+    )
     .description("Scan the enabled transcript stores into this project's index, then exit")
-    .action(async (options: { project?: string }) => {
+    .action(async (options: { project?: string; embed?: boolean }) => {
       const globalOptions = program.opts<{ project?: string }>();
-      await runScan({ projectPath: options.project ?? globalOptions.project });
+      await runScan({
+        projectPath: options.project ?? globalOptions.project,
+        embed: options.embed,
+      });
     });
 
   program
