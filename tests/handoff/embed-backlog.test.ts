@@ -67,11 +67,11 @@ class FixtureScraper implements ConversationScraper {
     yield* this.chunks;
   }
 
-  async loadState(): Promise<ScraperState | null> {
-    return null;
+  async getLastScrapedPosition(): Promise<ScraperState> {
+    return { lastTimestamp: new Date(0) };
   }
 
-  async saveState(): Promise<void> {
+  async saveScrapedPosition(): Promise<void> {
     return;
   }
 }
