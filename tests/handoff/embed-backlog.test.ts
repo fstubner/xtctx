@@ -203,6 +203,48 @@ describe("embedBacklog", () => {
     }
   }, 60_000);
 
+  /**
+   * The pass reads windows a page at a time rather than pulling the whole
+   * backlog into one array — measured on a real 9,013-window index, that
+   * single allocation was 104MB, and `--embed` is what runs it at full size.
+   *
+   * Paging is where a drain quietly goes wrong: skip a page and the run
+   * reports success with windows still unvectorized; re-read the same page and
+   * it never terminates. Every other test in this file uses fewer windows than
+   * one page holds, so none of them touch that code at all.
+   */
+  it("covers every window when the backlog spans several pages", async () => {
+    const index = new SqliteHandoffIndex(
+      join(tempDir, "xtctx.db"),
+      tempDir,
+      // 600 messages at size 2 / stride 1 is 599 windows: three pages, with
+      // the last one partial.
+      [{ tool: "codex", scraper: new FixtureScraper(conversation(600)) }],
+      {
+        embeddingProvider: new CountingEmbeddingProvider(),
+        windowSize: 2,
+        windowStride: 1,
+        vectorBudgetMs: 1,
+      },
+    );
+    try {
+      await index.listRecentSessions(1);
+      await index.whenScanSettled();
+
+      const before = await index.getStatus();
+      expect(before.retrieval_units).toBeGreaterThan(256);
+      expect(before.vectorized_units).toBeLessThan(before.retrieval_units);
+
+      const remaining = await index.embedBacklog();
+      const after = await index.getStatus();
+
+      expect(remaining).toBe(0);
+      expect(after.vectorized_units).toBe(after.retrieval_units);
+    } finally {
+      await index.close();
+    }
+  }, 120_000);
+
   it("finishes what a budgeted search only chips at", async () => {
     // The behaviour in one assertion: a search embeds a batch and stops; the
     // backlog pass covers the rest. The search's own budget is what makes it
