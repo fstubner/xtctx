@@ -24,6 +24,17 @@ import { SqliteHandoffIndex } from "@xtctx/handoff/sqlite-index";
 import type { EmbeddingProvider } from "@xtctx/handoff/embeddings";
 import type { ConversationChunk, ConversationScraper, ScraperState } from "@xtctx/types/scraper";
 
+/**
+ * How long one batch takes. Must exceed the clock's resolution.
+ *
+ * A batch that embeds instantly is what made the first version of this file
+ * flaky: `vectorBudgetMs: 1` only bites if the clock advances past the
+ * deadline between two batches, and on a fast runner all ten batches of the
+ * fixture completed inside a single millisecond. CI caught it — green on
+ * Windows and Linux, "expected 79 to be less than 79" on macOS.
+ */
+const BATCH_DELAY_MS = 5;
+
 /** Deterministic, and counts how many texts it was asked to embed. */
 class CountingEmbeddingProvider implements EmbeddingProvider {
   readonly model = "fixture-embedding";
@@ -36,6 +47,7 @@ class CountingEmbeddingProvider implements EmbeddingProvider {
 
   async embedBatch(texts: string[]): Promise<Float32Array[]> {
     this.embedBatchCalls += 1;
+    await new Promise((resolve) => setTimeout(resolve, BATCH_DELAY_MS));
     return texts.map((text) => {
       const vector = new Float32Array(4);
       for (let i = 0; i < text.length; i++) {
@@ -102,13 +114,16 @@ describe("embedBacklog", () => {
   /**
    * `vectorBudgetMs: 1` is what makes this test a test.
    *
-   * The fixture provider embeds instantly, so with the real six-second budget
-   * the scan covers the whole corpus and `embedBacklog` is handed nothing to
-   * do — every assertion below then passes without the code under test doing
-   * anything. A one-millisecond budget reproduces the condition this feature
-   * exists for: the deadline is checked between batches, so exactly one batch
-   * runs and the rest is left outstanding, which is the real index's ordinary
-   * state at a far larger scale.
+   * With the real six-second budget the fixture covers the whole corpus during
+   * the scan and `embedBacklog` is handed nothing to do — every assertion
+   * below then passes without the code under test doing anything. A
+   * one-millisecond budget reproduces the condition this feature exists for:
+   * the deadline is checked between batches, so one batch runs and the rest is
+   * left outstanding, which is the real index's ordinary state at a far larger
+   * scale.
+   *
+   * It only reproduces it because `BATCH_DELAY_MS` makes each batch outlast
+   * the clock's resolution — see the note there.
    */
   function build(): SqliteHandoffIndex {
     return new SqliteHandoffIndex(
