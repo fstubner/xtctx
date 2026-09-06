@@ -1,5 +1,7 @@
 import type { Database as DatabaseHandle } from "better-sqlite3";
 import {
+  MAX_SEGMENTS_PER_UNIT,
+  MAX_SEQ_CHARS,
   poolVectors,
   splitTextForEmbedding,
   type EmbeddingProvider,
@@ -55,6 +57,41 @@ export async function waitUntilEmbeddingReady(
  */
 export function dropVectorsFromOtherModels(db: DatabaseHandle, model: string): void {
   db.prepare("DELETE FROM retrieval_unit_vectors WHERE model != ?").run(model);
+}
+
+/**
+ * Segments the outstanding windows will be split into — the real unit of work.
+ *
+ * A window is not one embedding. Its content is cut into `MAX_SEQ_CHARS`
+ * pieces, capped at `MAX_SEGMENTS_PER_UNIT`, and every piece is its own pass
+ * through the model. Measured on a real index: 9,322 windows, 74,908
+ * segments, a mean of 7.7 and a fifth of them at the cap.
+ *
+ * That spread is why the estimate cannot be per window. Windows are processed
+ * newest first and their sizes are not evenly distributed, so a rate measured
+ * over the ones already done says little about the ones left: a real pass
+ * averaged 391ms/window over its first half and 854ms/window overall.
+ * Segments are all at most `MAX_SEQ_CHARS`, so their cost is roughly uniform
+ * and the arithmetic holds.
+ *
+ * Computed in SQL rather than by reading content out: the whole point is to
+ * cost the backlog without loading it.
+ */
+export function countUnvectorizedSegments(db: DatabaseHandle, model: string): number {
+  const row = db
+    .prepare(
+      // Integer ceiling, then the same cap `capSegments` applies. At least one
+      // segment per window: an empty window is still a pass through the model.
+      `SELECT COALESCE(SUM(MIN(MAX((LENGTH(u.content) + ${MAX_SEQ_CHARS - 1}) / ${MAX_SEQ_CHARS}, 1), ${MAX_SEGMENTS_PER_UNIT})), 0) AS count
+       FROM retrieval_units u
+       LEFT JOIN retrieval_unit_vectors v
+         ON v.unit_id = u.id
+        AND v.model = ?
+        AND v.content_hash = u.content_hash
+       WHERE v.unit_id IS NULL`,
+    )
+    .get(model) as CountRow | undefined;
+  return row?.count ?? 0;
 }
 
 /**
@@ -187,6 +224,7 @@ export async function ensureVectors({
   const deadline = vectorBudgetMs > 0 ? Date.now() + vectorBudgetMs : Infinity;
   const passStartedAt = Date.now();
   let embedded = 0;
+  let segmentsEmbedded = 0;
   let rows = readPage();
 
   for (let start = 0; start < rows.length; start += unitBatchSize) {
@@ -200,6 +238,7 @@ export async function ensureVectors({
     // mean-pooled, so content beyond the window's opening still shapes
     // the unit's vector.
     const segmented = batch.map((row) => capSegments(splitTextForEmbedding(row.content)));
+    segmentsEmbedded += segmented.reduce((total, segments) => total + segments.length, 0);
     const segmentVectors = await embeddingProvider.embedBatch(segmented.flat());
 
     let cursor = 0;
@@ -224,6 +263,21 @@ export async function ensureVectors({
       });
     });
     transaction();
+    // Published as the pass runs, not once it ends.
+    //
+    // This used to be written after the loop, which is invisible for the
+    // seconds-long passes a search makes and badly wrong for the hours-long
+    // one `scan --embed` makes: for the whole run, `status` reported the rate
+    // of whatever small pass finished last, and multiplied it by thousands of
+    // outstanding windows. A real 92-minute run was reported throughout as
+    // having about 19 minutes left, off by a factor of four, because the
+    // stored rate came from a six-second search pass over small windows.
+    //
+    // Cumulative over this pass rather than per batch, so the figure is an
+    // average over everything embedded so far instead of the last eight
+    // windows — window sizes vary from one segment to the capped sixteen, and
+    // a per-batch rate swings with whatever it happened to land on.
+    recordRate(db, passStartedAt, embedded, segmentsEmbedded);
     // After the commit, so the number reported is work that survives an
     // interrupt rather than work in flight.
     onProgress?.(embedded, total);
@@ -239,13 +293,38 @@ export async function ensureVectors({
     }
   }
 
-  // Per window rather than per pass, so a pass that embedded eight and one
-  // that embedded eight hundred report a comparable figure — and so the
-  // backlog can be read as a duration rather than a count.
-  if (embedded > 0) {
-    const perUnit = Math.round(((Date.now() - passStartedAt) / embedded) * 10) / 10;
-    setSetting(db, "vector_ms_per_unit", String(perUnit));
-  }
+  // Once more at the end, so a pass that stopped mid-batch still leaves the
+  // rate covering everything it did.
+  recordRate(db, passStartedAt, embedded, segmentsEmbedded);
 
   return vectorBacklog;
+}
+
+/**
+ * Publish how long a window is taking, averaged over this pass so far.
+ *
+ * Per window rather than per pass, so a pass that embedded eight and one that
+ * embedded eight hundred report a comparable figure — and so the backlog can
+ * be read as a duration rather than a count.
+ */
+function recordRate(
+  db: DatabaseHandle,
+  passStartedAt: number,
+  embedded: number,
+  segmentsEmbedded: number,
+): void {
+  if (embedded <= 0) {
+    return;
+  }
+  const elapsed = Date.now() - passStartedAt;
+  setSetting(db, "vector_ms_per_unit", String(Math.round((elapsed / embedded) * 10) / 10));
+  // The figure the estimate actually uses; the per-window one above is what
+  // `status` shows a person, because a window is the thing they can count.
+  if (segmentsEmbedded > 0) {
+    setSetting(
+      db,
+      "vector_ms_per_segment",
+      String(Math.round((elapsed / segmentsEmbedded) * 100) / 100),
+    );
+  }
 }

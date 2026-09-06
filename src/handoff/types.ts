@@ -49,6 +49,18 @@ export interface HandoffStatus {
    * to do. Null until a pass has run.
    */
   vector_ms_per_unit: number | null;
+  /**
+   * Segments the outstanding windows will be split into, and milliseconds per
+   * segment from the last pass.
+   *
+   * The estimate is built from these rather than from window counts. A window
+   * is split into up to sixteen segments and each is its own pass through the
+   * model, so windows differ in cost by more than an order of magnitude —
+   * a real pass averaged 391ms/window over its first half and 854ms/window
+   * overall. Segments are capped in size, so their cost is roughly uniform.
+   */
+  vector_segment_backlog: number;
+  vector_ms_per_segment: number | null;
   vector_model: string;
   /** Last semantic-search failure, or null. Non-null means hybrid search is
    *  silently answering from keyword only. */

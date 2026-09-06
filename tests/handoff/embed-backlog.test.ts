@@ -19,6 +19,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { SqliteHandoffIndex } from "@xtctx/handoff/sqlite-index";
 import type { EmbeddingProvider } from "@xtctx/handoff/embeddings";
@@ -240,6 +241,62 @@ describe("embedBacklog", () => {
 
       expect(remaining).toBe(0);
       expect(after.vectorized_units).toBe(after.retrieval_units);
+    } finally {
+      await index.close();
+    }
+  }, 120_000);
+
+  /**
+   * The rate `status` turns into an ETA has to describe the pass that is
+   * running, not the last one that finished.
+   *
+   * It was written once, after the loop. For the seconds-long passes a search
+   * makes that is invisible; for the hours-long one `scan --embed` makes it
+   * meant `status` reported the rate of whatever small pass finished last and
+   * multiplied it by thousands of outstanding windows. A real 92-minute run
+   * was reported throughout as having about 19 minutes left — wrong by a
+   * factor of four, and wrong in the confident direction.
+   */
+  it("publishes the rate while the pass is still running", async () => {
+    const index = build();
+    try {
+      await index.listRecentSessions(1);
+      await index.whenScanSettled();
+
+      // A rate from an earlier, much faster pass — exactly the stale value
+      // that made the estimate wrong.
+      const seed = new Database(join(tempDir, "xtctx.db"));
+      try {
+        seed
+          .prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('vector_ms_per_unit', '99999')")
+          .run();
+      } finally {
+        seed.close();
+      }
+
+      const midRun: Array<number | null> = [];
+      await index.embedBacklog((embedded, total) => {
+        // Read from a separate connection, the way `status` does.
+        if (embedded >= total || midRun.length > 0) {
+          return;
+        }
+        const probe = new Database(join(tempDir, "xtctx.db"), { readonly: true });
+        try {
+          const row = probe
+            .prepare("SELECT value FROM settings WHERE key = 'vector_ms_per_unit'")
+            .get() as { value: string } | undefined;
+          midRun.push(row ? Number(row.value) : null);
+        } finally {
+          probe.close();
+        }
+      });
+
+      expect(midRun).toHaveLength(1);
+      // The seeded value is gone by the first batch: what is there now
+      // describes this pass. Asserted as "not the stale one" rather than a
+      // range, because the fixture's rate is a property of the fixture.
+      expect(midRun[0]).not.toBeNull();
+      expect(midRun[0]).toBeLessThan(99999);
     } finally {
       await index.close();
     }

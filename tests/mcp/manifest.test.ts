@@ -48,6 +48,8 @@ class LimitHonoringService implements SessionService {
       retrieval_units: 0,
       vectorized_units: 0,
       vector_ms_per_unit: null,
+    vector_segment_backlog: 0,
+    vector_ms_per_segment: null,
       vector_model: "fixture",
       tools: [],
     };
