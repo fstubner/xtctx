@@ -51,6 +51,8 @@ class FixtureSessionService implements SessionService {
       retrieval_units: 1,
       vectorized_units: 1,
       vector_ms_per_unit: null,
+    vector_segment_backlog: 0,
+    vector_ms_per_segment: null,
       vector_model: "fixture-embedding",
       tools: [
         {

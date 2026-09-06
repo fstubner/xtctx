@@ -38,4 +38,38 @@ describe("estimateVectorBacklog", () => {
     // backlog.
     expect(estimateVectorBacklog(10, 12, 18).remaining).toBe(0);
   });
+
+  /**
+   * The estimate is built from segments, because that is the unit of work.
+   *
+   * A window is split into as many as sixteen segments and each is its own
+   * pass through the model, so windows vary in cost by more than an order of
+   * magnitude. A per-window rate cannot see that a heavy tail is coming: a
+   * real 92-minute run was reported throughout as having about 19 minutes
+   * left, and the run's own halves averaged 391ms and 854ms per window.
+   */
+  it("prefers the segment rate, which does not assume every window is average", () => {
+    // 100 windows left, but they carry 800 segments — eight times what a
+    // window-count estimate would assume for a corpus averaging one.
+    const backlog = estimateVectorBacklog(1000, 900, 10, { backlog: 800, msPerSegment: 5 });
+
+    // 800 segments x 5ms, not 100 windows x 10ms.
+    expect(backlog).toEqual({ remaining: 100, eta: "4.0s" });
+  });
+
+  it("falls back to the window rate when no segment rate has been measured", () => {
+    // An index that predates the segment rate, or one where nothing has
+    // embedded since. A worse estimate beats none.
+    expect(estimateVectorBacklog(1000, 900, 10, { backlog: 800, msPerSegment: null })).toEqual({
+      remaining: 100,
+      eta: "1.0s",
+    });
+  });
+
+  it("still gives no estimate when neither rate is known", () => {
+    expect(estimateVectorBacklog(1000, 900, null, { backlog: 800, msPerSegment: null })).toEqual({
+      remaining: 100,
+      eta: null,
+    });
+  });
 });

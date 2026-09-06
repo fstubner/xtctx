@@ -101,6 +101,10 @@ export async function renderStatusBlock(
     status.retrieval_units,
     status.vectorized_units,
     status.vector_ms_per_unit,
+    {
+      backlog: status.vector_segment_backlog,
+      msPerSegment: status.vector_ms_per_segment,
+    },
   );
   if (backlog.remaining > 0) {
     const rate = status.vector_ms_per_unit ? `${status.vector_ms_per_unit}ms/window` : "rate unknown";

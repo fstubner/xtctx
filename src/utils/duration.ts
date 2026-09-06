@@ -28,14 +28,36 @@ export function formatDuration(ms: number | null | undefined): string | null {
  *
  * Returns null when there is nothing outstanding or no rate has been measured
  * yet — an estimate invented from no measurement is worse than no estimate.
+ *
+ * Counted in segments where they are known, because that is the unit of work.
+ * A window is split into as many as sixteen segments and each is its own pass
+ * through the model, so windows vary in cost by more than an order of
+ * magnitude and a per-window rate does not survive the variation: a real pass
+ * averaged 391ms/window over its first half and 854ms/window overall, and the
+ * estimate it produced was out by a factor of four for a 92-minute run.
+ *
+ * `remaining` stays a window count. That is the number a person can see in
+ * `Data`, and the estimate reading as a duration is the point of it.
  */
 export function estimateVectorBacklog(
   retrievalUnits: number,
   vectorizedUnits: number,
   msPerUnit: number | null | undefined,
+  segments?: { backlog: number; msPerSegment: number | null | undefined },
 ): { remaining: number; eta: string | null } {
   const remaining = Math.max(0, retrievalUnits - vectorizedUnits);
-  if (remaining === 0 || msPerUnit === null || msPerUnit === undefined || !(msPerUnit > 0)) {
+  if (remaining === 0) {
+    return { remaining, eta: null };
+  }
+
+  const msPerSegment = segments?.msPerSegment;
+  if (segments && msPerSegment !== null && msPerSegment !== undefined && msPerSegment > 0) {
+    return { remaining, eta: formatDuration(segments.backlog * msPerSegment) };
+  }
+
+  // No segment rate yet — nothing has embedded since this was added, or the
+  // index predates it. The window rate is a worse estimate, not no estimate.
+  if (msPerUnit === null || msPerUnit === undefined || !(msPerUnit > 0)) {
     return { remaining, eta: null };
   }
   return { remaining, eta: formatDuration(remaining * msPerUnit) };

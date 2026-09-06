@@ -93,7 +93,7 @@ export const DEFAULT_EMBEDDING_MODEL = "Xenova/all-MiniLM-L6-v2";
 const DEFAULT_EMBEDDING_DTYPE = "fp32";
 const MAX_SEQ_TOKENS = 256;
 /** ~4 characters per token, the budget splitTextForEmbedding segments to. */
-const MAX_SEQ_CHARS = MAX_SEQ_TOKENS * 4;
+export const MAX_SEQ_CHARS = MAX_SEQ_TOKENS * 4;
 const MAX_BATCH_SIZE = 32;
 
 export interface EmbeddingProvider {

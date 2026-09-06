@@ -4,6 +4,7 @@ import { PROJECT_ROOT_SQL, countWhere } from "./queries.js";
 import { getSetting } from "./schema.js";
 import { safeDetect } from "./scan.js";
 import type { HandoffStatus, IndexProgress } from "./types.js";
+import { countUnvectorizedSegments } from "./vectors.js";
 
 interface ToolCountRow {
   tool: string;
@@ -111,6 +112,8 @@ export async function buildStatus(inputs: StatusInputs): Promise<HandoffStatus> 
     retrieval_units: retrievalUnitCount,
     vectorized_units: vectorizedUnitCount,
     vector_ms_per_unit: numericSetting(db, "vector_ms_per_unit"),
+    vector_segment_backlog: countUnvectorizedSegments(db, vectorModel),
+    vector_ms_per_segment: numericSetting(db, "vector_ms_per_segment"),
     vector_model: vectorModel,
     embedding_error: getSetting(db, "last_error:embeddings"),
     redirected_tools: redirectedTools,
