@@ -652,21 +652,71 @@ describe("scan time budget", () => {
     }
   }
 
+  /**
+   * A scraper that starts, then waits for the test to let it finish.
+   *
+   * The point of the test below is ordering — the read returns while the scan
+   * is still going — and it used to assert that by racing a 400ms sleep
+   * against a 300ms wall-clock ceiling. That is a coin toss on a loaded CI
+   * runner, and it came up tails: 320ms on ubuntu, green on the two other
+   * platforms and on eight consecutive local runs. A test that fails on
+   * machine speed rather than on behaviour teaches everyone to press re-run,
+   * which is how a real intermittent failure gets waved through.
+   *
+   * With a gate the ordering is structural: the scan cannot have finished,
+   * because nothing but this test can finish it.
+   */
+  class GatedScraper extends FixtureScraper {
+    private releaseGate!: () => void;
+    private markStarted!: () => void;
+    /** Resolves once `fullSync` has actually been entered. */
+    readonly started = new Promise<void>((resolve) => {
+      this.markStarted = resolve;
+    });
+    private readonly gate = new Promise<void>((resolve) => {
+      this.releaseGate = resolve;
+    });
+
+    override async *fullSync(): AsyncIterable<ConversationChunk> {
+      this.markStarted();
+      await this.gate;
+      yield* super.fullSync();
+    }
+
+    /** Let the scan run to completion. */
+    finish(): void {
+      this.releaseGate();
+    }
+  }
+
   it("returns before a slow scan finishes, and says the index is still filling", async () => {
-    const scraper = new SlowScraper([chunk("slow-session", 0, "user", "eventually indexed")], 400);
+    const scraper = new GatedScraper([chunk("slow-session", 0, "user", "eventually indexed")]);
     const index = new SqliteHandoffIndex(join(tempDir, "xtctx.db"), tempDir, [
       { tool: "codex", scraper },
     ], { refreshBudgetMs: 30 });
 
-    const startedAt = Date.now();
-    const recent = await index.listRecentSessions(5);
-    const elapsed = Date.now() - startedAt;
+    try {
+      const recent = await index.listRecentSessions(5);
 
-    expect(elapsed).toBeLessThan(300);
-    expect(recent).toEqual([]);
-    expect(index.isScanning()).toBe(true);
+      // The scan is genuinely under way — without this the assertions below
+      // would also pass for a scan that never started at all.
+      await scraper.started;
+      // ...and genuinely unfinished, because the gate is still closed.
+      expect(recent).toEqual([]);
+      expect(index.isScanning()).toBe(true);
 
-    await index.close();
+      // The other half: once it is allowed to finish, the data is there. This
+      // is what makes the empty answer above "not yet" rather than "never".
+      scraper.finish();
+      await index.whenScanSettled();
+      expect(index.isScanning()).toBe(false);
+      expect(await index.listRecentSessions(5)).toHaveLength(1);
+    } finally {
+      // `close()` waits for the scan to settle, so a failed assertion above
+      // would otherwise hang the suite on a gate nobody opened.
+      scraper.finish();
+      await index.close();
+    }
   });
 
   it("has the data once the scan it started has finished", async () => {
