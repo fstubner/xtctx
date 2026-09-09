@@ -1,10 +1,11 @@
 import { createProjectServices } from "../runtime/services.js";
 import type { SessionSummary } from "../handoff/types.js";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { readFile, realpath } from "node:fs/promises";
 import { writeFileAtomic } from "../utils/atomic-file.js";
 import { inlineSafe } from "../utils/untrusted-text.js";
 import { pathMatchesProject } from "../utils/project-scope.js";
+import { SUPPORTED_TOOLS } from "../tools/sources.js";
 
 interface HookOptions {
   projectPath?: string;
@@ -223,11 +224,55 @@ async function readHookPayload(): Promise<HookPayload> {
       // Only Claude Code documents this field; a tool that sends something
       // else shaped like it would be attributing its own store, which is the
       // same claim and equally trustworthy.
-      storeDirs: transcriptPath ? { "claude-code": dirname(transcriptPath) } : {},
+      storeDirs: transcriptPath ? claudeCodeStoreDir(transcriptPath) : {},
     };
   } catch {
     return empty;
   }
+}
+
+/**
+ * The directory a `transcript_path` names, but only if it is a Claude Code
+ * transcript store.
+ *
+ * The path arrives on stdin and was taken at face value: `dirname()` of it was
+ * recorded as this project's claude-code store and read on every later scan.
+ * Nothing checked where it pointed. Reproduced before this existed — a payload
+ * whose `transcript_path` was `<project>/../../../../../../evil/x.jsonl`
+ * recorded `C:\...\evil` as the store, and the scraper then read that
+ * directory with `exactDirectory: true`, which is precisely the mode that lets
+ * a record carrying no `cwd` be attributed to this project. Arbitrary
+ * directory contents were served back as the project's own history.
+ *
+ * The `cwd` check nearby does not cover this: it validates a different field.
+ *
+ * Containment is the check that fits, because the legitimate value always sits
+ * under the tool's own store root — `<store>/<encoded-project>/<id>.jsonl`.
+ * `CLAUDE_CONFIG_DIR` moving that tree is the case this whole payload exists
+ * to handle, so the root is read from the tool definition rather than assumed,
+ * and a path outside it is dropped rather than rejected loudly: the hook must
+ * not fail a session over a payload it merely mistrusts, and dropping it only
+ * costs the reconstruction it was optimising away.
+ */
+function claudeCodeStoreDir(transcriptPath: string): Record<string, string | undefined> {
+  const definition = SUPPORTED_TOOLS.find((tool) => tool.id === "claude-code");
+  if (!definition) {
+    return {};
+  }
+
+  let storeRoot: string;
+  try {
+    storeRoot = definition.defaultStorePath();
+  } catch {
+    return {};
+  }
+
+  // `resolve` collapses any `..` first, so containment is decided on the real
+  // destination rather than on the string that was sent.
+  const candidate = resolve(dirname(transcriptPath));
+  return pathMatchesProject(candidate, resolve(storeRoot))
+    ? { "claude-code": candidate }
+    : {};
 }
 
 /**
