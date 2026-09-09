@@ -816,7 +816,9 @@ export class SqliteHandoffIndex implements SessionService {
   ): Promise<SessionSummary[]> {
     const rows = this.queryKeywordUnits(query, limit, toolFilter, branchFilter);
     // Rank by BM25 position so relevance, not recency, dominates ordering.
-    return groupUnits(rows, rankKeywordRows(rows), "keyword", normalizeLimit(limit, DEFAULT_LIMIT));
+    return this.withDetailOffsets(
+      groupUnits(rows, rankKeywordRows(rows), "keyword", normalizeLimit(limit, DEFAULT_LIMIT)),
+    );
   }
 
   private async semanticSearch(
@@ -861,15 +863,62 @@ export class SqliteHandoffIndex implements SessionService {
     // Only needed to score vectors; skip the model entirely when there are none.
     const queryVector = rows.length > 0 ? await this.embeddingProvider.embed(query) : null;
 
-    return rankSearchCandidates({
-      rows,
-      keywordRows,
-      queryVector,
-      mode,
-      limit: normalizedLimit,
-      cosineSimilarity,
-      deserializeVector,
-    });
+    return this.withDetailOffsets(
+      rankSearchCandidates({
+        rows,
+        keywordRows,
+        queryVector,
+        mode,
+        limit: normalizedLimit,
+        cosineSimilarity,
+        deserializeVector,
+      }),
+    );
+  }
+
+  /**
+   * Give every match the `offset` that actually reaches it.
+   *
+   * A window records the `message_index` values at its edges, and those are
+   * not positions. `getSessionDetail` pages by position, so handing an agent
+   * the index values — which is what the rendered `Match 5987-2108` was —
+   * lands it wherever those numbers happen to fall. On a live index 430 of
+   * 9,728 windows (4.4%) even had an end index BELOW their start, because one
+   * session carried 828 duplicate messages and 862 disagreements between index
+   * order and time order.
+   *
+   * Resolved on read rather than stored: the stored edges are part of a
+   * window's id, so changing them would orphan every vector in every existing
+   * index and cost each user a full re-embed — measured at 92 minutes on the
+   * project that exposed this. At most three matches per session over five
+   * sessions, each an indexed count, is the cheaper end of that trade.
+   */
+  private withDetailOffsets(sessions: SessionSummary[]): SessionSummary[] {
+    for (const session of sessions) {
+      for (const match of session.matches ?? []) {
+        const offset = this.resolveDetailOffset(session.session_ref, match.message_start_index);
+        if (offset !== null) {
+          match.detail_offset = offset;
+        }
+      }
+    }
+    return sessions;
+  }
+
+  private resolveDetailOffset(sessionRef: string, messageIndex: number): number | null {
+    try {
+      const row = this.prepared().messageOffsetInSession.get(
+        sessionRef,
+        messageIndex,
+        sessionRef,
+      ) as { count: number } | undefined;
+      return row?.count ?? null;
+    } catch {
+      // A pointer is an aid, not the answer: a session whose messages this
+      // cannot locate still returns its match, preview and all. Failing the
+      // whole search over a missing signpost would be the worse trade.
+      return null;
+    }
   }
 
   private queryKeywordUnits(

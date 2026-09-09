@@ -203,6 +203,20 @@ export interface RetrievalMatch {
   ended_at: string;
   preview: string;
   /**
+   * The `offset` to pass to `xtctx_session_detail` to land on this match.
+   *
+   * Not the same number as `message_start_index`, and that difference is the
+   * bug this exists to fix. Detail pages by POSITION in the session's
+   * timestamp ordering; a window records the `message_index` VALUES at its
+   * edges. The two agree only while numbering is dense and monotonic in time
+   * order, which real transcripts are not — measured on one live index, 430 of
+   * 9,728 windows (4.4%) had an end index BELOW their start, and following the
+   * rendered range as an offset landed three weeks away from the match.
+   *
+   * Absent for a literal match, which has no indexed session to page through.
+   */
+  detail_offset?: number;
+  /**
    * How similar this window is to the query, on the same absolute scale as the
    * session's score. Absent for keyword-only matches, whose keyword score is
    * reciprocal rank — the top hit is 1.0 whatever it matched.
