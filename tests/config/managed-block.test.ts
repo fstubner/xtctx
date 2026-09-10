@@ -87,6 +87,78 @@ describe("removeManagedBlocks", () => {
  * The reachable route is the project path, which is rendered verbatim and can
  * legally contain the marker text on POSIX.
  */
+/**
+ * An unpaired marker must never take the user's content with it.
+ *
+ * The removal pattern was `begin[\s\S]*?end`, which pairs an opening marker
+ * with the nearest following close whatever lies between them. A file holding
+ * one orphaned `begin` — an end marker lost to a hand-edit, or a merge that
+ * kept half of one side — therefore matched from that orphan to the *next
+ * block's* end, and removal deleted every line in between.
+ *
+ * Reproduced end to end before the fix, through a real setup/disconnect: a
+ * file containing the user's own heading and body came back as a single line.
+ */
+describe("removeManagedBlocks with unpaired markers", () => {
+  it("keeps content after an orphaned begin marker", () => {
+    const content = [
+      "TOP LINE THE USER WROTE",
+      begin,
+      "stale text whose end marker was deleted",
+      "",
+      "## The user's own heading",
+      "Content the user cares about.",
+      "",
+    ].join("\n");
+
+    // Nothing here is a well-formed block, so nothing is xtctx's to remove.
+    expect(removeManagedBlocks(content)).toBe(content);
+  });
+
+  it("removes only the real block when an orphaned begin precedes it", () => {
+    const content = [
+      "USER TOP",
+      begin,
+      "orphaned, never closed",
+      "## The user's own heading",
+      begin,
+      "the genuine managed block",
+      end,
+      "USER BOTTOM",
+    ].join("\n");
+
+    const result = removeManagedBlocks(content);
+
+    expect(result).toContain("USER TOP");
+    expect(result).toContain("## The user's own heading");
+    expect(result).toContain("USER BOTTOM");
+    expect(result).toContain("orphaned, never closed");
+    expect(result).not.toContain("the genuine managed block");
+  });
+
+  it("still removes two properly paired blocks", () => {
+    // The case a stricter rule could easily break: a merge that kept both
+    // sides leaves two complete blocks, and both are ours.
+    const content = ["A", begin, "one", end, "MIDDLE", begin, "two", end, "B"].join("\n");
+
+    const result = removeManagedBlocks(content);
+
+    expect(result).not.toContain("one");
+    expect(result).not.toContain("two");
+    expect(result).toContain("MIDDLE");
+  });
+
+  it("counts blocks by the same rule removal uses", () => {
+    // Otherwise status reports a block that removal refuses to touch, and
+    // tells the user to run a repair that cannot change anything.
+    const orphaned = ["USER", begin, "not a block", "## heading"].join("\n");
+    expect(countManagedBlocks(orphaned)).toBe(0);
+
+    const paired = ["A", begin, "one", end, "B"].join("\n");
+    expect(countManagedBlocks(paired)).toBe(1);
+  });
+});
+
 describe("stripMarkers", () => {
   it("removes an end marker embedded in an interpolated value", () => {
     expect(stripMarkers(`/tmp/${end}/x`)).toBe("/tmp//x");
