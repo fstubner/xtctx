@@ -271,9 +271,18 @@ function formatRecentSessionsMarkdown(
       lines.push(`- Preview: ${inlineSafe(session.preview)}`);
     }
     for (const match of session.matches ?? []) {
-      lines.push(
-        `- Match ${match.message_start_index}-${match.message_end_index}: ${inlineSafe(match.preview)}`,
-      );
+      // Says what to do with the number rather than printing a bare pair.
+      //
+      // This rendered `Match ${start}-${end}` from the window's message_index
+      // values, next to a tool whose parameter is called "Message offset" —
+      // an invitation an agent took literally, and those are not offsets. On a
+      // live index 4.4% of windows even printed backwards (`Match 5987-2108`),
+      // and following one landed three weeks from the match.
+      const pointer =
+        match.detail_offset === undefined
+          ? ""
+          : ` (xtctx_session_detail offset=${match.detail_offset})`;
+      lines.push(`- Match${pointer}: ${inlineSafe(match.preview)}`);
     }
     lines.push("");
   }

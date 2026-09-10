@@ -12,6 +12,7 @@ export interface PreparedStatements {
   /** Sessions whose retrieval units do not reach their last message. */
   selectSessionsMissingUnits: Statement;
   selectSessionMessages: Statement;
+  messageOffsetInSession: Statement;
   selectSessionTool: Statement;
   selectUnitIds: Statement;
   insertUnit: Statement;
@@ -257,6 +258,34 @@ export function prepareStatements(db: DatabaseHandle): PreparedStatements {
        FROM messages
        WHERE session_ref = ?
        ORDER BY timestamp ASC, message_index ASC, id ASC`,
+    ),
+    /**
+     * How many messages of a session sort before a given `message_index`.
+     *
+     * `getSessionDetail` pages by POSITION — `LIMIT ? OFFSET ?` over this
+     * same ordering — while a retrieval unit records the `message_index`
+     * values at its edges. Those two coincide only while a session's
+     * numbering is dense and monotonic in timestamp order, and real
+     * transcripts are neither: one session here carries 828 duplicate
+     * messages and 862 places where index order disagrees with time order,
+     * which is what made a match point somewhere unrelated.
+     *
+     * The ordering below is character-for-character the one
+     * `selectSessionMessages` and `getSessionDetail` use. If any of the
+     * three changes, all three must.
+     */
+    messageOffsetInSession: db.prepare(
+      `WITH target AS (
+         SELECT timestamp, message_index, id FROM messages
+          WHERE session_ref = ? AND message_index = ?
+       )
+       SELECT COUNT(*) AS count
+         FROM messages m, target t
+        WHERE m.session_ref = ?
+          AND (m.timestamp < t.timestamp
+            OR (m.timestamp = t.timestamp AND m.message_index < t.message_index)
+            OR (m.timestamp = t.timestamp AND m.message_index = t.message_index
+                AND m.id < t.id))`,
     ),
     selectSessionTool: db.prepare("SELECT tool FROM sessions WHERE session_ref = ?"),
     selectUnitIds: db.prepare("SELECT id FROM retrieval_units WHERE session_ref = ?"),
