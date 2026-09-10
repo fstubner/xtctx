@@ -606,9 +606,22 @@ export function isKnownBulkyRecord(line: string): boolean {
  * still consumes an index so chunk identity stays stable between a full and
  * an incremental scrape; anything else is the message.
  *
- * `response_item` events with role "user" are deliberately not handled here:
- * they are system-injected context (AGENTS.md, permissions, environment),
- * not something the person typed.
+ * Two shapes, because Codex changed one and kept writing the other for a
+ * while. The original is `payload.type === "user_message"` with the text on
+ * `payload.message`. The current one wraps it: `payload.type ===
+ * "item_completed"` with `payload.item.type === "UserMessage"`.
+ *
+ * Reading only the original meant every human turn in a current transcript
+ * was dropped, silently — `event_msg` is a known type and `payload.type` was
+ * present, so the drift guard below had nothing to complain about. Measured
+ * across a real store of 825 session files: 41 turns in the old shape, 15,169
+ * in the new one. A scrape of that history returned the assistant side of
+ * every Codex conversation and almost none of what the person asked for.
+ *
+ * `response_item` events with role "user" are still deliberately not handled
+ * here: they are system-injected context (AGENTS.md, permissions,
+ * environment), not something the person typed, and they outnumber the real
+ * turns in a file that carries both.
  */
 function userMessageContent(payload: unknown, filePath: string): string | undefined {
   if (!isRecord(payload)) {
@@ -616,16 +629,37 @@ function userMessageContent(payload: unknown, filePath: string): string | undefi
     return undefined;
   }
 
-  if (payload.type !== "user_message") {
-    // A payload with no `type` at all is drift worth seeing; a payload with a
-    // different one is just an event this scraper does not read.
-    if (!("type" in payload)) {
-      warnDrift(filePath, "event_msg payload missing 'type' key — likely renamed");
-    }
-    return undefined;
+  if (payload.type === "user_message") {
+    return toStringValue(payload.message) ?? "";
   }
 
-  return toStringValue(payload.message) ?? "";
+  if (payload.type === "item_completed") {
+    const item = payload.item;
+    if (!isRecord(item) || item.type !== "UserMessage") {
+      // Every other item type is an event this scraper reads elsewhere or
+      // does not read at all; neither is drift.
+      return undefined;
+    }
+    // The text sits in a parts array, the way the assistant side does:
+    // `content: [{ type: "text", text: "..." }]`. A flat `text` is accepted
+    // too, so an older or simpler record still reads.
+    if (Array.isArray(item.content)) {
+      const text = item.content
+        .filter((part): part is Record<string, unknown> => isRecord(part))
+        .map((part) => toStringValue(part.text) ?? "")
+        .filter((part) => part.length > 0)
+        .join("\n");
+      return text;
+    }
+    return toStringValue(item.text) ?? "";
+  }
+
+  // A payload with no `type` at all is drift worth seeing; a payload with a
+  // different one is just an event this scraper does not read.
+  if (!("type" in payload)) {
+    warnDrift(filePath, "event_msg payload missing 'type' key — likely renamed");
+  }
+  return undefined;
 }
 
 /**
