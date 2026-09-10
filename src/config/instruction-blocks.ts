@@ -189,11 +189,11 @@ export async function removeManagedBlocksFromFile(
     return false;
   }
 
-  if (!repaired.trim() || isOnlyFrontmatter(repaired)) {
-    // The file held nothing but the xtctx block — or the YAML frontmatter
-    // xtctx itself wrote above it, which Cursor would keep loading as an
-    // xtctx rule. Either way setup created it and disconnect owns removing
-    // it, rather than leaving a stub behind.
+  if (!repaired.trim() || isXtctxPrelude(repaired, filePath, projectRoot)) {
+    // The file held nothing but the xtctx block — or that block under the
+    // exact frontmatter xtctx itself wrote above it, which Cursor would keep
+    // loading as an xtctx rule. Either way setup created it and disconnect
+    // owns removing it, rather than leaving a stub behind.
     await rm(filePath, { force: true });
     return true;
   }
@@ -207,14 +207,26 @@ export async function removeManagedBlocksFromFile(
   return true;
 }
 
-/** True when nothing survives but a single YAML frontmatter block. */
-function isOnlyFrontmatter(content: string): boolean {
-  const trimmed = content.trim();
-  if (!trimmed.startsWith("---")) {
+/**
+ * True when what survives removal is exactly the prelude xtctx wrote here.
+ *
+ * This asked a looser question — "is the remainder *any* YAML frontmatter?" —
+ * and deleted the file when it was. That cannot tell xtctx's own Cursor-rule
+ * prelude from frontmatter the user wrote, so a `CLAUDE.md` holding nothing
+ * but the author's own `---\ntitle: ...\n---` was destroyed by `disconnect`.
+ * Reproduced before the fix: the file did not exist afterwards.
+ *
+ * The writer only ever prepends `target.prelude`, and only when the file did
+ * not already open with frontmatter — so the exact string it added is the only
+ * thing removal is entitled to take back. Anything else, however much it looks
+ * like boilerplate, belongs to whoever wrote it.
+ */
+function isXtctxPrelude(content: string, filePath: string, projectRoot: string): boolean {
+  const prelude = memoryTargets(projectRoot).find((target) => target.path === filePath)?.prelude;
+  if (!prelude) {
     return false;
   }
-  const end = trimmed.indexOf("\n---", 3);
-  return end !== -1 && trimmed.slice(end + 4).trim().length === 0;
+  return normalizeNewlines(content).trim() === normalizeNewlines(prelude).trim();
 }
 
 export async function inspectManagedFile(filePath: string): Promise<{
