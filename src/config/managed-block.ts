@@ -38,15 +38,58 @@ export function stripMarkers(value: string): string {
   return value.split(MARKERS.begin).join("").split(MARKERS.end).join("");
 }
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
 
-function managedBlockPattern(trailingNewline: boolean): RegExp {
-  return new RegExp(
-    `${escapeRegExp(MARKERS.begin)}[\\s\\S]*?${escapeRegExp(MARKERS.end)}${trailingNewline ? "\\n?" : ""}`,
-    "g",
-  );
+/**
+ * The file, split around every *well-formed* managed block.
+ *
+ * Same shape as `String.split` on the block pattern, and different from it in
+ * the one case that destroyed a user's work: `begin[\s\S]*?end` pairs an
+ * opening marker with the nearest following close, whatever lies between. A
+ * file carrying one orphaned `begin` — the end marker deleted in a hand-edit,
+ * or a merge that kept half of one side — therefore matched from that orphan
+ * all the way to the *next block's* end, and removal swallowed every line in
+ * between.
+ *
+ * Measured on a real reproduction: a file holding a user's heading and body
+ * between an orphaned marker and a later valid block came back as one line.
+ *
+ * So a `begin` that meets another `begin` before it meets an `end` is not an
+ * opening at all — it is ordinary text that happens to look like a marker, and
+ * the safe thing is to leave it alone. An unterminated trailing `begin` is the
+ * same case. Both leave inert text in the file, which `inspectManagedFile`
+ * already surfaces, and inert text is recoverable where deleted content is
+ * not.
+ */
+function splitOnManagedBlocks(content: string): string[] {
+  const parts: string[] = [];
+  let sliceFrom = 0;
+  let searchFrom = 0;
+
+  for (;;) {
+    const begin = content.indexOf(MARKERS.begin, searchFrom);
+    if (begin === -1) {
+      break;
+    }
+    const end = content.indexOf(MARKERS.end, begin + MARKERS.begin.length);
+    if (end === -1) {
+      // Opened and never closed: not a block, and nothing after it is ours.
+      break;
+    }
+    const nextBegin = content.indexOf(MARKERS.begin, begin + MARKERS.begin.length);
+    if (nextBegin !== -1 && nextBegin < end) {
+      // Another block opens before this one closes, so this marker never had
+      // a partner. Skip it and try again from the one that might.
+      searchFrom = nextBegin;
+      continue;
+    }
+
+    parts.push(content.slice(sliceFrom, begin));
+    sliceFrom = end + MARKERS.end.length;
+    searchFrom = sliceFrom;
+  }
+
+  parts.push(content.slice(sliceFrom));
+  return parts;
 }
 
 /**
@@ -59,7 +102,7 @@ export function removeManagedBlocks(content: string): string {
   // a newline after the block takes one from the user's text when a block sits
   // between paragraphs. The separator handled below is the only whitespace
   // removal that belongs to xtctx.
-  const parts = normalized.split(managedBlockPattern(false));
+  const parts = splitOnManagedBlocks(normalized);
   if (parts.length === 1) {
     return normalized;
   }
@@ -106,5 +149,8 @@ export function matchLineEndings(content: string, original: string | null): stri
 }
 
 export function countManagedBlocks(content: string): number {
-  return normalizeNewlines(content).match(managedBlockPattern(false))?.length ?? 0;
+  // Counted by the same pairing rule removal uses. A regex count would report
+  // blocks that removal then refuses to touch — status would say "needs
+  // repair" about a file `setup --repair` cannot change, forever.
+  return splitOnManagedBlocks(normalizeNewlines(content)).length - 1;
 }
