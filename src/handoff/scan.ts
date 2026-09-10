@@ -81,6 +81,14 @@ export async function scanTool(
   // Insertion-ordered and de-duplicated, so folding this into the caller's
   // own set preserves the order the caller used to build it in.
   const touchedSessions = new Set<string>();
+  // What this scan wrote, per session: every id, and the lowest position it
+  // reached. Against the lowest position already stored — captured before the
+  // first write to that session — they say whether this scan's rows are the
+  // complete account of the session from that point on. See
+  // `pruneRereadSessions`.
+  const writtenIds = new Map<string, Set<string>>();
+  const lowestWritten = new Map<string, number>();
+  const lowestStored = new Map<string, number | null>();
   if (!(await safeDetect(scraper))) {
     // Not installed here, so there is nothing to wait for — read, rather
     // than outstanding forever.
@@ -104,9 +112,32 @@ export async function scanTool(
   let openSessionRolledUpAt = 0;
   try {
     for await (const chunk of scraper.scrape()) {
-      const sessionRef = upsertChunk(stmts, scopedRoot, chunk);
-      if (sessionRef) {
+      // Before the write, or the row about to be inserted would move the
+      // minimum this comparison depends on.
+      const chunkSessionRef = `${chunk.tool}:${chunk.sessionId}`;
+      if (!lowestStored.has(chunkSessionRef)) {
+        const row = stmts.minMessageIndexForSession.get(chunkSessionRef) as
+          | { lowest: number | null }
+          | undefined;
+        lowestStored.set(chunkSessionRef, row?.lowest ?? null);
+      }
+
+      const written = upsertChunk(stmts, scopedRoot, chunk);
+      if (written) {
+        const { sessionRef } = written;
         touchedSessions.add(sessionRef);
+
+        let ids = writtenIds.get(sessionRef);
+        if (!ids) {
+          ids = new Set<string>();
+          writtenIds.set(sessionRef, ids);
+        }
+        ids.add(written.id);
+
+        const lowest = lowestWritten.get(sessionRef);
+        if (lowest === undefined || written.messageIndex < lowest) {
+          lowestWritten.set(sessionRef, written.messageIndex);
+        }
         if (openSession !== null && openSession !== sessionRef) {
           stmts.sessionRollup.run(openSession);
           openSessionRolledUpAt = 0;
@@ -121,6 +152,11 @@ export async function scanTool(
         latestTimestamp = chunk.timestamp;
       }
     }
+
+    // Only after the scrape completed. A scrape that threw has an incomplete
+    // set of written ids, and pruning against it would delete rows for
+    // everything it never reached.
+    pruneRereadSessions(db, stmts, writtenIds, lowestWritten, lowestStored);
 
     if (latestTimestamp) {
       await scraper.saveScrapedPosition({
@@ -152,12 +188,23 @@ export async function scanTool(
   return { touchedSessions: [...touchedSessions], tool: scraper.tool };
 }
 
-/** Writes one chunk; returns its session ref, or null for an empty chunk. */
+/** What one written chunk tells the scan about the session it belongs to. */
+interface WrittenChunk {
+  sessionRef: string;
+  /**
+   * The row's deterministic id. Collected per session so a read that started
+   * at the top can delete what it did not produce; see `pruneRereadSessions`.
+   */
+  id: string;
+  messageIndex: number;
+}
+
+/** Writes one chunk; returns what was written, or null for an empty chunk. */
 function upsertChunk(
   stmts: PreparedStatements,
   scopedRoot: string,
   chunk: ConversationChunk,
-): string | null {
+): WrittenChunk | null {
   if (!chunk.content.trim()) {
     return null;
   }
@@ -210,7 +257,68 @@ function upsertChunk(
     ],
   );
 
-  return sessionRef;
+  return { sessionRef, id, messageIndex };
+}
+
+/**
+ * Delete rows a full re-read of a session did not produce.
+ *
+ * Message ids hash the message index, so a turn that moves position between
+ * two reads arrives under a new id and inserts *alongside* its old row rather
+ * than replacing it. Nothing else removes the old one, so the session ends up
+ * holding the same turn at two positions. Positions move whenever a read sees
+ * a different set of records than the read before it — a scraper taught to
+ * read something it used to skip, or a transcript rewritten underneath.
+ *
+ * A session is eligible when this scan reached at least as far back as the
+ * lowest position already stored for it: everything on record from that point
+ * on is then accounted for by what this scan wrote, so a row it did not write
+ * is stale. A resumed read starts past that point and is never eligible —
+ * pruning on one would delete the whole history before its resume point.
+ *
+ * The obvious signal, "the scan wrote index 0", is wrong and was tried: every
+ * scraper advances `messageIndex` over records it skips, so a real session's
+ * lowest written position is whatever survived the skipping. Across nine real
+ * Codex sessions those minima were 2, 2, 3, 3, 3, 3, 5, 5 and 5 — never 0, so
+ * that version of this prune never ran on real data while its test, whose
+ * fixture started at 0, passed.
+ *
+ * The caller re-runs the roll-up and rebuilds retrieval units for every
+ * touched session afterwards, which is what repairs `message_count` and the
+ * search windows over the rows this removes.
+ */
+function pruneRereadSessions(
+  db: DatabaseHandle,
+  stmts: PreparedStatements,
+  writtenIds: Map<string, Set<string>>,
+  lowestWritten: Map<string, number>,
+  lowestStored: Map<string, number | null>,
+): void {
+  for (const [sessionRef, written] of writtenIds) {
+    if (written.size === 0) {
+      continue;
+    }
+
+    const stored = lowestStored.get(sessionRef);
+    const reached = lowestWritten.get(sessionRef);
+    // Nothing stored before this scan means nothing can be stale.
+    if (stored === null || stored === undefined || reached === undefined || reached > stored) {
+      continue;
+    }
+
+    const stale = (stmts.selectMessageIdsForSession.all(sessionRef) as Array<{ id: string }>)
+      .map((row) => row.id)
+      .filter((id) => !written.has(id));
+    if (stale.length === 0) {
+      continue;
+    }
+
+    db.transaction(() => {
+      for (const id of stale) {
+        stmts.deleteMessageById.run(id);
+      }
+    })();
+  }
 }
 
 function sourcePathFromMetadata(metadata: ConversationChunk["metadata"]): string | null {
