@@ -137,7 +137,7 @@ jobs:
         run: |
           npm run test:security
           npm run security:checklist
-          npm audit --omit=dev
+          npm run audit:production
 
       - name: Landing dependency audit
         # The landing site has only devDependencies (Astro is a build-time
