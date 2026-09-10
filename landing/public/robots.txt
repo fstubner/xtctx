@@ -1,0 +1,8 @@
+# The published site is the root page. Everything below it is a design draft
+# kept in the repo so it can be compared side by side, and deployed only
+# because the whole build directory is uploaded — not because it is meant to
+# be read. Each also carries a noindex meta tag; this file is the half that
+# works for crawlers that never fetch the page.
+User-agent: *
+Disallow: /concepts
+Disallow: /v9
