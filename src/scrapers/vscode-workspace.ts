@@ -33,8 +33,87 @@ export async function workspaceMatchesProject(
       return false;
     }
     const folderPath = folder.startsWith("file:") ? fileURLToPath(folder) : folder;
-    return pathMatchesProject(folderPath, projectRoot);
+    if (pathMatchesProject(folderPath, projectRoot)) {
+      return true;
+    }
+
+    // A `vscode-remote://` folder is a URI, not a path, so the comparison
+    // above never matches one — not even when xtctx runs inside the same WSL
+    // distro and the root is literally the path the URI carries. Both readings
+    // of a WSL folder are offered here instead.
+    for (const candidate of wslWorkspacePaths(folder)) {
+      if (pathMatchesProject(candidate, projectRoot)) {
+        return true;
+      }
+    }
+
+    return false;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Every path a WSL workspace URI could name, for whichever side xtctx runs on.
+ *
+ * VS Code and Cursor record a folder opened through WSL as
+ * `vscode-remote://wsl%2B<distro>/mnt/h/projects/app`, never as a `file:` URL.
+ * Nothing decoded that, and a URI compared against a path never matches, so
+ * those workspaces were invisible — with no drift warning and no empty result,
+ * because a workspace that does not match is indistinguishable from one
+ * belonging to another project.
+ *
+ * Two readings, because the same URI means two things depending on where this
+ * process is running:
+ *
+ * - The POSIX path itself, for xtctx running inside that distro, where the
+ *   project root *is* `/mnt/h/projects/app`. This never matched either: the
+ *   comparison saw the whole URI, scheme and authority included.
+ * - Its Windows equivalent, for xtctx running on the host. `/mnt/<drive>` is
+ *   WSL's documented default automount root, confirmed on the machine this was
+ *   measured on: no `[automount]` section in `/etc/wsl.conf`, and `H:\ on
+ *   /mnt/h` in the live mount table.
+ *
+ * Nothing is offered for:
+ *
+ * - Any authority that is not `wsl+`. `ssh-remote`, `dev-container` and
+ *   `codespaces` name other machines — that store held 9 such workspaces for
+ *   Cursor and 5 for VS Code — and mapping one onto a local root would serve a
+ *   different computer's conversations as this project's.
+ * - The bare `/<drive>/…` shape left by an `automount root = /` configuration.
+ *   It appears 17 times in each tool's store here and every one of those
+ *   workspaces holds zero conversations, so translating it would add this
+ *   design's only ambiguity — a single-letter Linux directory that looks like
+ *   a drive letter — in exchange for nothing. The POSIX reading above still
+ *   covers it for anyone running inside WSL.
+ */
+function* wslWorkspacePaths(folder: string): Iterable<string> {
+  const parts = /^vscode-remote:\/\/([^/]+)(\/.*)$/.exec(folder);
+  if (!parts) {
+    return;
+  }
+
+  if (!decodeMaybe(parts[1]).startsWith("wsl+")) {
+    return;
+  }
+
+  const posixPath = decodeMaybe(parts[2]);
+  yield posixPath;
+
+  const mount = /^\/mnt\/([a-zA-Z])(\/.*)?$/.exec(posixPath);
+  if (!mount) {
+    return;
+  }
+
+  const rest = mount[2] ?? "";
+  yield `${mount[1].toUpperCase()}:${rest === "" ? "\\" : rest.replace(/\//g, "\\")}`;
+}
+
+/** Percent-decoding that leaves a malformed sequence as it found it. */
+function decodeMaybe(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
   }
 }
