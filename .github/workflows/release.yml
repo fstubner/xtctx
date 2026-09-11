@@ -78,6 +78,23 @@ jobs:
           # Tags are needed to find the previous release, and the default
           # shallow clone has none.
           fetch-depth: 0
+          # The push at the end of this job goes straight to main, and main is
+          # a protected branch requiring `test-and-build`. A directly pushed
+          # commit carries no check, so the push is refused — every release
+          # since 0.19.0 died here, with `GH006: Required status check
+          # "test-and-build" is expected`.
+          #
+          # The default credentials are `github-actions[bot]`, and classic
+          # branch protection has no per-actor bypass to grant it: the only
+          # exemption it offers is `enforce_admins`, which covers human admins
+          # and not a bot. So the checkout — and therefore the push — runs as
+          # the release PAT instead, which is an admin, with `enforce_admins`
+          # turned off to let it through.
+          #
+          # Deliberately not a standing grant to the bot: this token is used by
+          # one manually dispatched workflow, while `GITHUB_TOKEN` is present
+          # in every run of every workflow in the repository.
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
 
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
