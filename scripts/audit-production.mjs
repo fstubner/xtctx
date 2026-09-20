@@ -28,23 +28,7 @@ import { spawnSync } from "node:child_process";
  */
 
 /** @type {Exception[]} */
-const EXCEPTIONS = [
-  {
-    advisory: "GHSA-vwc7-r8mq-g2x9",
-    package: "adm-zip",
-    why:
-      "adm-zip is used in onnxruntime-node's postinstall script, to unpack the " +
-      "ONNX Runtime native build it downloads from Microsoft. The advisory is " +
-      "about extraction following symlinks in the archive, which requires the " +
-      "archive to be attacker-chosen. xtctx never calls adm-zip, never passes it " +
-      "an archive, and does not depend on it directly — the only archive it ever " +
-      "sees is the vendor download at install time.",
-    removedBy:
-      "onnxruntime-node releasing with adm-zip >= a fixed version, or xtctx " +
-      "dropping @huggingface/transformers from its default install (see the " +
-      "optional-peer plan) so the chain leaves the production tree entirely.",
-  },
-];
+const EXCEPTIONS = [];
 
 /**
  * npm reports one entry per package along the chain, so a single advisory
