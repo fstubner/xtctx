@@ -55,6 +55,16 @@ interface SkillStatus {
 
 interface ExistingSkillConfig {
   selectedIds: string[];
+  /**
+   * Where each selected skill was discovered, project-relative, as setup
+   * recorded it in `skills.selected.<id>.source`.
+   *
+   * Read back at disconnect to tell a file xtctx generated from one the user
+   * wrote. For `native-skill` mode the synced copy is byte-identical to the
+   * canonical one, so a content hash cannot separate them — the copy matches
+   * precisely because xtctx made it from that file.
+   */
+  sources: Record<string, string>;
 }
 
 interface SkillSyncOptions {
@@ -234,6 +244,11 @@ export async function removeSyncedSkillsForTools(
   const root = resolve(projectRoot);
   const writes: Array<{ path: string; kind: string; changed: boolean }> = [];
   const selectedIds = await listCanonicalSkillIds(skillSourceDir(root));
+  // Where each skill came from. A skill discovered in `.claude/skills/` syncs
+  // back to that same path under `native-skill` mode, so without this the
+  // user's own file is deleted by a disconnect that only ever meant to remove
+  // what xtctx generated.
+  const { sources } = await readExistingSkillConfig(join(root, ".xtctx", "config.yaml"));
 
   for (const toolId of tools) {
     const tool = SUPPORTED_TOOLS.find((item) => item.id === toolId);
@@ -248,12 +263,37 @@ export async function removeSyncedSkillsForTools(
         continue;
       }
 
+      if (isUserAuthoredTarget(root, sources[skillId], targetPath)) {
+        writes.push({ path: targetPath, kind: `skill:${toolId}:${skillId}:kept`, changed: false });
+        continue;
+      }
+
       const changed = await removePath(targetPath);
       writes.push({ path: targetPath, kind: `skill:${toolId}:${skillId}`, changed });
     }
   }
 
   return writes;
+}
+
+/**
+ * True when the file this tool syncs to is the same file the skill was
+ * discovered from — so removing it would delete the user's original rather
+ * than a copy xtctx made.
+ *
+ * `source` is absent for the built-in skill (recorded as `<built-in>`) and for
+ * any project set up before it was written, and in both of those cases the
+ * target is xtctx's to remove.
+ */
+function isUserAuthoredTarget(
+  projectRoot: string,
+  source: string | undefined,
+  targetPath: string,
+): boolean {
+  if (!source || source === "<built-in>") {
+    return false;
+  }
+  return resolve(projectRoot, source) === resolve(targetPath);
 }
 
 export function renderSyncedSkillsBlock(selected: SkillSelection[]): string[] {
@@ -383,18 +423,26 @@ function targetHasHash(content: string, hash: string, mode: SkillSyncMode): bool
 async function readExistingSkillConfig(configPath: string): Promise<ExistingSkillConfig> {
   const raw = await readUtf8IfExists(configPath);
   if (raw === null) {
-    return { selectedIds: [] };
+    return { selectedIds: [], sources: {} };
   }
 
   try {
     const parsed = parseYaml(raw) as unknown;
     if (!isRecord(parsed) || !isRecord(parsed.skills) || !isRecord(parsed.skills.selected)) {
-      return { selectedIds: [] };
+      return { selectedIds: [], sources: {} };
     }
 
-    return { selectedIds: Object.keys(parsed.skills.selected) };
+    const selected = parsed.skills.selected;
+    const sources: Record<string, string> = {};
+    for (const [id, entry] of Object.entries(selected)) {
+      if (isRecord(entry) && typeof entry.source === "string") {
+        sources[id] = entry.source;
+      }
+    }
+
+    return { selectedIds: Object.keys(selected), sources };
   } catch {
-    return { selectedIds: [] };
+    return { selectedIds: [], sources: {} };
   }
 }
 
