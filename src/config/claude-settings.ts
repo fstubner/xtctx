@@ -73,7 +73,21 @@ const CLAUDE_TOOL_PERMISSIONS = XTCTX_TOOL_NAMES.flatMap((tool) => [
   `mcp__plugin_xtctx_xtctx__${tool}`,
 ]);
 
-export async function installClaudeHook(projectRoot: string): Promise<boolean> {
+export interface ClaudeHookResult {
+  /** Whether anything was written. */
+  changed: boolean;
+  /**
+   * Why the hook could not be installed, when it could not be.
+   *
+   * Setup collects these into its `failures` list and exits nonzero. A
+   * refusal has to be reported rather than returned as "no change": the hook
+   * is what puts handoff in front of the agent without it asking, so silently
+   * not installing it looks exactly like a working setup.
+   */
+  failure?: string;
+}
+
+export async function installClaudeHook(projectRoot: string): Promise<ClaudeHookResult> {
   // Claude Code reads hooks from .claude/settings.json (matcher-group shape).
   // Earlier xtctx versions wrote a flat array to .claude/hooks.json, which
   // Claude Code never loads — migrate those entries out.
@@ -83,8 +97,36 @@ export async function installClaudeHook(projectRoot: string): Promise<boolean> {
   );
 
   const settingsPath = join(projectRoot, ".claude", "settings.json");
-  const existing = await readJsonIfExists(settingsPath);
-  const root = isRecord(existing) ? existing : {};
+  // Read raw rather than through `readJsonIfExists`, which answers `null` for
+  // a missing file and for an unparsable one alike. Treating the second as the
+  // first meant a settings.json with a trailing comma was replaced by a
+  // document holding nothing but xtctx's hook and permissions — the user's
+  // model, env, other hooks and `permissions.deny` written away, reported as a
+  // successful setup. `writeMcpConfig` already refuses in this situation; this
+  // path is the one that did not.
+  const raw = await readUtf8IfExists(settingsPath);
+  let root: Record<string, unknown> = {};
+  if (raw !== null && raw.trim() !== "") {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw) as unknown;
+    } catch (error) {
+      return {
+        changed: legacyChanged,
+        failure:
+          `Failed to parse ${settingsPath}; leaving it unchanged and skipping the ` +
+          `SessionStart hook: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+    if (!isRecord(parsed)) {
+      return {
+        changed: legacyChanged,
+        failure: `${settingsPath} is not a JSON object; leaving it unchanged and skipping the SessionStart hook.`,
+      };
+    }
+    root = parsed;
+  }
+
   const hooks = isRecord(root.hooks) ? root.hooks : {};
   const sessionStart = Array.isArray(hooks.SessionStart) ? hooks.SessionStart : [];
   const alreadyInstalled = sessionStart.some(
@@ -129,7 +171,7 @@ export async function installClaudeHook(projectRoot: string): Promise<boolean> {
     JSON.stringify(root, null, 2) + "\n",
     projectRoot,
   );
-  return changed || legacyChanged;
+  return { changed: changed || legacyChanged };
 }
 
 async function removeLegacyClaudeHook(hooksPath: string, projectRoot: string): Promise<boolean> {
