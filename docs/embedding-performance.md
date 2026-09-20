@@ -1,0 +1,188 @@
+# Embedding performance
+
+Measurements taken on 2026-09-20 while looking for a way to make indexing
+faster. None of them changed the code; they exist so the next person asking
+"can we speed this up" starts from evidence rather than from the same four
+guesses.
+
+Three of the four guesses were wrong, which is the main reason this file is
+worth keeping.
+
+## How these were measured
+
+Every number below comes from real segments pulled out of this project's own
+index — the unvectorized windows, split with `splitTextForEmbedding` and
+capped with `capSegments`, exactly as the indexer does it. Mean segment
+length 883 characters.
+
+That detail is the whole point. An earlier round of this work measured
+"18ms per embed" on strings like `warm query number 5`, concluded mpnet was
+affordable, and shipped a model change that had to be reverted the next day.
+A segment is ~1024 characters, and per-embed cost on short strings says
+nothing about it. See the comment on `DEFAULT_EMBEDDING_MODEL`.
+
+Each model and dtype ran in its own process: two providers in one process
+fail intermittently with `bad allocation`.
+
+**Machine:** Windows, 24 logical cores, discrete GPU. Absolute figures move
+with what else the machine is doing — several runs below differ by 20% for
+that reason. Ratios within a run are the durable part.
+
+## Device: the GPU is ~6x, for free
+
+| device | ms/segment (separate runs) | cores used |
+| --- | --- | --- |
+| CPU | 60.2, 81.7 | 10.7, 8.9 |
+| **DirectML** | **10.1, 10.4, 11.8** | **0.9** |
+| WebGPU | 15.1 | 1.0 |
+
+`cores used` is `process.cpuUsage()` divided by wall time.
+
+**The vectors are identical.** Embedding the same 128 segments on CPU and on
+DirectML and comparing the pairs: mean cosine **1.000000**, worst pair
+**0.999999**. This is not "close enough to accept" — it is the same
+computation on different silicon. No re-index, no threshold re-sweep, none of
+the vector-space mixing hazard that rules out quantization below.
+
+For a 21,349-segment backlog that is roughly 21–29 minutes on CPU against
+about 4 minutes on the GPU.
+
+`onnxruntime-node` already ships `DirectML.dll` in the package this project
+installs. Nothing needs adding to `package.json`; the `device` option is
+simply not passed today.
+
+**Not yet known, and the reason this is not implemented:** DirectML is
+Windows-only. WebGPU is the portable candidate and also worked here, but it
+has only ever been run on this machine. WSL on this host has `/dev/dxg` but
+no `/dev/dri`, so it would exercise the *fallback* path rather than a Linux
+GPU. A GitHub `macos-latest` runner is real Apple Silicon and is the one
+genuine second-GPU test available for free.
+
+## Multi-process embedding: no headroom worth taking
+
+The CPU path already uses 9–11 of 24 cores, so ONNX Runtime is parallelising
+internally. Forking worker processes would mostly have them compete for cores
+already in use. There is some headroom to 24, but it costs a process pool,
+duplicated model memory and crash handling — against a 6x win from passing an
+option.
+
+Worth noting the GPU path uses **0.9 cores**. The second prize after speed is
+that indexing stops eating the machine.
+
+## Batch size: 16 beats 32
+
+Three paired runs on CPU, fp32, same segments each time:
+
+| batch | run 1 | run 2 | run 3 |
+| --- | --- | --- | --- |
+| 8 | 101.7 | | |
+| **16** | **82.2** | **80.9** | **66.3** |
+| 32 | 100.5 | 88.7 | 81.4 |
+| 64 | 99.9 | | |
+
+16 wins every pairing against 32, by roughly 10–20%. `MAX_BATCH_SIZE` is
+currently 32.
+
+The absolute numbers are noisy and the sample is three pairs, so this is a
+consistent direction rather than a settled figure. Before changing the
+constant it deserves more repetitions on a quiet machine, including 24.
+
+## Quantized weights: rejected
+
+| dtype | ms/segment |
+| --- | --- |
+| fp32 | 100.5 |
+| q8 | 84.7 |
+
+**16% faster, not the ~2x that quantization is usually assumed to give.**
+
+And not free: comparing q8 vectors against fp32 vectors for the same 256
+segments gives mean cosine **0.9889**, worst pair **0.9789**. Every vector
+moves slightly, which would shift ranking around the confidence threshold and
+require the eval to re-price it.
+
+There is also a trap. `dropVectorsFromOtherModels` keys on the model *name*,
+and dtype is not part of that key — so switching dtype would leave existing
+fp32 vectors in place beside new q8 ones, silently mixing two slightly
+different vector spaces. A dtype switch needs the key widened first.
+
+16% does not buy any of that.
+
+## Caching duplicate segments: rejected
+
+Windows are 8 messages with a stride of 4, so each message appears in about
+two windows. The obvious inference is that the same text is embedded twice
+and a content-hash cache would halve the work.
+
+Measured across the real backlog:
+
+```
+unvectorized windows: 3505
+segments to embed   : 21349
+distinct segments   : 20155
+duplicate segments  : 1194 (5.6%)
+```
+
+Segments are packed by filling to a character budget, so the pack boundaries
+shift with each window's start and the text rarely repeats exactly. A cache
+would save about 5%. Not worth building.
+
+## Model bake-off: bge-small wins, once thresholds are per-model
+
+Run against the 60-query eval corpus. The MiniLM row reproduced the committed
+baseline exactly (hybrid 0.333 / 0.533 / 0.183), which is what establishes
+that this harness and `ranking.eval.test.ts` are measuring the same thing.
+
+First, every model at the thresholds tuned for MiniLM:
+
+| model | hybrid mrr | recall@5 | top1 | false positives |
+| --- | --- | --- | --- | --- |
+| MiniLM (0.15/0.36) | 0.333 | 0.533 | 0.183 | 0 |
+| bge-small | 0.395 | 0.550 | 0.267 | **1.00** |
+| gte-small | 0.385 | 0.600 | 0.250 | **1.00** |
+
+A false-positive rate of 1.00 means every deliberately unanswerable query,
+gibberish included, returned something. The models are not worse — they place
+their cosine values higher, and a floor tuned to MiniLM's distribution stops
+excluding anything.
+
+Swept to their own thresholds:
+
+| model | min semantic / confident | hybrid mrr | recall@5 | top1 | vector mrr | FP |
+| --- | --- | --- | --- | --- | --- | --- |
+| MiniLM | 0.15 / 0.36 | 0.333 | 0.533 | 0.183 | 0.246 | 0 |
+| **bge-small** | **0.55 / 0.65** | **0.404** | **0.567** | **0.250** | **0.325** | **0** |
+| bge-small | 0.65 / 0.75 | 0.433 | 0.600 | 0.283 | **0.000** | 0 |
+| gte-small | 0.75 / 0.85 | 0.418 | 0.583 | 0.283 | 0.315 | 0 |
+
+bge-small at 0.55/0.65 beats MiniLM on every metric at a false-positive rate
+of zero: hybrid ranking +21%, top-1 +37%, vector mode +32%.
+
+Ignore the 0.65/0.75 row despite its better hybrid score. Vector mode there is
+**0.000** — nothing clears the semantic floor, so `mode: "vector"` returns
+nothing at all, and the hybrid number is keyword hits being re-ranked. A
+public option that silently returns empty is worse than a slightly lower
+score.
+
+The cost: indexing the eval corpus took 25.9s under bge-small against MiniLM's
+14.2s, about 1.8x slower — the constraint the GPU result above loosens.
+
+**Caveat.** The eval corpus is synthetic and 60 queries. Differences this size
+are suggestive, not settled, and this should be confirmed against a real index
+before bge-small becomes the default. Changing model means re-embedding
+everything, which `dropVectorsFromOtherModels` already handles correctly by
+name.
+
+## What this leaves
+
+Ranked by value against effort, on the evidence above:
+
+1. **GPU with fallback.** ~6x, identical vectors, already installed. Blocked
+   only on portability evidence, which `macos-latest` can supply.
+2. **Batch size 16.** ~10–20%, no vector change, one constant. Blocked on a
+   cleaner measurement.
+3. **bge-small with its own thresholds.** Better retrieval at 1.8x the
+   indexing cost. Blocked on confirmation against a real index.
+
+Closed, with reasons above: quantization, segment caching, multi-process
+embedding, and (from `DEFAULT_EMBEDDING_MODEL`) mpnet and static models.
