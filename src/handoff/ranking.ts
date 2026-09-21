@@ -30,7 +30,7 @@ const MAX_MATCHES_PER_SESSION = 3;
  * Unrelated sentence-transformer pairs sit near 0; related ones are
  * comfortably above this.
  */
-export const MIN_SEMANTIC_COSINE = 0.15;
+export const MIN_SEMANTIC_COSINE = 0.62;
 
 /**
  * How similar the *best* window has to be before a query counts as having
@@ -96,7 +96,7 @@ export const MIN_SEMANTIC_COSINE = 0.15;
  *
  * If it needs to move, move it against the eval rather than against one query.
  */
-export const MIN_CONFIDENT_COSINE = 0.36;
+export const MIN_CONFIDENT_COSINE = 0.64;
 /**
  * Weight of the recency/continuity tie-break in the relevance modes. Small
  * enough that it only ever separates candidates that are otherwise equal.
