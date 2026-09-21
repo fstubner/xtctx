@@ -116,18 +116,23 @@ and the symptom is a backlog that never drains rather than anything that looks
 like a failure.
 
 That rules out a silent chain, not the feature. What it leaves is a device
-that has to be *chosen on evidence* — a short timed probe against the real
-CPU path on first use, or an explicit opt-in — which is a bigger piece of
-work than passing an option, and is the reason this still is not implemented.
+*chosen on evidence*: a short timed run against the real CPU path on this
+machine. That is what `xtctx calibrate` does — see "Calibration, as
+implemented" below.
 
 **Vectors agree everywhere.** Worst pair across every device that ran on every
 runner is 0.999999. Whatever selects the device, it does not become part of
 vector identity, and a machine that ends up on CPU shares an index with one
 that does not.
 
-DirectML remains the best result seen anywhere (5.1ms/segment locally, 0.8
-cores) and is Windows-with-a-real-GPU only: the Windows runner has no display
-adapter and DirectML said so plainly rather than degrading.
+DirectML is Windows-with-a-real-GPU only, and that is a feature here: the
+Windows runner has no display adapter and DirectML said so plainly rather than
+degrading, which is exactly the check WebGPU failed to perform.
+
+Every ms/segment figure in this table and the one above it is warmup-
+contaminated, including the 5.1 quoted for DirectML — see "Warmup" below. The
+relative story survives; the absolute numbers are roughly 1.5–2x pessimistic
+on the GPU rows.
 
 ## Multi-process embedding: no headroom worth taking
 
@@ -248,11 +253,8 @@ name.
 
 Ranked by value against effort, on the evidence above:
 
-1. **GPU chosen by measurement.** ~6x on a real GPU, identical vectors,
-   already installed. No longer blocked on portability evidence — that evidence
-   arrived and said a fallback *chain* is the wrong shape, because GPU-less
-   Windows succeeds at 50x the cost instead of failing. What it needs is a
-   first-use timed probe or an explicit opt-in.
+1. **GPU chosen by measurement.** Done — `xtctx calibrate`, and automatically
+   inside `xtctx scan --embed`. See below.
 2. **Batch size 16.** ~10–20%, no vector change, one constant. Blocked on a
    cleaner measurement.
 3. **bge-small with its own thresholds.** Better retrieval at 1.8x the
@@ -260,3 +262,52 @@ Ranked by value against effort, on the evidence above:
 
 Closed, with reasons above: quantization, segment caching, multi-process
 embedding, and (from `DEFAULT_EMBEDDING_MODEL`) mpnet and static models.
+
+## Warmup: a short one inverts the ranking
+
+Every per-segment figure in this file above the three-OS table was taken after
+a two-segment warmup batch, which is enough for the CPU and not remotely
+enough for a GPU. Graph compilation and buffer allocation are a one-off cost,
+so a short warmup leaves them inside the timed window, and they are large
+enough on the GPU paths to change which device looks fastest.
+
+Same desktop, same 16 segments, only the warmup differing:
+
+| warmup | cpu | dml | webgpu | winner |
+| --- | --- | --- | --- | --- |
+| 2 segments, 1 timed pass | 20.1 | 6.0 | 10.1 | dml |
+| 2 segments, best of 3 | 21.0 | 4.6 | 3.4 | webgpu |
+| **full pass, best of 3** | **18.4–21.3** | **3.1** | **3.3** | **dml** |
+
+The last row is three consecutive runs and varies by 0.0 on DirectML and 0.1
+on WebGPU, against a CPU arm that still moves by 3ms with machine load. That
+is the measurement `xtctx calibrate` takes.
+
+Two things follow. The earlier DirectML figure of 5.1ms per segment was also
+warmup-contaminated and the real number here is about 3.1, so the GPU win on
+this machine is ~6x rather than ~4x. And a single timed pass is not a
+measurement: it ranked WebGPU as the slower GPU when it is within 7% of the
+faster one.
+
+## Calibration, as implemented
+
+`xtctx calibrate` times the model on every execution provider the platform
+offers, each in its own process, takes the fastest of three passes per device,
+and writes the verdict to `~/.xtctx/device.json` keyed by platform, arch, core
+count, model and dtype. `xtctx scan --embed` runs it automatically when the
+machine has no verdict yet — a minute against the hours that command is about
+to spend — and `--no-calibrate` skips it.
+
+Nothing else calibrates. The MCP server answers a tool call inside a
+four-second budget and must not spawn three model-loading processes behind it;
+it reads the verdict and nothing more. `xtctx status` prints the device, read
+off the provider rather than off the cache file, so the line is evidence that
+the indexer is using it rather than evidence that a file exists.
+
+The decision rule is "fastest measured device", with a 1.1x margin over the
+CPU, and every case where no comparison exists resolves to the CPU: a device
+that would not initialise, and a run where the CPU arm itself failed.
+
+Measured end to end on this desktop, `xtctx scan --embed` before and after:
+**551.9ms per window on the CPU against 50.7ms on the GPU**, taking this
+project's remaining backlog from about 24 minutes to about 1.5.

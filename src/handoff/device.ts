@@ -125,14 +125,20 @@ export function calibrationSegments(count: number, chars = 1000): string[] {
 /**
  * How much faster than CPU a device has to be before it is worth switching to.
  *
- * Not 1.0. The calibration is one short run on a machine that is doing other
- * things, and a device that wins by 5% is inside that noise — while switching
- * to it is a permanent change to how every future embed runs. Measured gaps
- * that are real were 3x to 6x; the ones to reject were 0.02x. Nothing observed
- * so far lands anywhere near 1.3, which is the point: the threshold only has
- * to separate a decisive win from noise.
+ * The rule is "pick the fastest", and this is how close to 1.0 that rule can
+ * honestly get rather than a preference for the CPU.
+ *
+ * It was 1.3 when each device got one timed pass, which is a measurement that
+ * cannot distinguish a 10% device difference from a browser starting up
+ * mid-run. The worker now takes the fastest of three passes, and since other
+ * load only ever makes a pass slower, the minimum is close to the device's
+ * real throughput — so the margin only has to cover what is left.
+ *
+ * Every gap measured so far is far outside it either way: 3x to 6x for the
+ * wins, 0.02x for the one to reject. A margin this small changes the answer
+ * only in cases nobody has actually observed.
  */
-const MIN_SPEEDUP = 1.3;
+const MIN_SPEEDUP = 1.1;
 
 /**
  * The fastest device that beats the CPU by more than noise, else the CPU.

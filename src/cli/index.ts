@@ -147,12 +147,17 @@ export async function main(argv = process.argv): Promise<void> {
       "Also embed every window, so semantic search covers the whole history (slow: hours on a large one)",
       false,
     )
+    .option(
+      "--no-calibrate",
+      "With --embed, skip measuring which device embeds fastest on this machine",
+    )
     .description("Scan the enabled transcript stores into this project's index, then exit")
-    .action(async (options: { project?: string; embed?: boolean }) => {
+    .action(async (options: { project?: string; embed?: boolean; calibrate?: boolean }) => {
       const globalOptions = program.opts<{ project?: string }>();
       await runScan({
         projectPath: options.project ?? globalOptions.project,
         embed: options.embed,
+        calibrate: options.calibrate,
       });
     });
 
