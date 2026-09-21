@@ -144,7 +144,21 @@ supported tool — that one also deletes `.xtctx/skills`, since with nothing lef
 managing skills the synced source is xtctx's own scaffolding. A skill you
 wrote yourself and selected at setup is kept where you wrote it. Antigravity and Copilot CLI keep one MCP config for every
 project on the machine, so a project disconnect leaves those two files alone;
-pass `--global-mcp` (as with `setup`) to remove xtctx from them as well.
+pass `--global-mcp` to remove xtctx from them as well.
+
+That flag is **not** symmetric with `setup`, and the difference is worth
+knowing before you assume `disconnect --all` has removed everything. `setup`
+writes Antigravity's config without the flag, because Antigravity has no
+project-scoped MCP file and there is nowhere else to put it; `setup
+--global-mcp` additionally writes Copilot CLI's. Neither file holds a
+per-project entry, so a project disconnect cannot remove "this project's"
+wiring from them — it can only remove xtctx from that client for every project
+at once. Doing that silently is exactly what it used to do, and it took xtctx
+away from every other project on the machine, so it is an explicit step now.
+
+To remove xtctx from a machine entirely: `xtctx disconnect --all --global-mcp`
+in each project you set up, then delete each project's `.xtctx` directory,
+which holds the config and the indexed transcripts and is deliberately kept.
 
 `xtctx scan` reads every enabled transcript store into the project's index and
 exits. The MCP server does the same thing on its own every time it starts, so
