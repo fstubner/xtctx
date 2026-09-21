@@ -134,8 +134,8 @@ export const site: SiteData = {
     badge: 'Local transcript retrieval for AI coding tools',
     heading: 'Keep project context portable across coding tools.',
     subhead:
-      'Move between supported coding agents without starting over. xtctx indexes the transcript files your tools already write and serves them over MCP, so the next agent can pick up recent context. Install the plugin and retrieval works, with no project setup required.',
-    proof: ['No project setup required', 'Raw transcripts stay local', 'Five MCP tools'],
+      'Move between supported coding agents without starting over. xtctx indexes the transcript files your tools already write and serves them over MCP, so the next agent can pick up recent context. Install the plugin once to reach the tools everywhere, then opt each project in with a single setup command.',
+    proof: ['One command per project', 'Raw transcripts stay local', 'Five MCP tools'],
     quickInstall: 'claude plugin marketplace add fstubner/xtctx && claude plugin install xtctx@xtctx',
     installLinkLabel: 'Get started',
     sourceUrl: REPO_URL,
@@ -232,9 +232,9 @@ export const site: SiteData = {
       codeHtml: `<span class="info-text">cache</span> <span class="var-text">.xtctx/state/xtctx.db</span>
 ├── <span class="var-text">sessions</span>
 ├── <span class="var-text">messages</span>
-├── <span class="var-text">retrieval_windows</span>
-├── <span class="var-text">vectors</span>
-└── <span class="var-text">fts_index</span>`,
+├── <span class="var-text">retrieval_units</span>
+├── <span class="var-text">retrieval_units_fts</span>
+└── <span class="var-text">retrieval_unit_vectors</span>`,
     },
   ],
 
@@ -244,7 +244,7 @@ export const site: SiteData = {
         label: 'Install the plugin',
         command: 'claude plugin marketplace add fstubner/xtctx && claude plugin install xtctx@xtctx',
         hint:
-          'Registers the MCP server and the handoff skill, and writes nothing into your project. Retrieval works straight away, because the tools resolve the project from the working directory. Codex, Copilot, Cursor and Antigravity install from the same marketplace; see the README for their commands.',
+          'Registers the MCP server and the handoff skill machine-wide, and writes nothing into your project. The tools then reach every project; each one answers once it has been set up, and names the command until then. Codex, Copilot, Cursor and Antigravity install from the same marketplace; see the README for their commands.',
       },
       {
         label: 'Add project wiring',
@@ -281,7 +281,7 @@ export const site: SiteData = {
     },
     {
       q: 'Do I need to run setup in every project?',
-      a: 'No. With the plugin installed, the MCP tools resolve the project from the working directory, so retrieval works in any project with no setup at all. What setup adds is delivery: managed instruction blocks put the handoff in front of the next agent whether it calls a tool or not. Plugin first, setup where you want it automatic.',
+      a: 'Yes, once per project you want handoff in. The plugin makes the tools reachable everywhere, but a project that has not opted in has no index to read, so every tool answers with that and names `npx -y xtctx setup`. Setup also adds delivery: managed instruction blocks put the handoff in front of the next agent whether it calls a tool or not.',
     },
     {
       q: 'Does xtctx run a background service?',

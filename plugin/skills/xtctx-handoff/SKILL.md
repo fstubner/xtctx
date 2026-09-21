@@ -1,16 +1,15 @@
 ---
 name: xtctx-handoff
-description: Retrieve cross-tool handoff context with the xtctx MCP tools. Use when switching AI coding tools, resuming work another agent started, or picking up a project without knowing what was last done in it. Works in any project the tools are available in; no xtctx setup is required.
+description: Retrieve cross-tool handoff context with the xtctx MCP tools. Use when switching AI coding tools, resuming work another agent started, or picking up a project without knowing what was last done in it. Available in any project; retrieval needs `xtctx setup` to have been run there, and the tools say so when it has not.
 ---
 
 # xtctx Handoff
 
 Use the xtctx MCP tools to retrieve recent local transcript context for this project.
 
-The project is resolved from the working directory, so these tools work whether
-or not `xtctx setup` has been run here. If `xtctx_continuity_status` reports the
-config as missing, that refers to managed instruction blocks and hooks — the
-retrieval tools are unaffected and worth calling anyway.
+The project is resolved from the working directory. A project that has not
+been set up has no index to read, so every tool answers with that and names
+`xtctx setup` — offer it rather than reporting that there is no history.
 
 ## Workflow
 

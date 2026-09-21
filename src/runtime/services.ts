@@ -80,7 +80,7 @@ export async function createProjectServices(
   const stateDir = join(xtctxDir, "state");
   const dbPath = join(stateDir, "xtctx.db");
   const configPath = join(xtctxDir, "config.yaml");
-  const config = await loadProjectConfig(configPath);
+  const config = await loadProjectConfig(configPath, projectRoot);
   const overrides = Object.fromEntries(
     Object.entries(config.tools)
       .filter(([, value]) => value.enabled !== false)
@@ -127,7 +127,7 @@ export async function createProjectServices(
   };
 }
 
-async function loadProjectConfig(configPath: string): Promise<ProjectConfig> {
+async function loadProjectConfig(configPath: string, projectRoot: string): Promise<ProjectConfig> {
   let raw: string;
   try {
     raw = await readFile(configPath, "utf-8");
@@ -158,7 +158,7 @@ async function loadProjectConfig(configPath: string): Promise<ProjectConfig> {
     const parsed = parseYaml(raw);
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       const root = parsed as Record<string, unknown>;
-      return { tools: normalizeTools(root.tools), present: true };
+      return { tools: normalizeTools(root.tools, projectRoot), present: true };
     }
     return { tools: {}, present: true, error: "expected a mapping at the top level" };
   } catch (err) {
@@ -174,7 +174,7 @@ async function loadProjectConfig(configPath: string): Promise<ProjectConfig> {
   }
 }
 
-function normalizeTools(input: unknown): ProjectConfig["tools"] {
+function normalizeTools(input: unknown, projectRoot: string): ProjectConfig["tools"] {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     return {};
   }
@@ -191,7 +191,13 @@ function normalizeTools(input: unknown): ProjectConfig["tools"] {
       config.enabled = value.enabled;
     }
     if (typeof value.storePath === "string" && value.storePath.trim().length > 0) {
-      config.storePath = resolve(value.storePath);
+      // Against the project root, not the process's working directory.
+      // `.xtctx/config.yaml` belongs to the project and is committable, so a
+      // relative `storePath` in it means "relative to this project" — while
+      // `resolve(value.storePath)` made `xtctx status -p X` run from anywhere
+      // else read a different store than the MCP server, which runs with cwd
+      // at the project root.
+      config.storePath = resolve(projectRoot, value.storePath);
     }
     tools[tool] = config;
   }

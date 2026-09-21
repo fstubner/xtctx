@@ -26,7 +26,7 @@ async function homepageSources(): Promise<string> {
   const files = [
     join(LANDING, "pages", "index.astro"),
     join(LANDING, "data", "site.ts"),
-    ...["Nav", "Hero", "Workflow", "Surfaces", "Install", "Faq", "Footer", "Schematic", "IdeMock", "TerminalMock"].map(
+    ...["Nav", "Hero", "Workflow", "Surfaces", "Install", "Faq", "Footer", "IdeMock", "TerminalMock"].map(
       (name) => join(LANDING, "components", `${name}.astro`),
     ),
   ];
@@ -64,6 +64,23 @@ describe("the homepage visitors are sent to", () => {
     // the commitment is present is the check that survives rewording of the
     // sentence around it.
     expect(page.toLowerCase()).toContain("local-only");
+  });
+
+  it("does not promise retrieval without setup", async () => {
+    const page = await homepageSources();
+
+    // The page's central pitch was false. It said "Install the plugin and
+    // retrieval works, with no project setup required", with a proof chip
+    // reading "No project setup required" and an FAQ answering "No" to
+    // whether setup is needed per project — while `server.ts` points every
+    // tool at `notConfigured()` in a project with no `.xtctx/config.yaml`,
+    // and README.md's own table says "Retrieval in an unconfigured project:
+    // no (offers setup)". The same wrong belief was in the published plugin's
+    // skill text.
+    const lowered = page.toLowerCase();
+    expect(lowered).not.toContain("no project setup required");
+    expect(lowered).not.toContain("with no setup at all");
+    expect(lowered).not.toContain("retrieval works straight away");
   });
 
   it("keeps em and en dashes out of the copy", async () => {

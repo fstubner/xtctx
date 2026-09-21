@@ -451,16 +451,20 @@ export class SqliteHandoffIndex implements SessionService {
     mode: SessionSearchMode = "hybrid",
     branchFilter?: string[],
   ): Promise<SessionSummary[]> {
-    await this.refresh({ toolFilter });
+    const normalizedModeForRefresh = normalizeSearchMode(mode);
+    // A literal pass reads the stores, not the index, so it starts the scan
+    // and moves on rather than waiting out the refresh budget in front of its
+    // own. Every other mode reads the index and waits as before.
+    await this.refresh({ toolFilter, noWait: normalizedModeForRefresh === "literal" });
     const trimmed = query.trim();
     if (!trimmed) {
       return [];
     }
 
-    const normalizedMode = normalizeSearchMode(mode);
+    const normalizedMode = normalizedModeForRefresh;
 
-    // Answered without the index, so it deliberately skips the refresh above
-    // having settled and does not touch the database at all.
+    // Answered without the index: the refresh above was started but not waited
+    // on, and nothing below touches the database.
     if (normalizedMode === "literal") {
       const { sessions, exhausted, unreadable } = await literalSearch(
         this.tools,
@@ -538,6 +542,20 @@ export class SqliteHandoffIndex implements SessionService {
     toolFilter?: string[];
     sessionRef?: string;
     statusOnly?: boolean;
+    /**
+     * Start a scan if one is due, but do not wait for it.
+     *
+     * For a caller that does not read the index. A literal search streams the
+     * transcript stores directly — that is the whole reason it exists, to
+     * answer while the index is still filling — and it was still paying up to
+     * `refreshBudgetMs` first, for a scan whose results it never touches. On
+     * the defaults that is four seconds of waiting in front of its own five,
+     * on the one route chosen for being fast when the index is cold.
+     *
+     * The scan is still started, because the next caller does read the index
+     * and a literal search is often the first call in a session.
+     */
+    noWait?: boolean;
   }): Promise<void> {
     await this.initialized;
     if (reason.statusOnly) {
@@ -562,7 +580,11 @@ export class SqliteHandoffIndex implements SessionService {
       this.scanStartedMs = Date.now();
     }
 
-    await waitWithBudget(this.refreshPromise, this.scanStartedMs, this.refreshBudgetMs);
+    await waitWithBudget(
+      this.refreshPromise,
+      this.scanStartedMs,
+      reason.noWait ? 0 : this.refreshBudgetMs,
+    );
   }
 
   /** True when a scan started by an earlier call is still running. */

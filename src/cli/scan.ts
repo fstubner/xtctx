@@ -111,6 +111,10 @@ async function embedBacklog(sessions: SessionService): Promise<void> {
     // Not expected: the pass is uncapped. Saying so beats reporting a
     // completion that did not happen.
     process.stdout.write(`Embedding stopped with ${remaining} windows outstanding${took ? ` after ${took}` : ""}.\n`);
+    // Nonzero, because it did not do what it was asked. Exiting 0 here made an
+    // unfinished embed indistinguishable from a finished one to anything
+    // scripting this command.
+    process.exitCode = 1;
     return;
   }
   process.stdout.write(`Embedding complete${took ? ` in ${took}` : ""}.\n`);

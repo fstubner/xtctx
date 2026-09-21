@@ -170,6 +170,16 @@ export function getToolDefinition(toolId: string): ToolSourceDefinition | undefi
 
 /** @internal Exported for tests only. */
 export function defaultClaudeProjectsDir(): string {
+  // `CLAUDE_CONFIG_DIR` moves the whole `.claude` tree, and the hook's
+  // containment check is built from this path — so with it set, the real
+  // transcript path fell outside the root the hook would accept, the payload
+  // naming it was dropped, and the scraper then looked in a `~/.claude` that
+  // holds nothing. The hook comment already claimed this variable was
+  // followed; nothing read it.
+  const configDir = process.env.CLAUDE_CONFIG_DIR;
+  if (configDir && configDir.trim() !== "") {
+    return join(configDir, "projects");
+  }
   const home = process.env.USERPROFILE ?? process.env.HOME ?? "";
   return join(home, ".claude", "projects");
 }

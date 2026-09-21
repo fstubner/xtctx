@@ -95,6 +95,12 @@ jobs:
           # one manually dispatched workflow, while `GITHUB_TOKEN` is present
           # in every run of every workflow in the repository.
           token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          # Not left in `.git/config`. With the default, the admin PAT sits on
+          # disk while `npm ci`, `npm --prefix landing ci` and the whole
+          # `verify:release` suite run — third-party install scripts and every
+          # test in the repository, any one of which could read it. Only the
+          # push at the end needs it, and it is supplied there.
+          persist-credentials: false
 
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -185,6 +191,7 @@ jobs:
         env:
           VERSION: ${{ steps.bump.outputs.version }}
           TAG: ${{ steps.bump.outputs.tag }}
+          RELEASE_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
@@ -195,8 +202,12 @@ jobs:
           git add package.json package-lock.json CHANGELOG.md             plugin .claude-plugin landing/src/data/site.ts
           git commit -m "chore(release): ${VERSION}"
           git tag "$TAG"
-          git push origin "HEAD:${GITHUB_REF_NAME}"
-          git push origin "$TAG"
+          # The token reaches git here and nowhere else; see
+          # `persist-credentials: false` on the checkout. Through the
+          # environment rather than `${{ }}`, so it is never substituted into
+          # the script text.
+          git push "https://x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:${GITHUB_REF_NAME}"
+          git push "https://x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$TAG"
 
       - name: Create the GitHub release
         env:

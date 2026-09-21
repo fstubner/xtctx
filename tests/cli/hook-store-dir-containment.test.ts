@@ -71,6 +71,15 @@ describe("the store directory a hook payload names", () => {
         removeAllListeners() {
           return this;
         },
+        // A real stdin has these, and the hook now uses them to stop the
+        // stream holding the event loop open. A double that omits them makes
+        // the product code untestable rather than the product wrong.
+        pause() {
+          return this;
+        },
+        destroy() {
+          return this;
+        },
       },
     );
     Object.defineProperty(process, "stdin", { value: stdin, configurable: true });
@@ -89,6 +98,26 @@ describe("the store directory a hook payload names", () => {
 
   it("refuses a path somewhere else entirely", async () => {
     expect(await recordedStoreDir(join(tmpdir(), "not-a-store", "x.jsonl"))).toBeUndefined();
+  });
+
+  it("follows CLAUDE_CONFIG_DIR when the tree has been moved", async () => {
+    // The variable moves the whole `.claude` tree. The containment root is
+    // built from the same helper, so a hook comment claiming this was followed
+    // while nothing read it meant the real transcript path fell outside the
+    // root, the payload was dropped, and the scraper then searched a
+    // `~/.claude` holding nothing — the exact case the payload exists for.
+    const moved = join(tmpdir(), "xtctx-claude-config-dir");
+    const previous = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = moved;
+    try {
+      const genuine = join(moved, "projects", "h--some-project", "abc.jsonl");
+      expect(await recordedStoreDir(genuine)).toBe(
+        join(moved, "projects", "h--some-project"),
+      );
+    } finally {
+      if (previous === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+      else process.env.CLAUDE_CONFIG_DIR = previous;
+    }
   });
 
   it("still records a genuine claude-code transcript path", async () => {
