@@ -1,0 +1,265 @@
+/* Docs code blocks: Expressive Code's frame, its copy button, and the
+ * token colours inside it. Code stays on the dark surface in both themes;
+ * see styles/code-surface.css for why.
+ *
+ * Unlayered on purpose; see docs/theme.css.
+ */
+
+.sl-markdown-content .expressive-code {
+  --ec-codePadInl: 1.15rem;
+  --ec-codePadBlk: 0.62rem;
+  --ec-codeLineHt: 1.52;
+  --ec-codeBg: var(--ui-code-bg);
+  --ec-codeFg: var(--ui-code-fg);
+  --ec-brdCol: rgba(var(--ui-hairline-rgb), 0.2);
+  --ec-focusBrd: rgba(215, 220, 229, 0.8);
+  --ec-sbThumbCol: rgba(var(--ui-hairline-rgb), 0.24);
+  --ec-sbThumbHoverCol: rgba(194, 202, 216, 0.42);
+  --ec-frm-frameBoxShdCssVal: 0 16px 36px rgba(0, 0, 0, 0.3);
+  --ec-frm-trmBg: var(--ui-code-bg);
+  --ec-frm-trmTtbBg: #202733;
+  --ec-frm-trmTtbBrdBtmCol: rgba(var(--ui-hairline-rgb), 0.2);
+  --ec-frm-trmTtbDotsFg: #8c95a6;
+  --ec-frm-trmTtbDotsOpa: 0.48;
+  --ec-frm-inlBtnFg: var(--ui-accent-high);
+  --ec-frm-inlBtnBg: var(--ui-accent-high);
+  --ec-frm-inlBtnBrd: var(--ui-accent-high);
+  --ec-frm-tooltipSuccessBg: #2b313d;
+  /* The copy button's size, and the room the code keeps clear for it. */
+  --ui-code-copy-size: 1.75rem;
+  --ui-code-copy-space: 3rem;
+  --ui-code-copy-inset: 0.48rem;
+  margin-block: 0.9rem 1.2rem;
+}
+
+.sl-markdown-content .expressive-code .frame {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(var(--ui-hairline-rgb), 0.2);
+  border-radius: 8px;
+  background: var(--ui-code-bg);
+  box-shadow: none;
+}
+
+/* No accent rule along the top edge.
+ *
+ * There was one, at 2px and then at 1px. Thinning it helped and did not fix
+ * the actual problem, which is repetition rather than weight: a docs page
+ * carries six or more code blocks, and an accent worn by every one of them
+ * marks nothing. The same green was also underlining every table header,
+ * tinting every inline code chip, and colouring the syntax highlighting
+ * inside the blocks themselves.
+ *
+ * The frame's own border already says where a code block starts and ends, so
+ * the rule was decoration on top of a boundary that existed. The accent is
+ * kept for things that are interactive or stateful -- links, the active
+ * sidebar item, focus rings, the copied state -- where being the loudest
+ * colour on the page is the point. */
+
+html[data-theme='light'] .sl-markdown-content .expressive-code .frame {
+  border-color: rgba(var(--ui-hairline-rgb), 0.13);
+  box-shadow: none;
+}
+
+html[data-theme='light'] .sl-markdown-content .expressive-code .frame::before {
+  background: rgba(var(--ui-accent-rgb), 0.42);
+}
+
+.sl-markdown-content .expressive-code pre {
+  background: var(--ui-code-bg);
+}
+
+.sl-markdown-content .expressive-code code {
+  padding-inline-end: var(--ui-code-copy-space);
+}
+
+.sl-markdown-content .expressive-code .ec-line:first-child .code {
+  padding-inline-end: calc(var(--ec-codePadInl) + var(--ui-code-copy-space));
+}
+
+/* Terminal frames: no title bar, the top border moves onto the code. */
+.sl-markdown-content .expressive-code .frame.is-terminal .header {
+  min-height: 2.45rem;
+  display: none;
+}
+
+.sl-markdown-content .expressive-code .frame.is-terminal pre,
+.sl-markdown-content .expressive-code .frame.is-terminal code {
+  border-top: var(--ec-brdWd) solid var(--ec-brdCol);
+  border-top-left-radius: calc(var(--ec-brdRad) + var(--ec-brdWd));
+  border-top-right-radius: calc(var(--ec-brdRad) + var(--ec-brdWd));
+}
+
+/* ---- Token colours --------------------------------------------------- */
+/* Expressive Code writes each token's colour as an inline `style`
+   (`style="--0:#FF7B72"`), and an inline declaration outranks every
+   stylesheet rule except an !important one. These five are the only
+   !important in src/styles/docs/, and they cannot be anything else: the
+   screenshot check shows the original GitHub-dark salmon and blue the
+   moment it is dropped. Matched by the literal each token carries and
+   re-pointed at the site's palette. */
+.sl-markdown-content .expressive-code .ec-line span[style^='--'] {
+  color: var(--0, inherit);
+  background-color: var(--0bg, transparent);
+}
+
+.sl-markdown-content .expressive-code .ec-line :where(span[style*='#8B949E']) {
+  --0: #818b9c !important;
+}
+
+.sl-markdown-content .expressive-code .ec-line :where(span[style*='#E6EDF3']) {
+  --0: #d7dce5 !important;
+}
+
+.sl-markdown-content .expressive-code .ec-line :where(span[style*='#FFA657']) {
+  --0: #e7edf6 !important;
+}
+
+.sl-markdown-content .expressive-code .ec-line :where(span[style*='#A5D6FF']),
+.sl-markdown-content .expressive-code .ec-line :where(span[style*='#79C0FF']) {
+  --0: #9fb4d0 !important;
+}
+
+.sl-markdown-content .expressive-code .ec-line :where(span[style*='#FF7B72']) {
+  --0: #cfa0a0 !important;
+}
+
+/* ---- Copy button ------------------------------------------------------ */
+.sl-markdown-content .expressive-code .copy {
+  inset-inline-end: calc(var(--ec-brdWd) + var(--ui-code-copy-inset));
+  inset-block-start: calc(var(--ec-brdWd) + var(--ui-code-copy-inset));
+}
+
+.sl-markdown-content .expressive-code .copy button {
+  width: var(--ui-code-copy-size);
+  height: var(--ui-code-copy-size);
+  border: 1px solid rgba(var(--ui-hairline-rgb), 0.18);
+  border-radius: 5px;
+  background: #252b36;
+  opacity: 0.9;
+  box-shadow: none;
+}
+
+.sl-markdown-content .expressive-code .copy button::before {
+  border-color: rgba(var(--ui-hairline-rgb), 0.38);
+}
+
+.sl-markdown-content .expressive-code .copy button::after {
+  margin: 0.45rem;
+}
+
+.sl-markdown-content .expressive-code .copy button:hover,
+.sl-markdown-content .expressive-code .copy button:focus-visible {
+  opacity: 1;
+  border-color: rgba(var(--ui-accent-rgb), 0.42);
+  background: #2b313d;
+}
+
+/* No animation on the button, and no "Copied!" bubble: the feedback is the
+   icon turning into a tick, and the text stays for screen readers only. */
+.sl-markdown-content .expressive-code .copy button,
+.sl-markdown-content .expressive-code .copy button::after,
+.sl-markdown-content .expressive-code .copy .feedback {
+  transition: none;
+}
+
+.sl-markdown-content .expressive-code .copy .feedback {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+  opacity: 0;
+  transform: none;
+}
+
+.sl-markdown-content .expressive-code .copy .feedback::after {
+  content: none;
+}
+
+.sl-markdown-content .expressive-code .copy button[data-copied] {
+  border-color: rgba(var(--ui-hairline-rgb), 0.18);
+  background: #252b36;
+  color: rgba(216, 222, 232, 0.46);
+}
+
+.sl-markdown-content .expressive-code .copy button[data-copied]::after {
+  background: rgba(216, 222, 232, 0.46);
+  -webkit-mask-image: var(--ec-frm-copyIcon);
+  mask-image: var(--ec-frm-copyIcon);
+}
+
+.sl-markdown-content .expressive-code .copy button[data-copied]:hover::after,
+.sl-markdown-content .expressive-code .copy button[data-copied]:focus-visible::after {
+  background: rgba(216, 222, 232, 0.66);
+}
+
+.sl-markdown-content .expressive-code .copy:has(.feedback.show) button {
+  border-color: rgba(var(--ui-accent-rgb), 0.4);
+  color: var(--ui-accent-bright);
+}
+
+.sl-markdown-content .expressive-code .copy:has(.feedback.show) button::after {
+  background: var(--ui-accent-bright);
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg aria-hidden='true' viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 8.2 6.1 11 13 4'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg aria-hidden='true' viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 8.2 6.1 11 13 4'/%3E%3C/svg%3E");
+}
+
+/* ---- Responsive ------------------------------------------------------ */
+/* With a mouse the button stays hidden until the block is hovered or
+   focused; on touch it is always visible. */
+@media (hover: hover) and (min-width: 43.75rem) {
+  .sl-markdown-content .expressive-code .copy button {
+    opacity: 0;
+  }
+
+  .sl-markdown-content .expressive-code .frame:hover .copy button,
+  .sl-markdown-content .expressive-code .frame:focus-within .copy button,
+  .sl-markdown-content .expressive-code .copy button:focus-visible {
+    opacity: 0.9;
+  }
+}
+
+/* On a phone the button is always visible -- there is no hover to reveal it
+   -- and it is opaque, so anywhere over the code it hides a line. It moves
+   out of the block entirely here, into space above it.
+ *
+ * Two earlier attempts reserved room INSIDE the frame instead: first the
+ * full button plus 0.5rem, then a trimmed 26.4px. Both read as an empty band
+ * above every one-line command, on the screens with the least room to spare,
+ * because the button was still over the code and the code had to get out of
+ * its way.
+ *
+ * HOW IT LEAVES A CLIPPING PARENT. `.copy` is a DOM child of `.frame`, and
+ * the frame is `overflow: hidden` for its rounded corners, so a negative
+ * offset would simply be cut off. Un-positioning the frame here hands
+ * `.copy` a containing block further up -- the `.expressive-code` wrapper --
+ * and an absolutely positioned element is not clipped by an intermediate
+ * ancestor's overflow when its containing block sits above that ancestor.
+ * The frame keeps its clipping for the code surface itself.
+ *
+ * Safe because `.copy` is the only thing anchored to the frame: its own
+ * `.feedback` is positioned against `.copy`, and the accent `::before` that
+ * used to sit on the frame no longer paints. */
+@media (max-width: 700px) {
+  .sl-markdown-content .expressive-code {
+    --ui-code-copy-size: 1.5rem;
+    --ui-code-copy-inset: 0.35rem;
+    position: relative;
+    padding-block-start: calc(var(--ui-code-copy-size) + 0.4rem);
+  }
+
+  .sl-markdown-content .expressive-code .frame {
+    position: static;
+  }
+
+  .sl-markdown-content .expressive-code .copy {
+    inset-block-start: 0;
+    inset-inline-end: 0;
+  }
+}

@@ -1,0 +1,133 @@
+---
+import EditLink from 'virtual:starlight/components/EditLink';
+import LastUpdated from 'virtual:starlight/components/LastUpdated';
+import Pagination from 'virtual:starlight/components/Pagination';
+import { site } from '../../data/site';
+
+const { meta, hero, builtWith } = site;
+const year = new Date().getFullYear();
+---
+
+<footer class="docs-footer">
+  {/*
+    Starlight renders LastUpdated and EditLink from its OWN footer. This file
+    replaces that footer, so turning the two on in astro.config.mjs was
+    necessary and not sufficient -- the flags were live and nothing appeared
+    anywhere on the page, because the components they enable had no host.
+    That is the cost of overriding a component rather than extending it: the
+    override inherits responsibility for everything the original rendered.
+  */}
+  <Pagination />
+
+  {/* Below the Previous/Next cards, not above them. These are a footnote
+      about the page you just read; the pagination is where you go next, and
+      it should not be pushed down the screen by metadata. */}
+  <div class="docs-page-meta">
+    <LastUpdated />
+    <EditLink />
+  </div>
+
+  <div class="docs-footer-inner">
+    <div>&copy; {year} {meta.author.name} · MIT</div>
+    <div class="docs-footer-links">
+      <a class="external-link" href={hero.sourceUrl}>GitHub</a>
+      <a class="external-link" href={`${hero.sourceUrl}/releases`}>Releases</a>
+      <a href="/docs/">Docs</a>
+      <a href="/changelog/">Changelog</a>
+    </div>
+    {builtWith.length > 0 && (
+      <div class="docs-built-with">
+        Built with{' '}
+        <span class="docs-built-with-items">
+        {builtWith.map((b, i) => (
+          <>
+            {i > 0 && <span>{i === builtWith.length - 1 ? ', and ' : ', '}</span>}
+            <a class="external-link" href={b.url}>{b.name}</a>
+          </>
+        ))}
+        </span>.
+      </div>
+    )}
+  </div>
+</footer>
+
+<style>
+  @layer starlight.core {
+    .docs-footer {
+      display: flex;
+      flex-direction: column;
+      gap: 1.75rem;
+      margin-top: 4rem;
+      padding-top: 1.75rem;
+      border-top: 1px solid var(--sl-color-hairline);
+    }
+
+    .docs-footer-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 0.9rem 1.25rem;
+      width: 100%;
+      max-width: 1060px;
+      margin-inline: auto;
+      padding-inline: 1.5rem;
+      color: var(--sl-color-gray-3);
+      font-size: 0.75rem;
+    }
+
+    /* Sits above the pagination, on the same measure as the rest of the
+       footer. Row rather than column so the date and the edit link read as
+       one line of page metadata; it wraps on narrow screens instead of
+       squashing. Empty on a page where neither renders, and `:empty` keeps
+       it from adding a gap in that case. */
+    .docs-page-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 0.5rem 1.25rem;
+      width: 100%;
+      max-width: 1060px;
+      margin-inline: auto;
+      padding-inline: 1.5rem;
+      color: var(--sl-color-gray-3);
+      font-size: 0.75rem;
+    }
+
+    .docs-page-meta:empty {
+      display: none;
+    }
+
+    .docs-footer :global(.pagination-links) {
+      width: 100%;
+      max-width: 1060px;
+      margin-inline: auto;
+      padding-inline: 1.5rem;
+    }
+
+    .docs-footer-links {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+
+    .docs-footer a {
+      color: var(--sl-color-gray-3);
+      text-decoration: none;
+    }
+
+    .docs-footer a:hover {
+      color: var(--sl-color-gray-1);
+    }
+
+    /* Matches the landing page's footer: a third item in the same row rather
+       than a centred band of its own behind another rule. components/Footer
+       .astro is the reference -- the two footers carry the same links and the
+       same built-with line, and reading as two different components on two
+       pages of one site was the whole complaint. */
+    .docs-built-with {
+      color: var(--sl-color-gray-3);
+    }
+  }
+</style>

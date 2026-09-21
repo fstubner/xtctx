@@ -1,0 +1,129 @@
+# The same gate netscli runs on its site/ directory, with this repo as the
+# site root. Every step blocks; a check that is allowed to fail is a check
+# nobody reads.
+#
+# It runs on a GitHub-hosted runner. This was self-hosted until 2026-09-12,
+# to avoid metered minutes on a private repo, and the trade turned out badly:
+# the runner went offline and every queued run sat there indefinitely,
+# reporting neither pass nor fail. A check that cannot run is worse than a
+# metered one, because nothing about it looks broken -- the pull request just
+# waits.
+#
+# Hosted runners also remove the security condition the self-hosted setup
+# carried, which was that a fork's pull request would have executed its own
+# code on a personal machine the moment this repo was made public.
+#
+# Still one job rather than two: two would checkout and `npm ci` twice for no
+# gain. The step names report separately either way.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  site:
+    name: Checks
+    # Self-hosted, because this repository is PRIVATE and hosted minutes are
+    # metered for private repositories.
+    #
+    # It ran on ubuntu-latest from 2026-09-21 until the same day. Measured on
+    # that commit and two re-runs: the job completed in three seconds with ZERO
+    # steps executed, no log written at all (the API returns BlobNotFound), and
+    # no annotation. That is what GitHub does when it will not schedule a job,
+    # and it is indistinguishable from a broken workflow until you compare
+    # repositories: nvx and netscli are public, get free hosted minutes, and
+    # their jobs run on ubuntu-latest today.
+    #
+    # So the choice here is not between hosted and self-hosted on the merits --
+    # hosted does not run at all for this repository.
+    runs-on: [self-hosted, windows]
+    # The browser sweeps are the slow part, at a couple of minutes each. This
+    # is a ceiling on a hang rather than a target; on a self-hosted runner an
+    # overrun blocks every later job in the queue, so the ceiling matters more
+    # here than it did on a hosted one.
+    timeout-minutes: 30
+    defaults:
+      run:
+        # Explicit, so these are the same commands that work locally, and
+        # because the runner is Windows: without this the default shell is
+        # PowerShell and every `npm run` line would need rewriting.
+        shell: bash
+    steps:
+      # SECURITY. A self-hosted runner executes whatever the workflow says, on
+      # a real machine. On a PUBLIC repository a fork's pull request would run
+      # its own code there, which is why this guard exists and why it is first.
+      #
+      # It was removed on 2026-09-21 along with the move to ubuntu-latest, and
+      # restored with the move back: the hazard returns with the runner.
+      # Checked at run time rather than trusted from a comment, because the
+      # setting it depends on is one click away in the repository settings.
+      - name: Refuse to run self-hosted on a public repo
+        if: ${{ github.event.repository.private == false }}
+        run: |
+          echo "This repository is public and CI is on a self-hosted runner." >&2
+          echo "A fork's pull request would execute its own code on that machine." >&2
+          echo "Change runs-on to ubuntu-latest -- public repos get hosted minutes free." >&2
+          exit 1
+
+      - uses: actions/checkout@v4
+        with:
+          # check:changelog compares dated headings against tags; with the
+          # default depth there are none and a dated-but-untagged version
+          # cannot be caught.
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          # Deliberately not `cache: npm`, and the reason is the runner. On the
+          # self-hosted box ~/.npm already sits on the disk between runs, so
+          # caching turns a local read into an upload and a download. Measured
+          # on run 35599905672, the first run of this workflow after the netscli
+          # sync switched the option back on: all fourteen checks green at
+          # 12:33:42Z, then the setup-node post step sat on the cache upload for
+          # twenty minutes with 0.44s of CPU and had to be cancelled. Turn it
+          # back on only if CI returns to hosted runners, where the VM is thrown
+          # away and there is no local cache to prefer.
+      - run: npm ci
+
+      # --- Static guards: no build needed ---------------------------------
+      # 300 lines per file, with named transition exceptions.
+      - name: File size guard
+        run: node scripts/check-file-size.mjs
+      # A declaration a later file always overrides is dead; budget 0.
+      - name: Dead CSS budget
+        run: npm run check:css
+      # One region file per part of the docs shell, all registered, no
+      # !important outside the named exceptions.
+      - name: CSS region guard
+        run: npm run check:regions
+      # The wordmark's transparent margin still matches the token that
+      # cancels it.
+      - name: Wordmark inset
+        run: npm run check:wordmark
+
+      # --- The build, and the checks that read dist/ ----------------------
+      - name: Build
+        run: npm run build
+      - name: Types
+        run: npm run check
+      - name: Changelog dates
+        run: npm run check:changelog
+      - name: Accessibility check
+        run: npm run test:a11y
+      - name: Rendered contrast sweep
+        run: npm run check:contrast
+
+      # There was a cleanup step here that killed a leftover `astro preview`
+      # between runs. It existed because a cancelled sweep left one holding
+      # its port on the self-hosted runner, failing the NEXT run on a port
+      # conflict rather than on anything real. A hosted runner is destroyed
+      # after the job, so nothing survives to conflict with.
