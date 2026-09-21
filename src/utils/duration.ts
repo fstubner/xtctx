@@ -39,6 +39,21 @@ export function formatDuration(ms: number | null | undefined): string | null {
  * `remaining` stays a window count. That is the number a person can see in
  * `Data`, and the estimate reading as a duration is the point of it.
  */
+/**
+ * Longest background embed the MCP server starts without being asked.
+ *
+ * Lives here, beside the estimate it is compared against, because two callers
+ * need it: the server deciding whether to drain, and `xtctx status` telling
+ * the user when it will not. A status line that stays silent about a backlog
+ * nothing is working on is how someone ends up with keyword-only search and no
+ * idea why.
+ *
+ * The constraint is not time but how much of the machine this takes while an
+ * agent is working — about 0.9 cores on a calibrated GPU, nine to eleven of
+ * twenty-four on the CPU path.
+ */
+export const BACKGROUND_EMBED_BUDGET_MS = 15 * 60 * 1000;
+
 export function estimateVectorBacklog(
   retrievalUnits: number,
   vectorizedUnits: number,

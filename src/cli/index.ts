@@ -10,7 +10,7 @@ import { createProjectServices } from "../runtime/services.js";
 import { startMcpServer } from "../mcp/server.js";
 import type { SessionService } from "../handoff/types.js";
 import { readXtctxPackage } from "../utils/package-info.js";
-import { estimateVectorBacklog } from "../utils/duration.js";
+import { BACKGROUND_EMBED_BUDGET_MS, estimateVectorBacklog } from "../utils/duration.js";
 
 const { version: CLI_VERSION } = readXtctxPackage(import.meta.url);
 
@@ -237,22 +237,6 @@ async function warmIndex(sessions: SessionService): Promise<void> {
     // Deliberately silent; see above.
   }
 }
-
-/**
- * Longest background embed worth starting without being asked.
- *
- * The server lives for the session, so the constraint is not time but how much
- * of the machine this takes while an agent is working. On a calibrated GPU
- * that is about 0.9 cores; on the CPU path it is nine to eleven of twenty-four,
- * which is intrusive enough that it should not start behind someone's back for
- * an hour.
- *
- * One threshold covers both, because the estimate is built from this machine's
- * own measured rate: fifteen minutes is most of a large history on the GPU
- * (9,232 windows at 50.7ms is about eight) and excludes the same history on
- * the CPU (at 551.9ms, about eighty-five).
- */
-const BACKGROUND_EMBED_BUDGET_MS = 15 * 60 * 1000;
 
 /**
  * Work the vector backlog down in the background, when it is cheap enough.
