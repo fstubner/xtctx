@@ -59,6 +59,14 @@ const MIN_SEMANTIC_COSINE = 0.15;
  *   0.36   mrr 0.598  recall@5 0.850  top1 0.450   <- here
  *   0.40   mrr 0.592  recall@5 0.850  top1 0.433
  *
+ * This sweep predates #318, which rebuilt the eval corpus to use realistic
+ * session lengths because the old one "has been measuring a world that does
+ * not exist". The committed baseline moved with it — MiniLM hybrid reads
+ * 0.333 / 0.533 / 0.183 today — so the SHAPE of the sweep is what survives,
+ * not the absolute figures. The threshold has not been re-swept against the
+ * current corpus; 0.36 is inherited rather than re-derived, which is worth
+ * knowing before treating it as measured.
+ *
  * The trap worth naming: held at 0.36 while the default was mpnet, that model
  * looked like it regressed false positives to 0.10. It had not — the
  * threshold simply belonged to the distribution it was cut from. A model

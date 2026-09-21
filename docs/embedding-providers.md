@@ -5,8 +5,10 @@ instead of the bundled local model. Nothing here is built yet.
 
 ## What stays true
 
-xtctx ships local-only and stays local-only by default. The bundled MiniLM
-model is what runs when nobody configures anything, and that is the behaviour
+xtctx ships local-only and stays local-only by default. The default MiniLM
+model — downloaded on first use, not bundled in the package, which ships
+`dist` only — is what runs when nobody configures anything, and that is the
+behaviour
 every existing claim describes.
 
 An endpoint is opt-in, per project, and never inferred — no environment
@@ -94,10 +96,13 @@ local:Xenova/all-MiniLM-L6-v2
 ```
 
 Changing the endpoint or the model then invalidates vectors the same way
-changing the local model already does. Dimensions do not need separate
-handling: a different dimension count only ever arrives with a different
+changing the local model already does. Dimensions then need no separate
+handling — a different dimension count only ever arrives with a different
 identity string, so the old vectors are already gone by the time the new ones
-are written.
+are written. That is a requirement on the identity string rather than
+something the schema enforces: `retrieval_unit_vectors.dimensions` is stored
+and nothing reads it back, so an identity that failed to change would mix
+widths silently.
 
 ## Thresholds
 
@@ -136,9 +141,12 @@ already stored.
 
 All of them degrade to keyword search, which is the path a failed local model
 already takes, and all of them record the reason in `embedding_error` so
-`xtctx status` and `xtctx_continuity_status` report it. None of them fail a
-tool call: an agent asking for context gets keyword results and a note saying
-semantic search is unavailable, rather than an error.
+`xtctx status` and `xtctx_continuity_status` report it. None of them fails a
+`hybrid` tool call: an agent asking for context gets keyword results and a note
+saying semantic search is unavailable, rather than an error. An explicit
+`vector` request still throws, as it does today — there is no other route for
+it to degrade to, and answering it from keyword would be answering a different
+question than the one asked.
 
 Retries are bounded and not clever — one retry on a 429 or a 5xx, then give up
 for that call and let the next call try again. Vectorizing is already
@@ -182,7 +190,9 @@ partially.
    currently runs uncapped, which is right for local compute and possibly
    expensive against a metered API.
 3. **Is a per-provider threshold sweep something xtctx can run itself?** The
-   eval harness does exactly this against a synthetic corpus. A
+   sweeps recorded in this repository were done by hand, against a temporarily
+   patched constant; the eval harness runs one fixed provider and has no way to
+   select a model or vary a threshold. A
    `xtctx calibrate` that sweeps against the project's own index would remove
    the unswept-threshold warning entirely, and is a larger piece of work than
    the provider itself.

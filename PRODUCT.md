@@ -36,7 +36,12 @@ Single-user, single-machine. There is no team, sync, or server component.
   config file that setup created may be left behind holding an empty server
   map.
 - Only the current project's sessions are ever indexed or served — content
-  from other projects on the machine never crosses the project boundary.
+  from other projects on the machine never crosses the project boundary — with
+  one exception the product states rather than hides: a committable
+  `.xtctx/config.yaml` can point a tool's `storePath` somewhere else, and that
+  redirect is reported by `xtctx status` and `xtctx_continuity_status` rather
+  than blocked. A cloned repository can carry one, which is why it is
+  surfaced.
 - The demo smoke (`npm run demo:public`) proves the loop end-to-end against
   synthetic data on every release.
 

@@ -42,7 +42,9 @@ Or run everything with:
 1. Keep changes focused and atomic.
 2. Add tests for behavior changes.
 3. Update docs when CLI or MCP behavior changes.
-4. Use conventional commits for release automation:
+4. Use conventional commits. Nothing reads the prefix — release notes come
+   from GitHub's own generator over the commit range — but a reader scanning
+   the log does:
    - `feat: ...`
    - `fix: ...`
    - `docs: ...`

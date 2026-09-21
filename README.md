@@ -93,7 +93,15 @@ Plugins standard the package above is built against, so `setup` is the only
 route there.
 
 Either route registers the same MCP server (`npx -y xtctx`) and the same
-handoff skill. Because the plugin writes no project config, `xtctx status`
+handoff skill.
+
+One thing to know about the plugin specifically: it is installed from this
+repository, so its skill text comes from `main`, while the server it launches
+is whatever `npx -y xtctx` resolves to on npm. Those are not the same commit
+whenever work has landed but not been released — which is the normal state
+here — so a plugin install can describe behaviour the server it runs does not
+have yet. `xtctx status` reports a skill copy that predates the built-in one;
+it cannot see the server's version from the other side. Because the plugin writes no project config, `xtctx status`
 reports a plugin-only project as `Config missing (run xtctx setup)`, and the
 tools answer the same way until `setup` has been run there.
 
@@ -132,7 +140,9 @@ blocks where that tool owns them, removes supported startup hooks, and marks the
 tool disabled in `.xtctx/config.yaml`. It removes generated skill adapters for
 that tool. It does not delete transcript sources, canonical project skills, or
 the local SQLite cache. Use `xtctx disconnect --all` to remove xtctx from every
-supported tool. Antigravity and Copilot CLI keep one MCP config for every
+supported tool — that one also deletes `.xtctx/skills`, since with nothing left
+managing skills the synced source is xtctx's own scaffolding. A skill you
+wrote yourself and selected at setup is kept where you wrote it. Antigravity and Copilot CLI keep one MCP config for every
 project on the machine, so a project disconnect leaves those two files alone;
 pass `--global-mcp` (as with `setup`) to remove xtctx from them as well.
 
@@ -310,4 +320,4 @@ no `release: published` trigger. It had one once, with releases drafted so
 nothing published itself, and that broke outright: GitHub's `releases/latest`
 endpoint hides drafts, the release tooling read that endpoint to find the last
 release, so it saw a pre-draft version forever and proposed a release covering
-the entire history. It cut 54 versions in an hour.
+the entire history. It cut 76 versions over four days, 49 of them in one day.

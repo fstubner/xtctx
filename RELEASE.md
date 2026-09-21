@@ -25,7 +25,8 @@ when someone runs it.
 
 To publish a version that was tagged earlier but never reached npm, dispatch
 `publish` on its own against that tag, typing `publish` to confirm. That is
-not hypothetical: this repo once sat nine versions tagged-but-unpublished.
+not hypothetical: this repo is in that state now, and has been since 0.19.0 —
+fifteen tagged versions that npm has never served.
 
 A release is **not done** until `post-publish-smoke` is green.
 
@@ -44,7 +45,8 @@ the release process outright. GitHub's `releases/latest` endpoint hides
 drafts, Release Please read it to find the last release, so it saw the last
 pre-draft version forever, proposed a release covering the entire history,
 auto-merge landed it, and the resulting draft was invisible again. That loop
-cut 54 versions in an hour before anyone noticed.
+cut 76 versions over four days, 49 of them on 2026-08-29 alone and 12 in its
+busiest hour, before anyone noticed.
 
 A per-day ceiling was tried after that and was the wrong shape: capping
 unwanted releases still leaves them unwanted. The automatic path was removed
@@ -79,7 +81,8 @@ the transcript index, which is derived data).
 
 - [ ] `post-publish-smoke` job is green on the publish run
 - [ ] `npx -y xtctx@latest --version` prints the new version
-- [ ] `npm run demo:public` passes against the released build
+- [ ] `npm run demo:public` passes against this checkout (it imports the local
+      `dist/`, not the published package)
 - [ ] Landing site footer shows the new version (synced by the `version`
       script; see `landing/src/data/site.ts` and `scripts/sync-version.mjs`)
 

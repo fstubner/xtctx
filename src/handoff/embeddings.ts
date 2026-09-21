@@ -7,6 +7,14 @@
  *   MiniLM fp32   mrr 0.598  recall@5 0.850  top1 0.450   at 0.36
  *   mpnet q8      mrr 0.654  recall@5 0.933  top1 0.483   at 0.40
  *
+ * Those figures predate #318, which rebuilt the eval corpus to use realistic
+ * session lengths on the grounds that it "has been measuring a world that does
+ * not exist". The committed baseline moved with it: MiniLM hybrid reads
+ * 0.333 / 0.533 / 0.183 today, not 0.598 / 0.850 / 0.450. The COMPARISON above
+ * was measured on one corpus and stands; the absolute numbers no longer match
+ * anything reproducible, so do not quote them or compare a new model against
+ * them. `tests/eval/results/ranking-baseline.json` is the current truth.
+ *
  * It was the default for a day on the strength of that table, which measured
  * only half the question. What the table left out is what embedding actually
  * costs, and the figure used at the time — 18ms per embed — came from

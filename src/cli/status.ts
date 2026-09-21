@@ -172,9 +172,15 @@ export async function renderStatusBlock(
   lines.push("Skills:");
   lines.push(`  Source ${skills.sourceDir}`);
   for (const skill of skills.selected) {
-    const marker = skill.exists ? "ok" : "missing";
+    const marker = skill.exists ? (skill.staleBuiltIn ? "stale" : "ok") : "missing";
     const hash = skill.hash ? ` ${skill.hash.slice(0, 18)}` : "";
     lines.push(`  ${marker.padEnd(8)} ${skill.id}${hash}`);
+    if (skill.staleBuiltIn) {
+      lines.push(
+        "           this project's copy predates the built-in skill shipped with " +
+          "this version; run `xtctx setup --yes` to refresh it",
+      );
+    }
   }
   for (const target of skills.targets) {
     const skillPart = target.skillId ? ` ${target.skillId}` : "";

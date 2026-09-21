@@ -43,7 +43,27 @@ interface SkillSyncResult {
 
 interface SkillStatus {
   sourceDir: string;
-  selected: Array<{ id: string; exists: boolean; hash?: string }>;
+  selected: Array<{
+    id: string;
+    exists: boolean;
+    hash?: string;
+    /**
+     * The built-in skill's canonical copy no longer matches the one this
+     * version ships.
+     *
+     * Only ever set for `xtctx-handoff`. Setup copies the built-in text into
+     * `.xtctx/skills/` once, and everything afterwards compares the synced
+     * targets against THAT copy — so a project set up before the text changed
+     * keeps the old wording, every target agrees with it, and status reports
+     * `ok`. That is how a skill telling agents "no xtctx setup is required"
+     * survived in projects after the claim was corrected, while the server
+     * refuses every tool in an unconfigured project.
+     *
+     * The skill is instructions to an agent, so a stale copy is not cosmetic:
+     * it is an instruction to keep calling tools that will not answer.
+     */
+    staleBuiltIn?: boolean;
+  }>;
   targets: Array<{
     tool: ToolId;
     mode: SkillSyncMode;
@@ -190,10 +210,15 @@ export async function inspectSkillStatus(projectRoot: string, configPath: string
     selectedIds.map(async (id) => {
       const path = join(sourceDir, id, "SKILL.md");
       const content = await readUtf8IfExists(path);
+      const staleBuiltIn =
+        id === BUILT_IN_SKILL_ID &&
+        content !== null &&
+        hashContent(content) !== hashContent(builtInHandoffSkill());
       return {
         id,
         exists: content !== null,
         hash: content ? hashContent(content) : undefined,
+        ...(staleBuiltIn ? { staleBuiltIn: true } : {}),
       };
     }),
   );
