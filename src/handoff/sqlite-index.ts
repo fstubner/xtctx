@@ -495,6 +495,20 @@ export class SqliteHandoffIndex implements SessionService {
     // and let the next search use the model. An explicit `vector` request is a
     // different matter: there is no other route, so that one waits.
     if (normalizedMode === "hybrid" && this.embeddingProvider.isReady?.() === false) {
+      // A load that FAILED is not a load still running, and this branch used
+      // to treat them the same. `warm()` swallows its error and `isReady()`
+      // stays false afterwards, so a model that could not be fetched at all
+      // returned keyword results with "still loading, ask again shortly" on
+      // every call for the life of the project — advice that could never come
+      // true — while `last_error:embeddings` stayed empty because the only
+      // code that writes it is the catch below, which this return skips.
+      const loadError = this.embeddingProvider.loadError?.();
+      if (loadError !== undefined) {
+        setSetting(this.getDb(), "last_error:embeddings", loadError);
+      }
+      // Retried regardless: the reason is usually a cold cache behind a flaky
+      // network, which succeeds on a later attempt, and the setting is cleared
+      // when it does.
       this.embeddingProvider.warm?.();
       return this.keywordSearch(trimmed, limit, toolFilter, branchFilter);
     }

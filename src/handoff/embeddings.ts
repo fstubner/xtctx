@@ -145,6 +145,22 @@ export interface EmbeddingProvider {
   isReady?(): boolean;
   /** Begin loading the model without waiting for it. */
   warm?(): void;
+  /**
+   * Why the last load attempt failed, or undefined if none has.
+   *
+   * `isReady()` answers "can I embed right now", and a model that is still
+   * downloading and a model that cannot download both answer false. Callers
+   * that only ask `isReady()` therefore tell the user to wait, forever, for
+   * something that is never going to finish — which is exactly what happened:
+   * `warm()` is best-effort and swallows its error, so a failed load left
+   * hybrid search answering from keyword and reporting "embedding model still
+   * loading, ask again shortly" on every call, indefinitely, with nothing in
+   * `xtctx status` to say otherwise.
+   *
+   * Cleared on a successful load, because the failure is worth retrying: a
+   * cold cache behind a flaky network fails once and succeeds next time.
+   */
+  loadError?(): string | undefined;
 }
 
 type FeatureExtractionOutput = {
@@ -180,6 +196,7 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
   readonly model: string;
   private extractor: FeatureExtractionPipeline | null = null;
   private loading: Promise<FeatureExtractionPipeline> | null = null;
+  private lastLoadError: string | undefined;
 
   constructor(
     model = DEFAULT_EMBEDDING_MODEL,
@@ -222,9 +239,15 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
     return this.extractor !== null;
   }
 
+  loadError(): string | undefined {
+    return this.lastLoadError;
+  }
+
   warm(): void {
     void this.getExtractor().catch(() => {
-      // Warming is best-effort; the next real embed call reports the failure.
+      // Still best-effort — nothing is thrown at the caller — but the reason
+      // is kept now. Swallowing it entirely made a permanent load failure
+      // indistinguishable from a slow first download, forever.
     });
   }
 
@@ -237,9 +260,21 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
       return this.loading;
     }
 
-    this.loading = this.loadExtractor().finally(() => {
-      this.loading = null;
-    });
+    this.loading = this.loadExtractor()
+      .then((extractor) => {
+        this.lastLoadError = undefined;
+        return extractor;
+      })
+      .catch((error: unknown) => {
+        this.lastLoadError = error instanceof Error ? error.message : String(error);
+        throw error;
+      })
+      .finally(() => {
+        // Cleared so the next call retries. A cold cache behind a flaky
+        // network fails once and succeeds next time, and refusing to try
+        // again would turn a transient fault into a permanent one.
+        this.loading = null;
+      });
     return this.loading;
   }
 
