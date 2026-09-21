@@ -50,6 +50,11 @@ describe("startMcpServer shutdown wiring", () => {
     });
 
     try {
+      // Before the emit, so "ran at startup" and "ran on stdin end" are
+      // distinguishable. Without it, calling `onClose()` directly in the
+      // wiring — which tears the server down at boot — reads as 1 either way.
+      expect(closes).toBe(0);
+
       process.stdin.emit("end");
 
       expect(closes).toBe(1);

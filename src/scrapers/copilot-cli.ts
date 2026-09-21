@@ -178,7 +178,14 @@ export class CopilotCliScraper extends AbstractScraper<CopilotCliChunk> {
     const resumed = startAt > 0 ? cursor?.context : undefined;
 
     let messageIndex = resumed?.messageIndex ?? 0;
-    let lineNo = 0;
+    // A byte offset, not a line number.
+    //
+    // A resumed read starts at `startAt` bytes, so a counter starting at zero
+    // counts lines since the RESUME POINT: a record appended as line 101
+    // reported as `path:1`, and a drift location is the only pointer anyone
+    // has when chasing a format break. The offset is what the reader already
+    // tracks and means the same thing on every pass.
+    let byteAt = startAt;
     // null = no session.start context seen yet; only consulted when scoped.
     // Carried across a resume: it is set by the `session.start` record at the
     // head of the file, which a resumed read never sees again.
@@ -188,8 +195,8 @@ export class CopilotCliScraper extends AbstractScraper<CopilotCliChunk> {
     let readTo = startAt;
 
     for await (const entry of readJsonlLines(filePath, { start: startAt })) {
+      byteAt = entry.endOffset;
       readTo = entry.endOffset;
-      lineNo++;
       const line = entry.line;
       if (line === null) {
         warnDrift(filePath, `line exceeds the cap; skipped`);
@@ -205,7 +212,7 @@ export class CopilotCliScraper extends AbstractScraper<CopilotCliChunk> {
         event = JSON.parse(line) as Record<string, unknown>;
       } catch (err) {
         warnDrift(
-          `${filePath}:${lineNo}`,
+          `${filePath}@${byteAt}`,
           `events.jsonl line is not valid JSON: ${(err as Error).message}`,
         );
         continue;
@@ -213,7 +220,7 @@ export class CopilotCliScraper extends AbstractScraper<CopilotCliChunk> {
 
       if (!isRecord(event)) {
         warnDrift(
-          `${filePath}:${lineNo}`,
+          `${filePath}@${byteAt}`,
           `events.jsonl line is not an object (got ${describeType(event)})`,
         );
         continue;
@@ -263,7 +270,7 @@ export class CopilotCliScraper extends AbstractScraper<CopilotCliChunk> {
             (isRecord(event.message) && "role" in event.message);
           if (looksLikeMessage) {
             warnDrift(
-              `${filePath}:${lineNo}`,
+              `${filePath}@${byteAt}`,
               "event has content but no readable role — likely role-field rename",
             );
           }
@@ -280,7 +287,7 @@ export class CopilotCliScraper extends AbstractScraper<CopilotCliChunk> {
         // key on a role'd event is unusual but not necessarily drift.
         if ("content" in event && typeof event.content !== "string" && !Array.isArray(event.content)) {
           warnDrift(
-            `${filePath}:${lineNo}`,
+            `${filePath}@${byteAt}`,
             `event has role but 'content' is unexpected type ${describeType(event.content)}`,
           );
         } else if (
@@ -294,7 +301,7 @@ export class CopilotCliScraper extends AbstractScraper<CopilotCliChunk> {
           !Array.isArray(event.data.content)
         ) {
           warnDrift(
-            `${filePath}:${lineNo}`,
+            `${filePath}@${byteAt}`,
             `event has role but 'data.content' is unexpected type ${describeType(event.data.content)}`,
           );
         } else if (
@@ -311,7 +318,7 @@ export class CopilotCliScraper extends AbstractScraper<CopilotCliChunk> {
           // no text, which is ordinary. Warning on "no readable content" alone
           // reported all of them as drift on the first live scan.
           warnDrift(
-            `${filePath}:${lineNo}`,
+            `${filePath}@${byteAt}`,
             `${event.type} has no 'data' payload — the field may have been renamed`,
           );
         }
