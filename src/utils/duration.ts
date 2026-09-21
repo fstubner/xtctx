@@ -44,21 +44,23 @@ export function estimateVectorBacklog(
   vectorizedUnits: number,
   msPerUnit: number | null | undefined,
   segments?: { backlog: number; msPerSegment: number | null | undefined },
-): { remaining: number; eta: string | null } {
+): { remaining: number; eta: string | null; etaMs: number | null } {
   const remaining = Math.max(0, retrievalUnits - vectorizedUnits);
   if (remaining === 0) {
-    return { remaining, eta: null };
+    return { remaining, eta: null, etaMs: null };
   }
 
   const msPerSegment = segments?.msPerSegment;
   if (segments && msPerSegment !== null && msPerSegment !== undefined && msPerSegment > 0) {
-    return { remaining, eta: formatDuration(segments.backlog * msPerSegment) };
+    const etaMs = segments.backlog * msPerSegment;
+    return { remaining, eta: formatDuration(etaMs), etaMs };
   }
 
   // No segment rate yet — nothing has embedded since this was added, or the
   // index predates it. The window rate is a worse estimate, not no estimate.
   if (msPerUnit === null || msPerUnit === undefined || !(msPerUnit > 0)) {
-    return { remaining, eta: null };
+    return { remaining, eta: null, etaMs: null };
   }
-  return { remaining, eta: formatDuration(remaining * msPerUnit) };
+  const etaMs = remaining * msPerUnit;
+  return { remaining, eta: formatDuration(etaMs), etaMs };
 }

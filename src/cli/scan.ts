@@ -8,9 +8,10 @@ interface ScanOptions {
   /**
    * Also embed every window the scan leaves without a vector.
    *
-   * Off by default, and the default is the important half: the session-start
-   * hook launches this command detached, so draining here unconditionally
-   * would start hours of embedding every time an agent opens a large project.
+   * Off by default. The MCP server now drains the backlog in the background
+   * at session start when this machine's measured rate says it can finish
+   * inside a budget, so this flag is the "do it all now, however long it
+   * takes" escape hatch rather than the only way it ever happens.
    */
   embed?: boolean;
   /**
@@ -72,9 +73,8 @@ async function calibrateIfNeeded(): Promise<void> {
  * The MCP server scans on demand and answers within a budget, and the
  * session-start hook reads without scanning at all. Between them, a project
  * that has not been asked anything yet has an empty index — so the first
- * session after another tool's work starts cold. This is the piece that
- * fills that gap: the hook launches it detached, and it runs to completion
- * with nobody waiting on it.
+ * session after another tool's work starts cold. This runs to completion
+ * instead of to a budget, which is what fills that gap.
  *
  * Also usable by hand, which is why it is a public command and not an
  * internal flag: "warm the index" is a reasonable thing to want to do.

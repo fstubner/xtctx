@@ -21,19 +21,19 @@ describe("formatDuration", () => {
 
 describe("estimateVectorBacklog", () => {
   it("turns a backlog into a duration", () => {
-    expect(estimateVectorBacklog(1770, 8, 18)).toEqual({ remaining: 1762, eta: "31.7s" });
+    expect(estimateVectorBacklog(1770, 8, 18)).toEqual({ remaining: 1762, eta: "31.7s", etaMs: 31716 });
   });
 
   it("gives no estimate when nothing has been measured", () => {
     // An estimate invented from no measurement is worse than no estimate: the
     // first scan on a fresh index has no rate yet, and guessing one would put
     // a number in front of a user that nothing supports.
-    expect(estimateVectorBacklog(1770, 8, null)).toEqual({ remaining: 1762, eta: null });
-    expect(estimateVectorBacklog(1770, 8, 0)).toEqual({ remaining: 1762, eta: null });
+    expect(estimateVectorBacklog(1770, 8, null)).toEqual({ remaining: 1762, eta: null, etaMs: null });
+    expect(estimateVectorBacklog(1770, 8, 0)).toEqual({ remaining: 1762, eta: null, etaMs: null });
   });
 
   it("reports nothing outstanding once the corpus is covered", () => {
-    expect(estimateVectorBacklog(1770, 1770, 18)).toEqual({ remaining: 0, eta: null });
+    expect(estimateVectorBacklog(1770, 1770, 18)).toEqual({ remaining: 0, eta: null, etaMs: null });
     // More vectors than windows is possible mid-rebuild; it is not a negative
     // backlog.
     expect(estimateVectorBacklog(10, 12, 18).remaining).toBe(0);
@@ -54,7 +54,7 @@ describe("estimateVectorBacklog", () => {
     const backlog = estimateVectorBacklog(1000, 900, 10, { backlog: 800, msPerSegment: 5 });
 
     // 800 segments x 5ms, not 100 windows x 10ms.
-    expect(backlog).toEqual({ remaining: 100, eta: "4.0s" });
+    expect(backlog).toEqual({ remaining: 100, eta: "4.0s", etaMs: 4000 });
   });
 
   it("falls back to the window rate when no segment rate has been measured", () => {
@@ -63,6 +63,7 @@ describe("estimateVectorBacklog", () => {
     expect(estimateVectorBacklog(1000, 900, 10, { backlog: 800, msPerSegment: null })).toEqual({
       remaining: 100,
       eta: "1.0s",
+      etaMs: 1000,
     });
   });
 
@@ -70,6 +71,7 @@ describe("estimateVectorBacklog", () => {
     expect(estimateVectorBacklog(1000, 900, null, { backlog: 800, msPerSegment: null })).toEqual({
       remaining: 100,
       eta: null,
+      etaMs: null,
     });
   });
 });

@@ -1008,10 +1008,12 @@ export class SqliteHandoffIndex implements SessionService {
    * and every search pays the six seconds anyway.
    *
    * There is no daemon, so nothing works the backlog down between commands.
-   * This is the piece that does, and it is deliberately not what a scan does
-   * by default: the session-start hook launches `scan` detached, and draining
-   * there would start hours of embedding every time an agent opens a large
-   * project.
+   * Two things call this: `xtctx scan --embed`, which runs it to completion
+   * however long that takes, and the MCP server at session start, which runs
+   * it only when this machine's measured rate says the remainder fits in a
+   * budget. The bound is the whole point of the second caller — unconditional
+   * background embedding is what would make a large project on a CPU
+   * unusable.
    */
   async embedBacklog(onProgress?: (embedded: number, total: number) => void): Promise<number> {
     await this.whenScanSettled();

@@ -10,6 +10,7 @@ import { createProjectServices } from "../runtime/services.js";
 import { startMcpServer } from "../mcp/server.js";
 import type { SessionService } from "../handoff/types.js";
 import { readXtctxPackage } from "../utils/package-info.js";
+import { estimateVectorBacklog } from "../utils/duration.js";
 
 const { version: CLI_VERSION } = readXtctxPackage(import.meta.url);
 
@@ -230,9 +231,73 @@ export async function main(argv = process.argv): Promise<void> {
 async function warmIndex(sessions: SessionService): Promise<void> {
   try {
     await sessions.listRecentSessions(1);
+    await sessions.whenScanSettled?.();
+    await drainVectorsIfAffordable(sessions);
   } catch {
     // Deliberately silent; see above.
   }
+}
+
+/**
+ * Longest background embed worth starting without being asked.
+ *
+ * The server lives for the session, so the constraint is not time but how much
+ * of the machine this takes while an agent is working. On a calibrated GPU
+ * that is about 0.9 cores; on the CPU path it is nine to eleven of twenty-four,
+ * which is intrusive enough that it should not start behind someone's back for
+ * an hour.
+ *
+ * One threshold covers both, because the estimate is built from this machine's
+ * own measured rate: fifteen minutes is most of a large history on the GPU
+ * (9,232 windows at 50.7ms is about eight) and excludes the same history on
+ * the CPU (at 551.9ms, about eighty-five).
+ */
+const BACKGROUND_EMBED_BUDGET_MS = 15 * 60 * 1000;
+
+/**
+ * Work the vector backlog down in the background, when it is cheap enough.
+ *
+ * Until this existed, nothing ever finished embedding a real history. Searches
+ * vectorize about sixteen windows per call, which by this project's own
+ * measurement leaves a 9,232-window project needing on the order of 570
+ * searches — so semantic search was keyword-only in practice while still
+ * paying six seconds a call for the privilege. The only way out was knowing to
+ * run `xtctx scan --embed` by hand, which is not something a user should have
+ * to know.
+ *
+ * Three comments in this repository claimed the session-start hook launched a
+ * detached scan that did this. No such code has ever existed: the hook does a
+ * deliberate no-scan read, and nothing in `src` spawned a process except the
+ * Antigravity client.
+ *
+ * Bounded rather than unconditional, because "embed everything in the
+ * background" is exactly what would make a large project on a CPU unusable.
+ * What changed is that device calibration made the affordable case the common
+ * one.
+ */
+async function drainVectorsIfAffordable(sessions: SessionService): Promise<void> {
+  if (!sessions.embedBacklog) {
+    return;
+  }
+
+  const status = await sessions.getStatus();
+  const { remaining, etaMs } = estimateVectorBacklog(
+    status.retrieval_units,
+    status.vectorized_units,
+    status.vector_ms_per_unit,
+    { backlog: status.vector_segment_backlog, msPerSegment: status.vector_ms_per_segment },
+  );
+  if (remaining === 0) {
+    return;
+  }
+  // No estimate means nothing has embedded yet on this machine, so there is no
+  // measured rate to judge affordability by. Searches still vectorize
+  // incrementally, which is what produces the rate this needs.
+  if (etaMs === null || etaMs > BACKGROUND_EMBED_BUDGET_MS) {
+    return;
+  }
+
+  await sessions.embedBacklog();
 }
 
 function shouldStartMcp(argv: string[]): boolean {
