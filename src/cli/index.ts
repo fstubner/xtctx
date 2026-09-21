@@ -250,9 +250,14 @@ async function warmIndex(sessions: SessionService): Promise<void> {
  * to know.
  *
  * Three comments in this repository claimed the session-start hook launched a
- * detached scan that did this. No such code has ever existed: the hook does a
- * deliberate no-scan read, and nothing in `src` spawned a process except the
- * Antigravity client.
+ * detached scan that did this, and the hook has not done so since #323 on
+ * 2026-09-02, which moved the warm-up here — to the server — on the same day
+ * #322 added it. The comments outlived the code they described by nineteen
+ * days.
+ *
+ * (An earlier version of this comment said no such code had ever existed.
+ * That was wrong: `launchDetachedScan` was real, in `src/cli/hook.ts`, for a
+ * few hours. What it was right about is that nothing launches one now.)
  *
  * Bounded rather than unconditional, because "embed everything in the
  * background" is exactly what would make a large project on a CPU unusable.

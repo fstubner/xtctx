@@ -229,7 +229,11 @@ startup hooks; others receive MCP config plus managed instructions only.
 
 ## Limits
 
-- xtctx is local-only. It does not upload transcripts or run telemetry.
+- xtctx is local-only by default: it never uploads transcripts and runs no
+  telemetry. A project can opt into an external embedding endpoint by writing
+  one into `.xtctx/config.yaml`, in which case window text is sent there to be
+  vectorized — never inferred from an environment variable, and `xtctx status`
+  names the endpoint in full whenever one is configured.
 - Transcript formats belong to each upstream tool and can drift. The drift
   tests and format fingerprints exist to catch parser breakage, but `xtctx status`
   is still the source of truth for your machine.

@@ -137,6 +137,16 @@ export async function renderStatusBlock(
   if (status.vector_device && status.vector_device !== "cpu") {
     lines.push(`Device   ${status.vector_device} (from \`xtctx calibrate\`)`);
   }
+  // An endpoint is the one thing that sends transcript text off this machine,
+  // so it is stated in full and unconditionally whenever one is configured.
+  // "Am I uploading my transcripts, and where to" must never require opening a
+  // config file to answer. The identity already carries the endpoint because
+  // `retrieval_unit_vectors` is keyed on it; the URL is what matters here, and
+  // the API key is never part of it.
+  if (status.vector_model.startsWith("openai:")) {
+    const endpoint = status.vector_model.slice("openai:".length);
+    lines.push(`Embedding  external endpoint — window text is sent to ${endpoint}`);
+  }
   lines.push("");
   lines.push("Tools:");
 

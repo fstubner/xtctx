@@ -72,7 +72,9 @@ twice: into FTS5 for keyword search, and as one embedding vector.
 comes from bm25 ordering but is rescored as a linear decay, because bm25
 favours short documents and a one-line mention was outranking the paragraph
 that decided something. Semantic matches are gated twice: a per-window floor
-(0.15) and a per-query confidence floor (0.36). When nothing clears the second
+(0.62) and a per-query confidence floor (0.64). Those numbers belong to the
+model — they are swept per model, not carried between them, and MiniLM's were
+0.15 and 0.36. When nothing clears the second
 one, semantic results are dropped wholesale and only keyword hits remain —
 whether a query found anything is a property of the query, not of each window,
 and no answer beats a confident wrong one.
