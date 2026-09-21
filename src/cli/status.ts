@@ -202,6 +202,18 @@ export async function renderStatusBlock(
     }
   }
 
+  // Everything below reports on wiring that setup creates, so in a project
+  // that has not been set up every line of it reads `missing` — about thirty
+  // of them, each carrying an absolute path, between the reader and the one
+  // sentence that matters. A first-time user running `status` to see what
+  // this thing does met a wall of faults describing the absence of a thing
+  // they had not asked for yet.
+  if (!configPresent) {
+    lines.push("");
+    lines.push("Next     This project is not set up yet. Run: xtctx setup");
+    return lines.join("\n");
+  }
+
   lines.push("");
   lines.push("Skills:");
   lines.push(`  Source ${skills.sourceDir}`);
@@ -283,9 +295,7 @@ export async function renderStatusBlock(
     skills.targets.some((target) => target.state === "missing" || target.state === "drift"));
 
   lines.push("");
-  if (!configPresent) {
-    lines.push("Next     This project is not set up yet. Run: xtctx setup");
-  } else if (services.config.error) {
+  if (services.config.error) {
     // Checked before everything below it, because nothing below it can be
     // true while this holds. Nothing is scanned at all with an unreadable
     // config, so "ask an agent to call xtctx_recent_sessions" is advice that

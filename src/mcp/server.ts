@@ -41,6 +41,18 @@ interface McpToolDependencies {
    * setup to the person.
    */
   unconfiguredProjectRoot?: string;
+  /**
+   * Why `.xtctx/config.yaml` could not be read, if it could not.
+   *
+   * Separate from `unconfiguredProjectRoot`, because the two mean opposite
+   * things to a user: nobody opted this directory in, against somebody did and
+   * the file is broken. Both used to reach an agent as the same thing — an
+   * ordinary empty answer — because a config that will not parse yields zero
+   * scrapers, so every tool returned "No matching sessions found." and the
+   * agent told the user there was no cross-tool history. The CLI says
+   * `UNREADABLE`, but agents never read the CLI.
+   */
+  configError?: { projectRoot: string; configPath: string; message: string };
 }
 
 /** @internal Exported for tests only. */
@@ -205,6 +217,14 @@ export function createToolHandlers(
     return handlers;
   }
 
+  if (dependencies.configError) {
+    const notice = configUnreadable(dependencies.configError);
+    for (const name of TOOL_NAMES) {
+      handlers.set(name, notice);
+    }
+    return handlers;
+  }
+
   if (dependencies.sessions) {
     handlers.set("xtctx_recent_sessions", createRecentSessionsHandler(dependencies.sessions));
     handlers.set("xtctx_session_detail", createSessionDetailHandler(dependencies.sessions));
@@ -323,6 +343,34 @@ function notConfigured(projectRoot: string): ToolHandler {
       "",
       "Offer that to the user rather than running it unprompted — setup writes",
       "configuration into the repository and into one machine-global file.",
+    ].join("\n");
+}
+
+/**
+ * Every tool answers with the broken file, rather than with nothing found.
+ *
+ * Returned, not thrown, for the same reason `notConfigured` is: this is a
+ * state the user can fix, and an agent that receives it can say so. Throwing
+ * would make it a tool malfunction, which is a different and less useful
+ * message to pass on.
+ */
+function configUnreadable(details: {
+  projectRoot: string;
+  configPath: string;
+  message: string;
+}): ToolHandler {
+  return async () =>
+    [
+      `xtctx cannot read this project's configuration: ${inlineSafe(details.configPath)}`,
+      "",
+      `    ${inlineSafe(details.message)}`,
+      "",
+      "No transcript stores are being read until that file parses, so this is",
+      "not an empty history — it is an unread one. Nothing has been changed.",
+      "",
+      "Tell the user to fix or delete that file. `npx -y xtctx status` prints",
+      "the same error. Do not edit it unprompted: it records which transcript",
+      "stores they allowed to be read.",
     ].join("\n");
 }
 

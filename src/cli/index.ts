@@ -65,8 +65,19 @@ export async function main(argv = process.argv): Promise<void> {
     // A tool call still in flight when stdin closes may go unanswered — the
     // grace window above is enough for ordinary calls, not for one waiting on
     // a scan. The client has closed its side by then, so nothing is listening.
+    // A config that exists but will not parse is not an empty project, and
+    // used to reach an agent as one: zero scrapers, "No matching sessions
+    // found.", and the agent telling the user there is no cross-tool history
+    // here. The CLI has said `UNREADABLE` for a while; agents never read it.
+    const configError = services.config.error
+      ? {
+          projectRoot: services.projectRoot,
+          configPath: services.configPath,
+          message: services.config.error,
+        }
+      : undefined;
     await startMcpServer(
-      { sessions: services.sessions, unconfiguredProjectRoot },
+      { sessions: services.sessions, unconfiguredProjectRoot, configError },
       () => shutdown(true),
     );
 
