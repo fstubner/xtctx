@@ -17,6 +17,10 @@ import {
 import { errorMessage, sanitizeErrorMessage } from "../utils/errors.js";
 import { readXtctxPackage } from "../utils/package-info.js";
 import { inlineSafe } from "../utils/untrusted-text.js";
+import { SUPPORTED_TOOLS } from "../tools/sources.js";
+
+/** The tool ids `tool_filter` accepts, straight from the tool registry. */
+const TOOL_IDS = SUPPORTED_TOOLS.map((tool) => tool.id);
 
 const { version: SERVER_VERSION } = readXtctxPackage(import.meta.url);
 
@@ -52,8 +56,12 @@ export function buildToolDefinitions(): Tool[] {
           limit: { type: "number", description: "Max sessions. Default: 5" },
           tool_filter: {
             type: "array",
-            items: { type: "string" },
-            description: "Optional tool ids to include",
+            // Enumerated, because the ids are not guessable: `claude-code` and
+            // `antigravity`, against the natural guesses `claude` and `gemini`.
+            // An id that matches nothing used to return "No matching sessions
+            // found.", which an agent reports as an empty history.
+            items: { type: "string", enum: TOOL_IDS },
+            description: `Optional tool ids to include. One or more of: ${TOOL_IDS.join(", ")}`,
           },
           branch_filter: {
             type: "array",
@@ -98,8 +106,12 @@ export function buildToolDefinitions(): Tool[] {
           limit: { type: "number", description: "Max sessions. Default: 5" },
           tool_filter: {
             type: "array",
-            items: { type: "string" },
-            description: "Optional tool ids to include",
+            // Enumerated, because the ids are not guessable: `claude-code` and
+            // `antigravity`, against the natural guesses `claude` and `gemini`.
+            // An id that matches nothing used to return "No matching sessions
+            // found.", which an agent reports as an empty history.
+            items: { type: "string", enum: TOOL_IDS },
+            description: `Optional tool ids to include. One or more of: ${TOOL_IDS.join(", ")}`,
           },
           branch_filter: {
             type: "array",
@@ -150,8 +162,12 @@ export function buildToolDefinitions(): Tool[] {
           },
           tool_filter: {
             type: "array",
-            items: { type: "string" },
-            description: "Optional tool ids to include",
+            // Enumerated, because the ids are not guessable: `claude-code` and
+            // `antigravity`, against the natural guesses `claude` and `gemini`.
+            // An id that matches nothing used to return "No matching sessions
+            // found.", which an agent reports as an empty history.
+            items: { type: "string", enum: TOOL_IDS },
+            description: `Optional tool ids to include. One or more of: ${TOOL_IDS.join(", ")}`,
           },
           branch_filter: {
             type: "array",

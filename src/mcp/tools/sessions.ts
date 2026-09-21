@@ -1,5 +1,6 @@
 import type { SessionSearchMode, SessionService } from "../../handoff/types.js";
 import { inlineSafe } from "../../utils/untrusted-text.js";
+import { SUPPORTED_TOOLS } from "../../tools/sources.js";
 
 interface RecentSessionsParams {
   limit?: number;
@@ -58,6 +59,27 @@ export function validatedFilter(value: unknown, field: string): string[] | undef
 
   if (value.some((item) => typeof item !== "string" || item.trim().length === 0)) {
     throw new ToolInputError(`${field} must contain only non-empty strings`);
+  }
+
+  // An id that names no tool is rejected, not filtered on.
+  //
+  // The filter reaches SQLite as `WHERE tool IN (...)`, so an unrecognised id
+  // matches nothing and the answer is "No matching sessions found." — which an
+  // agent reports to the user as "you have no Claude Code history here". The
+  // ids are not guessable from the schema either: they are `claude-code` and
+  // `antigravity`, while the obvious guesses are `claude` and `gemini`.
+  //
+  // Naming the valid ids in the error is the point. An agent that gets this
+  // back can fix its own call; one that gets an empty result cannot tell a
+  // wrong id from an empty index.
+  const known = new Set<string>(SUPPORTED_TOOLS.map((tool) => tool.id));
+  const unknown = (value as string[]).filter((item) => !known.has(item.trim()));
+  if (unknown.length > 0) {
+    throw new ToolInputError(
+      `${field} contains unknown tool id${unknown.length === 1 ? "" : "s"} ` +
+        `${unknown.map((item) => JSON.stringify(item)).join(", ")}. ` +
+        `Valid ids: ${SUPPORTED_TOOLS.map((tool) => tool.id).join(", ")}`,
+    );
   }
 
   return value as string[];
