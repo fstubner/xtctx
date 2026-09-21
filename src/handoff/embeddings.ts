@@ -91,6 +91,7 @@
  * recorded on `DEFAULT_WINDOW_SIZE`, where the decision belongs.
  */
 export const DEFAULT_EMBEDDING_MODEL = "Xenova/all-MiniLM-L6-v2";
+
 /**
  * Weight precision to load the model at.
  *
@@ -136,6 +137,20 @@ type PipelineFactory = (
 ) => Promise<FeatureExtractionPipeline>;
 
 export class TransformersEmbeddingProvider implements EmbeddingProvider {
+  /**
+   * The bare HuggingFace id, which is also the vector identity.
+   *
+   * `docs/embedding-providers.md` specifies a composite identity and gives
+   * `local:Xenova/all-MiniLM-L6-v2` as the local form. Only the remote half of
+   * that is implemented, deliberately. The composite exists because two
+   * endpoints can both serve `text-embedding-3-small` in different vector
+   * spaces, and every remote identity is already `openai:…`-prefixed, so it can
+   * never collide with a HuggingFace id. Prefixing the local one collides with
+   * nothing either way — while renaming it makes
+   * `dropVectorsFromOtherModels` discard every vector every existing project
+   * has, on first open after the upgrade, for no gain. That is tens of minutes
+   * of keyword-only search for anyone who upgrades.
+   */
   readonly model: string;
   private extractor: FeatureExtractionPipeline | null = null;
   private loading: Promise<FeatureExtractionPipeline> | null = null;

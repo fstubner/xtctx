@@ -1,12 +1,19 @@
 import { readFile, realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
+import {
+  createEmbeddingProvider,
+  defaultEmbeddingConfig,
+  parseEmbeddingConfig,
+} from "../handoff/embedding-config.js";
 import { SqliteHandoffIndex } from "../handoff/sqlite-index.js";
 import type { SessionService } from "../handoff/types.js";
 import { SUPPORTED_TOOLS, createDefaultScrapers } from "../tools/sources.js";
+import type { EmbeddingConfig } from "../types/config.js";
 
 interface ProjectConfig {
   tools: Record<string, { enabled?: boolean; storePath?: string }>;
+  embedding: EmbeddingConfig;
   /**
    * Whether `.xtctx/config.yaml` exists — whether anyone opted this directory
    * in.
@@ -113,6 +120,12 @@ export async function createProjectServices(
       // against an in-memory database and report zeros, which is the truth.
       createIfMissing: options.createIfMissing ?? config.present,
       redirectedTools: redirectedTools(config),
+      // Provider comes from config, not from whatever happens to be in the
+      // environment — an OPENAI_API_KEY sitting around must not opt a project
+      // into uploading transcript text.
+      embeddingProvider: config.error ? undefined : createEmbeddingProvider(config.embedding),
+      minSemanticCosine: config.embedding.minSemanticCosine,
+      minConfidentCosine: config.embedding.minConfidentCosine,
     },
   );
 
@@ -145,10 +158,11 @@ async function loadProjectConfig(configPath: string, projectRoot: string): Promi
     // degraded read becoming the base for a write, again.
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "ENOENT") {
-      return { tools: {}, present: false };
+      return { tools: {}, embedding: defaultEmbeddingConfig(), present: false };
     }
     return {
       tools: {},
+      embedding: defaultEmbeddingConfig(),
       present: true,
       error: `could not be read (${code ?? "unknown error"}): ${err instanceof Error ? err.message : String(err)}`,
     };
@@ -158,9 +172,15 @@ async function loadProjectConfig(configPath: string, projectRoot: string): Promi
     const parsed = parseYaml(raw);
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       const root = parsed as Record<string, unknown>;
-      return { tools: normalizeTools(root.tools, projectRoot), present: true };
+      const embedding = parseEmbeddingConfig(root.embedding);
+      return { tools: normalizeTools(root.tools, projectRoot), embedding, present: true };
     }
-    return { tools: {}, present: true, error: "expected a mapping at the top level" };
+    return {
+      tools: {},
+      embedding: defaultEmbeddingConfig(),
+      present: true,
+      error: "expected a mapping at the top level",
+    };
   } catch (err) {
     // A config that exists but will not parse is not the same as no config.
     // `enabled: false` is the only control a user has over which transcript
@@ -170,7 +190,12 @@ async function loadProjectConfig(configPath: string, projectRoot: string): Promi
     // Reported rather than thrown: `status` has to keep working, since
     // explaining a broken config is exactly what a diagnostic is for. What
     // does change is that nothing is scanned until it is fixed.
-    return { tools: {}, present: true, error: err instanceof Error ? err.message : String(err) };
+    return {
+      tools: {},
+      embedding: defaultEmbeddingConfig(),
+      present: true,
+      error: err instanceof Error ? err.message : String(err),
+    };
   }
 }
 

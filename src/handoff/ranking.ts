@@ -30,7 +30,7 @@ const MAX_MATCHES_PER_SESSION = 3;
  * Unrelated sentence-transformer pairs sit near 0; related ones are
  * comfortably above this.
  */
-const MIN_SEMANTIC_COSINE = 0.15;
+export const MIN_SEMANTIC_COSINE = 0.15;
 
 /**
  * How similar the *best* window has to be before a query counts as having
@@ -96,7 +96,7 @@ const MIN_SEMANTIC_COSINE = 0.15;
  *
  * If it needs to move, move it against the eval rather than against one query.
  */
-const MIN_CONFIDENT_COSINE = 0.36;
+export const MIN_CONFIDENT_COSINE = 0.36;
 /**
  * Weight of the recency/continuity tie-break in the relevance modes. Small
  * enough that it only ever separates candidates that are otherwise equal.
@@ -396,8 +396,16 @@ export function rankSearchCandidates(options: {
   limit: number;
   cosineSimilarity: (left: Float32Array, right: Float32Array) => number;
   deserializeVector: (buffer: Buffer, dimensions: number) => Float32Array;
+  /**
+   * Floors swept per embedding model. Defaults stay MiniLM's; a remote model
+   * with a higher cosine distribution needs its own or every query matches.
+   */
+  minSemanticCosine?: number;
+  minConfidentCosine?: number;
 }): SessionSummary[] {
   const { rows, keywordRows, queryVector, mode, limit } = options;
+  const minSemanticCosine = options.minSemanticCosine ?? MIN_SEMANTIC_COSINE;
+  const minConfidentCosine = options.minConfidentCosine ?? MIN_CONFIDENT_COSINE;
 
   /**
    * Windows that matched on words but have no vector yet.
@@ -449,13 +457,13 @@ export function rankSearchCandidates(options: {
     // matching nothing, formatted exactly like a real hit. A unit qualifies
     // on semantic similarity or a keyword match; "no matching sessions" is
     // a more useful answer than a nearest vector.
-    .filter((item) => item.rawCosine >= MIN_SEMANTIC_COSINE || item.keywordScore > 0);
+    .filter((item) => item.rawCosine >= minSemanticCosine || item.keywordScore > 0);
 
   // Nothing here is actually similar to the query — keep only what matched
   // on words. For a query that means nothing to this corpus that leaves
   // nothing at all, which is the answer.
   const bestCosine = candidates.reduce((best, item) => Math.max(best, item.rawCosine), 0);
-  const semanticallyConfident = bestCosine >= MIN_CONFIDENT_COSINE;
+  const semanticallyConfident = bestCosine >= minConfidentCosine;
   const surviving = semanticallyConfident
     ? candidates
     : candidates.filter((item) => item.keywordScore > 0);

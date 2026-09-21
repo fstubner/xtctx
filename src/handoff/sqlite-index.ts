@@ -102,6 +102,10 @@ interface SqliteHandoffIndexOptions {
    * embeds is a search that degrades to keyword forever.
    */
   freezeVectors?: boolean;
+  /** Per-window cosine floor; see ranking.ts. */
+  minSemanticCosine?: number;
+  /** Best-window confidence floor; see ranking.ts. */
+  minConfidentCosine?: number;
 }
 
 /**
@@ -303,6 +307,8 @@ export class SqliteHandoffIndex implements SessionService {
   private readonly embeddingProvider: EmbeddingProvider;
   private readonly windowSize: number;
   private readonly windowStride: number;
+  private readonly minSemanticCosine: number | undefined;
+  private readonly minConfidentCosine: number | undefined;
 
   constructor(
     private readonly dbPath: string,
@@ -314,6 +320,8 @@ export class SqliteHandoffIndex implements SessionService {
       options.embeddingProvider ?? defaultEmbeddingProvider();
     this.windowSize = Math.max(2, Math.floor(options.windowSize ?? DEFAULT_WINDOW_SIZE));
     this.windowStride = Math.max(1, Math.floor(options.windowStride ?? DEFAULT_WINDOW_STRIDE));
+    this.minSemanticCosine = options.minSemanticCosine;
+    this.minConfidentCosine = options.minConfidentCosine;
     this.refreshBudgetMs = Math.max(0, options.refreshBudgetMs ?? DEFAULT_REFRESH_BUDGET_MS);
     this.literalBudgetMs = Math.max(0, options.literalBudgetMs ?? DEFAULT_LITERAL_BUDGET_MS);
     this.embeddingWarmBudgetMs = Math.max(
@@ -894,6 +902,8 @@ export class SqliteHandoffIndex implements SessionService {
         limit: normalizedLimit,
         cosineSimilarity,
         deserializeVector,
+        minSemanticCosine: this.minSemanticCosine,
+        minConfidentCosine: this.minConfidentCosine,
       }),
     );
   }
