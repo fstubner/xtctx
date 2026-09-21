@@ -4,7 +4,11 @@ import { inspectManagedFile, pathExists } from "../config/setup.js";
 import { inspectMcpWiring, type McpWiringState } from "../config/mcp-config.js";
 import { inspectSkillStatus } from "../config/skills.js";
 import { createProjectServices, type ProjectServices } from "../runtime/services.js";
-import { estimateVectorBacklog, formatDuration } from "../utils/duration.js";
+import {
+  BACKGROUND_EMBED_BUDGET_MS,
+  estimateVectorBacklog,
+  formatDuration,
+} from "../utils/duration.js";
 import { readDriftLog, type DriftLogFile } from "../scrapers/drift-log.js";
 import { SUPPORTED_TOOLS } from "../tools/sources.js";
 import { readXtctxPackage } from "../utils/package-info.js";
@@ -112,6 +116,20 @@ export async function renderStatusBlock(
       `Embed    ${backlog.remaining} windows outstanding, ${rate}` +
         `${backlog.eta ? `, about ${backlog.eta} of embedding left` : ""}`,
     );
+    // Say whether anything is actually working on it.
+    //
+    // The MCP server drains the backlog in the background only while the
+    // estimate fits its budget, so on a slow machine with a large history
+    // nothing is. Until this line existed that state was invisible and
+    // indistinguishable from the one above it: semantic search quietly
+    // answering from keyword, forever, with a status report that looked like
+    // progress was being made. Naming the command is the point — the backlog
+    // does not drain by waiting.
+    if (backlog.etaMs !== null && backlog.etaMs > BACKGROUND_EMBED_BUDGET_MS) {
+      lines.push(
+        "         too large to finish in the background — run `xtctx scan --embed`",
+      );
+    }
   }
   // Only when it is not the default. A machine that has never been calibrated
   // is on the CPU, which is what every machine did before calibration existed,

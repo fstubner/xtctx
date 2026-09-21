@@ -28,6 +28,45 @@ describe("status", () => {
     await rm(homeDir, { recursive: true, force: true });
   });
 
+  it("says when a backlog is too large for anything to drain it on its own", async () => {
+    // The MCP server drains the vector backlog at session start only while the
+    // estimate fits its budget. Above that nothing is working on it, and
+    // without this line that state is indistinguishable from the one below it:
+    // both read as windows outstanding with a time estimate, while one
+    // finishes within minutes and the other never finishes at all.
+    //
+    // A large history on a CPU-only machine lands there the moment a model
+    // change invalidates every vector it had, which is what makes it worth a
+    // line rather than a footnote.
+    await setupProject({ projectPath: projectRoot, homeDir, yes: true });
+
+    const services = await createProjectServices(projectRoot);
+    try {
+      const real = await services.sessions.getStatus();
+      const withBacklog = (msPerUnit: number) => ({
+        ...real,
+        retrieval_units: 9232,
+        vectorized_units: 0,
+        vector_ms_per_unit: msPerUnit,
+        vector_segment_backlog: 0,
+        vector_ms_per_segment: null,
+      });
+
+      // 551.9ms/window, the CPU rate measured on this project.
+      services.sessions.getStatus = async () => withBacklog(551.9);
+      const slow = await renderStatusBlock(services, { homeDir });
+      expect(slow).toContain("xtctx scan --embed");
+
+      // 50.7ms/window, the same history on DirectML.
+      services.sessions.getStatus = async () => withBacklog(50.7);
+      const fast = await renderStatusBlock(services, { homeDir });
+      expect(fast).toContain("9232 windows outstanding");
+      expect(fast).not.toContain("xtctx scan --embed");
+    } finally {
+      await services.sessions.close();
+    }
+  });
+
   it("does not report drift on a freshly wired project", async () => {
     // `managed-block` and `unsupported` are healthy skill-target states for
     // codex/antigravity/opencode/copilot-cli, not drift. Treating any
