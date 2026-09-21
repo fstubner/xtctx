@@ -533,6 +533,7 @@ export class SqliteHandoffIndex implements SessionService {
       tools: this.tools,
       redirectedTools: this.redirectedTools,
       vectorModel: this.embeddingProvider.model,
+      vectorDevice: this.embeddingProvider.device ?? null,
     });
   }
 

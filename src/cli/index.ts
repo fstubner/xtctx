@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { Command } from "commander";
+import { runCalibrate } from "./calibrate.js";
 import { runDisconnect } from "./disconnect.js";
 import { runHook } from "./hook.js";
 import { runScan } from "./scan.js";
@@ -153,6 +154,14 @@ export async function main(argv = process.argv): Promise<void> {
         projectPath: options.project ?? globalOptions.project,
         embed: options.embed,
       });
+    });
+
+  program
+    .command("calibrate")
+    .option("--force", "Measure again even if this machine already has a verdict", false)
+    .description("Time the embedding model on this machine's GPU and CPU, and use the faster")
+    .action(async (options: { force: boolean }) => {
+      await runCalibrate({ force: options.force });
     });
 
   program

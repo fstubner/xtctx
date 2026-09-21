@@ -90,7 +90,11 @@ export function parseEmbeddingConfig(input: unknown): EmbeddingConfig {
   return config;
 }
 
-export function createEmbeddingProvider(config: EmbeddingConfig): EmbeddingProvider {
+export function createEmbeddingProvider(
+  config: EmbeddingConfig,
+  /** Calibrated execution provider, if this machine has been calibrated. */
+  device?: string,
+): EmbeddingProvider {
   if (process.env.XTCTX_DISABLE_EMBEDDINGS === "1") {
     return new NullEmbeddingProvider();
   }
@@ -107,7 +111,7 @@ export function createEmbeddingProvider(config: EmbeddingConfig): EmbeddingProvi
       timeoutMs: config.timeoutMs,
     });
   }
-  return new TransformersEmbeddingProvider(DEFAULT_EMBEDDING_MODEL);
+  return new TransformersEmbeddingProvider(DEFAULT_EMBEDDING_MODEL, undefined, device);
 }
 
 function readPositiveInt(value: unknown, fallback: number, label: string): number {

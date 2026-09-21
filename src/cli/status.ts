@@ -113,6 +113,12 @@ export async function renderStatusBlock(
         `${backlog.eta ? `, about ${backlog.eta} of embedding left` : ""}`,
     );
   }
+  // Only when it is not the default. A machine that has never been calibrated
+  // is on the CPU, which is what every machine did before calibration existed,
+  // and does not need a line saying so on every status call.
+  if (status.vector_device && status.vector_device !== "cpu") {
+    lines.push(`Device   ${status.vector_device} (from \`xtctx calibrate\`)`);
+  }
   lines.push("");
   lines.push("Tools:");
 

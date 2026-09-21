@@ -6,6 +6,7 @@ import {
   defaultEmbeddingConfig,
   parseEmbeddingConfig,
 } from "../handoff/embedding-config.js";
+import { readDeviceVerdict } from "../handoff/device.js";
 import { SqliteHandoffIndex } from "../handoff/sqlite-index.js";
 import type { SessionService } from "../handoff/types.js";
 import { SUPPORTED_TOOLS, createDefaultScrapers } from "../tools/sources.js";
@@ -123,7 +124,9 @@ export async function createProjectServices(
       // Provider comes from config, not from whatever happens to be in the
       // environment — an OPENAI_API_KEY sitting around must not opt a project
       // into uploading transcript text.
-      embeddingProvider: config.error ? undefined : createEmbeddingProvider(config.embedding),
+      embeddingProvider: config.error
+        ? undefined
+        : createEmbeddingProvider(config.embedding, (await readDeviceVerdict())?.device),
       minSemanticCosine: config.embedding.minSemanticCosine,
       minConfidentCosine: config.embedding.minConfidentCosine,
     },

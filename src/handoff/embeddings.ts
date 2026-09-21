@@ -99,7 +99,7 @@ export const DEFAULT_EMBEDDING_MODEL = "Xenova/all-MiniLM-L6-v2";
  * little and costs accuracy. The q8 tradeoff only mattered for mpnet, where
  * fp32 was 416MB.
  */
-const DEFAULT_EMBEDDING_DTYPE = "fp32";
+export const DEFAULT_EMBEDDING_DTYPE = "fp32";
 const MAX_SEQ_TOKENS = 256;
 /** ~4 characters per token, the budget splitTextForEmbedding segments to. */
 export const MAX_SEQ_CHARS = MAX_SEQ_TOKENS * 4;
@@ -107,6 +107,15 @@ const MAX_BATCH_SIZE = 32;
 
 export interface EmbeddingProvider {
   readonly model: string;
+  /**
+   * Execution provider this will actually load on, for `xtctx status`.
+   *
+   * Read off the provider rather than off the calibration cache on purpose.
+   * "A verdict was written" and "the indexer is using it" are two different
+   * facts, and reporting the first while meaning the second is how a wiring
+   * bug hides behind a green check.
+   */
+  readonly device?: string;
   embed(text: string): Promise<Float32Array>;
   embedBatch(texts: string[]): Promise<Float32Array[]>;
   /**
@@ -158,6 +167,16 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
   constructor(
     model = DEFAULT_EMBEDDING_MODEL,
     private readonly dtype = DEFAULT_EMBEDDING_DTYPE,
+    /**
+     * Execution provider, from `xtctx calibrate`; see `device.ts`.
+     *
+     * Undefined means pass nothing, which is what this did before calibration
+     * existed and measured identical to `cpu` on all three operating systems.
+     * It is NOT a chain: a device is named here only after being timed against
+     * the CPU on this machine, because the one configuration where a GPU is
+     * catastrophic is also the one where it does not fail.
+     */
+    readonly device?: string,
   ) {
     this.model = model;
   }
@@ -215,6 +234,7 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
     };
     const extractor = await transformers.pipeline("feature-extraction", this.model, {
       dtype: this.dtype,
+      ...(this.device === undefined ? {} : { device: this.device }),
     });
 
     // `model_max_length` is a getter with no setter in @huggingface/transformers,

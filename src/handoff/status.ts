@@ -32,6 +32,8 @@ interface StatusInputs {
   tools: StatusToolRuntime[];
   redirectedTools: string[];
   vectorModel: string;
+  /** Execution provider the indexer will load on; see HandoffStatus. */
+  vectorDevice: string | null;
 }
 
 /**
@@ -66,7 +68,7 @@ function indexedByTool(db: DatabaseHandle, scopedRoot: string): Map<string, Tool
 
 /** Everything `getStatus` reports, given an already-refreshed database. */
 export async function buildStatus(inputs: StatusInputs): Promise<HandoffStatus> {
-  const { db, scopedRoot, projectRoot, dbPath, tools, redirectedTools, vectorModel } = inputs;
+  const { db, scopedRoot, projectRoot, dbPath, tools, redirectedTools, vectorModel, vectorDevice } = inputs;
   // Scoped like the read paths. Unscoped counts disagreed with what the
   // retrieval tools return, and a status saying "3 sessions" for a project
   // whose searches return one is the report that makes a scoping bug look
@@ -115,6 +117,7 @@ export async function buildStatus(inputs: StatusInputs): Promise<HandoffStatus> 
     vector_segment_backlog: countUnvectorizedSegments(db, vectorModel),
     vector_ms_per_segment: numericSetting(db, "vector_ms_per_segment"),
     vector_model: vectorModel,
+    vector_device: vectorDevice,
     embedding_error: getSetting(db, "last_error:embeddings"),
     redirected_tools: redirectedTools,
     tools: toolStatuses,
