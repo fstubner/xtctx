@@ -1,5 +1,5 @@
 import type { SessionService, SessionSummary } from "../../handoff/types.js";
-import { indexingPayload, validatedFilter } from "./sessions.js";
+import { indexingPayload, ToolInputError, validatedFilter } from "./sessions.js";
 import { inlineSafe } from "../../utils/untrusted-text.js";
 
 interface HandoffManifestParams {
@@ -22,7 +22,7 @@ const MAX_LIMIT = 100;
 export function createHandoffManifestHandler(service: SessionService) {
   return async (raw: Record<string, unknown> = {}) => {
     const params = raw as unknown as HandoffManifestParams;
-    const requestedRefs = uniqueStrings(params.session_refs);
+    const requestedRefs = requestedSessionRefs(params.session_refs);
 
     // Requested refs are resolved directly by primary key — filtering a
     // recency-limited list would misreport older indexed sessions as missing.
@@ -128,11 +128,38 @@ function formatManifestMarkdown(manifest: {
   return lines.join("\n").trim();
 }
 
-function uniqueStrings(value: unknown): string[] {
-  if (!Array.isArray(value)) {
+/**
+ * The requested session refs, or a refusal.
+ *
+ * Previously this answered `[]` for anything that was not an array of
+ * strings, and `[]` routes to the branch that returns recent sessions — so a
+ * caller asking for three specific sessions got some arbitrary recent ones
+ * instead, with `missing_session_refs` empty because nothing had been asked
+ * for. `validatedFilter` exists to stop exactly that widening, and its
+ * docstring names this handler as the reason; the fix reached `tool_filter`
+ * and `branch_filter` here and missed `session_refs`.
+ *
+ * The cap matches `limit`'s. Each ref is one synchronous better-sqlite3 `get`
+ * on the event-loop thread, so an unbounded list stalls the stdio server.
+ */
+function requestedSessionRefs(value: unknown): string[] {
+  if (value === undefined || value === null) {
     return [];
   }
-  return [...new Set(value.filter((item): item is string => typeof item === "string" && item.length > 0))];
+
+  if (!Array.isArray(value)) {
+    throw new ToolInputError("session_refs must be an array of strings");
+  }
+
+  if (value.some((item) => typeof item !== "string" || item.trim().length === 0)) {
+    throw new ToolInputError("session_refs must contain only non-empty strings");
+  }
+
+  const unique = [...new Set(value as string[])];
+  if (unique.length > MAX_LIMIT) {
+    throw new ToolInputError(`session_refs accepts at most ${MAX_LIMIT} refs`);
+  }
+  return unique;
 }
 
 function normalizeCorrelationId(value: unknown): string | undefined {

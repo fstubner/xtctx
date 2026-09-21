@@ -131,11 +131,27 @@ async function loadProjectConfig(configPath: string): Promise<ProjectConfig> {
   let raw: string;
   try {
     raw = await readFile(configPath, "utf-8");
-  } catch {
+  } catch (err) {
     // Missing config is valid — `status` still diagnoses, and the MCP server
     // still starts. What it must not do is behave as though the project were
     // configured; see `present`.
-    return { tools: {}, present: false };
+    //
+    // Only ENOENT, though. A config that exists but cannot be READ is the
+    // same situation as one that cannot be PARSED, which the branch below
+    // takes care to distinguish: answering `present: false` there makes every
+    // tool tell the agent to run `xtctx setup`, and setup rewrites
+    // config.yaml with every tool `enabled: true` — so a locked or busy file
+    // would end with the user's `enabled: false` silently undone. The
+    // degraded read becoming the base for a write, again.
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") {
+      return { tools: {}, present: false };
+    }
+    return {
+      tools: {},
+      present: true,
+      error: `could not be read (${code ?? "unknown error"}): ${err instanceof Error ? err.message : String(err)}`,
+    };
   }
 
   try {

@@ -129,6 +129,19 @@ interface ProgressInputs {
   vectorBacklog: number;
   embeddingWarming: boolean;
   literalSearchStoppedEarly?: boolean;
+  /**
+   * Declared, and copied below, because the caller passes it by spread.
+   *
+   * Excess-property checking does not apply to a spread, so an undeclared
+   * field is dropped here in silence: `literalUnreadableTools` reached this
+   * function and never left it, which left the unreadable-store branch in
+   * `mcp/tools/sessions.ts` permanently unreachable. A store that cannot be
+   * read was therefore always reported as a search that stopped at its limit,
+   * advising the caller to narrow a query — the exact wrong advice that
+   * branch was written to replace, since narrowing a query against an
+   * unreadable store returns the same nothing forever.
+   */
+  literalUnreadableTools?: string[];
 }
 
 export function buildIndexProgress(inputs: ProgressInputs): IndexProgress {
@@ -142,5 +155,8 @@ export function buildIndexProgress(inputs: ProgressInputs): IndexProgress {
     ...(inputs.literalSearchStoppedEarly === undefined
       ? {}
       : { literalSearchStoppedEarly: inputs.literalSearchStoppedEarly }),
+    ...(inputs.literalUnreadableTools === undefined
+      ? {}
+      : { literalUnreadableTools: inputs.literalUnreadableTools }),
   };
 }
