@@ -1,49 +1,64 @@
 /**
- * The embedding model, chosen on indexing throughput as much as on ranking.
+ * The embedding model, chosen on retrieval quality once indexing cost stopped
+ * being the binding constraint.
  *
- * mpnet-q8 ranks better on the sixty-query eval, each model at its own swept
- * confidence threshold:
+ * bge-small-en-v1.5, at the thresholds on `MIN_SEMANTIC_COSINE` and
+ * `MIN_CONFIDENT_COSINE`, against MiniLM at the ones it replaced. Measured
+ * 2026-09-21 with `scripts/embedding-bakeoff.ts`, sixty queries, both at a
+ * false-positive rate of zero:
  *
- *   MiniLM fp32   mrr 0.598  recall@5 0.850  top1 0.450   at 0.36
- *   mpnet q8      mrr 0.654  recall@5 0.933  top1 0.483   at 0.40
+ *              hybrid                     vector
+ *              mrr    recall@5  top1      mrr    recall@5  top1
+ *   MiniLM     0.333  0.533     0.183     0.246  0.350     0.183
+ *   bge-small  0.417  0.583     0.267     0.398  0.533     0.317
  *
- * Those figures predate #318, which rebuilt the eval corpus to use realistic
- * session lengths on the grounds that it "has been measuring a world that does
- * not exist". The committed baseline moved with it: MiniLM hybrid reads
- * 0.333 / 0.533 / 0.183 today, not 0.598 / 0.850 / 0.450. The COMPARISON above
- * was measured on one corpus and stands; the absolute numbers no longer match
- * anything reproducible, so do not quote them or compare a new model against
- * them. `tests/eval/results/ranking-baseline.json` is the current truth.
+ * Reproduce either row by running that script; its MiniLM row at 0.15/0.36
+ * reproduces `tests/eval/results/ranking-baseline.json` exactly, which is what
+ * establishes that it and `ranking.eval.test.ts` measure the same thing.
  *
- * It was the default for a day on the strength of that table, which measured
- * only half the question. What the table left out is what embedding actually
- * costs, and the figure used at the time — 18ms per embed — came from
- * benchmarking strings like "warm query number 5". A real segment is 1024
- * characters, the model's full sequence window, and costs far more.
+ * THRESHOLDS DO NOT TRANSFER BETWEEN MODELS, and this is the trap. At MiniLM's
+ * 0.15/0.36, bge-small scores a false-positive rate of 1.00 — every
+ * deliberately unanswerable query, gibberish included, returns something. It is
+ * not the worse model there; it places its cosine values higher, so a floor
+ * tuned to MiniLM's distribution excludes nothing. Any future model change has
+ * to re-sweep, and the sweep is the whole job.
  *
- * Back to back over 291 real segments from this project's index, mpnet first:
+ * What changed to allow this is cost, not quality. bge-small indexes the eval
+ * corpus in 27.5s against MiniLM's 15.6s, about 1.8x, and that ratio is why
+ * this was rejected when first measured on 2026-09-20. Device calibration
+ * (`device.ts`) then made embedding roughly six times faster on a machine with
+ * a GPU, and the MCP server began draining the backlog in the background, so
+ * 1.8x of a much smaller number stopped being the deciding term.
+ *
+ * The caveat the earlier measurement carried still stands: the corpus is
+ * synthetic and sixty queries. What is stronger now is that the margin holds
+ * across three modes and every threshold pair swept, rather than resting on a
+ * single row.
+ *
+ * Both models are 384 dimensions, so nothing about the schema changes.
+ * `dropVectorsFromOtherModels` keys on the model name, so upgrading discards
+ * every existing vector and re-embeds — which is the cost of this change and
+ * is paid once per project.
+ *
+ * TWO REJECTIONS WORTH KEEPING, because the arguments for them are strong and
+ * the reasons they lose are not obvious.
+ *
+ * mpnet-q8 was the default for a day, on a table that measured only half the
+ * question. What it left out is what embedding actually costs, and the figure
+ * used at the time — 18ms per embed — came from benchmarking strings like
+ * "warm query number 5". A real segment is 1024 characters, the model's full
+ * sequence window, and costs far more. Back to back over 291 real segments
+ * from this project's index, mpnet first:
  *
  *   mpnet q8      ~360ms per segment
  *   MiniLM fp32   ~116ms per segment
  *
- * and MiniLM alone in a fresh process, with the segment cap applied, ~65ms.
  * The absolute figures move with what else the process has loaded; the ratio
- * is the durable part, and it favours MiniLM by three times or better.
+ * is the durable part, and it favoured MiniLM by three times or better.
+ * Measure throughput on real content before moving this again; a per-embed
+ * figure taken on short strings says nothing about it.
  *
- * Over this project's ~12,000 segments that is tens of minutes of embedding
- * either way, but roughly three times fewer of them. Vectorizing is budgeted
- * per call, so the difference is not "slower indexing" in the background — it
- * is how long a project's semantic search stays partly blind, tool call after
- * tool call.
- *
- * Five queries of recall and two of top-1 on a sixty-query corpus do not buy
- * fifty extra minutes of that. Measure throughput on real content before
- * moving this again; a per-embed figure taken on short strings says nothing
- * about it.
- *
- * A static model was measured against this on 2026-09-03 and rejected, which
- * is worth writing down because the speed argument for one is overwhelming
- * and the reason it loses is not obvious.
+ * A static model was measured on 2026-09-03 and rejected.
  *
  * Model2Vec statics (`minishlab/potion-base-8M`, 256 dimensions, 30MB) have no
  * transformer forward pass: they look each token's vector up and mean-pool. On
@@ -90,14 +105,16 @@
  * 2/1 is markedly better in `vector` mode than at the current 8/4. That is
  * recorded on `DEFAULT_WINDOW_SIZE`, where the decision belongs.
  */
-export const DEFAULT_EMBEDDING_MODEL = "Xenova/all-MiniLM-L6-v2";
+export const DEFAULT_EMBEDDING_MODEL = "Xenova/bge-small-en-v1.5";
 
 /**
  * Weight precision to load the model at.
  *
- * fp32 for MiniLM: the model is 86MB at full precision, so quantizing saves
- * little and costs accuracy. The q8 tradeoff only mattered for mpnet, where
- * fp32 was 416MB.
+ * fp32 for both MiniLM and bge-small: each is under 140MB at full precision,
+ * so quantizing saves little and costs accuracy. The q8 tradeoff only mattered
+ * for mpnet, where fp32 was 416MB. Measured on MiniLM, q8 was 16% faster while
+ * moving every vector (mean cosine 0.9889 against fp32) — and dtype is not part
+ * of the vector identity, so switching it would silently mix two spaces.
  */
 export const DEFAULT_EMBEDDING_DTYPE = "fp32";
 const MAX_SEQ_TOKENS = 256;

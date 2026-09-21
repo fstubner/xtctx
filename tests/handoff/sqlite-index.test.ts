@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { SqliteHandoffIndex } from "@xtctx/handoff/sqlite-index";
 import { MAX_SEGMENTS_PER_UNIT } from "@xtctx/handoff/embeddings";
+import { MIN_CONFIDENT_COSINE } from "@xtctx/handoff/ranking";
 import type { EmbeddingProvider } from "@xtctx/handoff/embeddings";
 import type { ConversationChunk, ConversationScraper, ScraperState } from "@xtctx/types/scraper";
 
@@ -881,10 +882,16 @@ describe("search scores mean similarity", () => {
   }
 
   it("reports the similarity itself, not the best survivor rescaled to 1", async () => {
-    const results = await searchWith(0.6);
+    // Derived from the threshold rather than written as a literal. This was
+    // 0.6, which cleared MiniLM's 0.36 confidence floor; moving the default
+    // model to bge-small raised that floor to 0.64 and the single result this
+    // asserts on was filtered out before it could be scored, so a test about
+    // score REPORTING failed for a reason that had nothing to do with scoring.
+    const cosine = Math.min(0.99, MIN_CONFIDENT_COSINE + 0.1);
+    const results = await searchWith(cosine);
 
     expect(results).toHaveLength(1);
-    expect(results[0].score).toBeCloseTo(0.6, 2);
+    expect(results[0].score).toBeCloseTo(cosine, 2);
   });
 
   it("finds nothing when nothing is actually similar", async () => {
