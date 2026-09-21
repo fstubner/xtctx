@@ -520,6 +520,24 @@ async function removeMcpConfig(
       };
     }
 
+    // Same refusal the write path makes, for the same reason: the TOML parser
+    // drops comments, so rewriting a commented file to take one entry out
+    // deletes every comment with it. Setup already declines here and tells the
+    // user to edit by hand keeping their comments — and disconnect then
+    // removed them all, which made following that advice pointless.
+    if (format === "toml" && tomlHasComments(existingContent)) {
+      return {
+        tool,
+        path: configPath,
+        scope,
+        removed: false,
+        skipped: true,
+        warning:
+          `MCP config at ${configPath} contains comments, which xtctx will not rewrite. ` +
+          `Remove the "${serverName}" entry manually, or remove the comments so xtctx can manage it.`,
+      };
+    }
+
     const existing = parseConfig(existingContent, format);
     const existingEntries =
       isRecord(existing[rootKey]) ? { ...(existing[rootKey] as Record<string, unknown>) } : {};

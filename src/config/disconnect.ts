@@ -169,14 +169,18 @@ export async function disconnectProject(options: DisconnectOptions = {}): Promis
     };
   }
 
+  const projectConfig = await disableToolsInProjectConfig(configPath, tools, projectRoot);
   writes.push({
     path: configPath,
     kind: "config",
     // config.yaml is rewritten with the tools disabled, never deleted — it is
     // the record that xtctx was disconnected.
     action: "updated",
-    changed: await disableToolsInProjectConfig(configPath, tools, projectRoot),
+    changed: projectConfig.changed,
   });
+  if (projectConfig.warning) {
+    warnings.push(projectConfig.warning);
+  }
 
   const mcpTools = options.globalMcp ? tools : tools.filter((tool) => !GLOBAL_MCP_TOOLS.has(tool));
   const mcpSummary = await removeMcpServerConfigs(projectRoot, "xtctx", mcpTools, options.homeDir ? { homeDir: options.homeDir } : {});
@@ -323,21 +327,34 @@ async function disableToolsInProjectConfig(
   configPath: string,
   tools: ToolId[],
   projectRoot: string,
-): Promise<boolean> {
+): Promise<{ changed: boolean; warning?: string }> {
   const raw = await readUtf8IfExists(configPath);
   if (raw === null) {
-    return false;
+    return { changed: false };
   }
 
   // Every other reader of this file degrades on unparseable YAML rather than
   // throwing; this one did not, so a stray tab made uninstalling impossible.
   // Disconnect is the command someone reaches for when things are already
   // wrong, which is the worst moment to require a well-formed config.
+  //
+  // Degrading the READ is right. Using the degraded result as the base for a
+  // WRITE is not: `{}` plus the disabled tools is a complete document, so a
+  // file with a stray tab was replaced by one holding nothing but `tools:`,
+  // and any `storePath` override in it — which `status` treats as a
+  // deliberate, user-owned setting — went with it. Everything else disconnect
+  // does still happens; only this rewrite is skipped.
   let parsed: unknown;
   try {
     parsed = parseYaml(raw);
-  } catch {
-    parsed = null;
+  } catch (error) {
+    return {
+      changed: false,
+      warning:
+        `${configPath} could not be parsed, so its tools were left as they are: ` +
+        `${error instanceof Error ? error.message : String(error)}. ` +
+        `Everything else was disconnected; fix the file or delete it to finish.`,
+    };
   }
   const config = isRecord(parsed) ? parsed : {};
   const currentTools = isRecord(config.tools) ? { ...config.tools } : {};
@@ -353,12 +370,12 @@ async function disableToolsInProjectConfig(
   }
 
   if (!changed) {
-    return false;
+    return { changed: false };
   }
 
   config.tools = currentTools;
   await writeFileAtomic(configPath, stringifyYaml(config), { containWithin: projectRoot });
-  return true;
+  return { changed: true };
 }
 
 function memoryPathsToDisconnect(projectRoot: string, tools: ToolId[], all: boolean): string[] {

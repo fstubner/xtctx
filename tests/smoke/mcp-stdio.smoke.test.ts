@@ -49,9 +49,37 @@ describe("MCP server over stdio", () => {
     return text;
   }
 
+  /**
+   * What the spawned server wrote to stderr, and how it died if it died.
+   *
+   * Nothing read the child's stderr, so when the server failed to start the
+   * suite reported only "initialize did not answer within 60s" — an assertion
+   * about a symptom, with the cause piped into a buffer nobody drained. That
+   * happened once under load on 2026-09-20 (four of five cases in this file),
+   * could not be reproduced, and left nothing to diagnose.
+   *
+   * The likely cause is the one the comment below already names: the child
+   * loads a ~100MB ONNX model, and this machine was running several model
+   * loads at once. That is a guess, and it stays a guess precisely because
+   * this text was thrown away. Now it is attached to the failure.
+   */
+  let childStderr = "";
+  let childExit: string | null = null;
+
+  function serverDiagnostics(): string {
+    const tail = childStderr.trim().split("\n").slice(-20).join("\n");
+    return [
+      childExit ? `server process ${childExit}` : "server process still running",
+      tail ? `stderr:\n${tail}` : "stderr: (empty)",
+    ].join("\n");
+  }
+
   function request(id: number, method: string, params: unknown): Promise<Record<string, unknown>> {
     return new Promise((resolvePromise, rejectPromise) => {
-      const timer = setTimeout(() => rejectPromise(new Error(`${method} did not answer within 60s`)), 60_000);
+      const timer = setTimeout(
+        () => rejectPromise(new Error(`${method} did not answer within 60s\n${serverDiagnostics()}`)),
+        60_000,
+      );
       pending.set(id, (message) => {
         clearTimeout(timer);
         resolvePromise(message);
@@ -98,6 +126,20 @@ describe("MCP server over stdio", () => {
       env,
       stdio: ["pipe", "pipe", "pipe"],
     }) as ChildProcessWithoutNullStreams;
+
+    proc.stderr.on("data", (chunk) => {
+      childStderr += String(chunk);
+    });
+    // Fail the pending call immediately rather than waiting out the timeout:
+    // a server that has exited is never going to answer, and sixty seconds of
+    // waiting adds nothing but sixty seconds.
+    proc.on("exit", (code, signal) => {
+      childExit = signal ? `killed by ${signal}` : `exited with code ${String(code)}`;
+      for (const [id, resolvePending] of pending) {
+        pending.delete(id);
+        resolvePending({ error: { message: `server ${childExit}\n${serverDiagnostics()}` } });
+      }
+    });
 
     proc.stdout.on("data", (chunk) => {
       buffer += String(chunk);

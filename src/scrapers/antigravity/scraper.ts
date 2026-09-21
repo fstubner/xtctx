@@ -124,7 +124,13 @@ export class AntigravityScraper extends AbstractScraper<AntigravityChunk> {
       });
 
       for (const [messageIndex, artifact] of artifacts.entries()) {
-        if (artifact.timestamp <= since) {
+        // A zero `since` means full sync: emit even epoch-sentinel timestamps.
+        // `store.ts` returns `new Date(0)` for an artifact whose metadata has
+        // no `updatedAt` and whose `stat` fails, and `0 <= 0` is true — so
+        // without this guard those artifacts were dropped on every path,
+        // including a rebuild that exists to recover them, and nothing in the
+        // drift log said so.
+        if (since.getTime() > 0 && artifact.timestamp <= since) {
           continue;
         }
 
@@ -230,7 +236,10 @@ export class AntigravityScraper extends AbstractScraper<AntigravityChunk> {
         });
 
       for (const [messageIndex, message] of sortedMessages.entries()) {
-        if (message.timestamp <= since) {
+        // See the fallback loop above: `steps.ts` falls back to `new Date(0)`
+        // when neither the step metadata nor the summary carries a parseable
+        // time, and a full sync must still emit those.
+        if (since.getTime() > 0 && message.timestamp <= since) {
           continue;
         }
 
