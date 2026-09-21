@@ -103,7 +103,7 @@ describe("deviceCandidates", () => {
   });
 
   it("always measures the CPU, because it is what everything is compared to", () => {
-    for (const platform of ["win32", "darwin", "linux"]) {
+    for (const platform of ["win32", "darwin", "linux"] as NodeJS.Platform[]) {
       expect(deviceCandidates(platform)).toContain("cpu");
     }
   });

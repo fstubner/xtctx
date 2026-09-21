@@ -73,6 +73,7 @@ class FixtureService implements SessionService {
     vector_segment_backlog: 0,
     vector_ms_per_segment: null,
       vector_model: "fixture",
+      vector_device: null,
       tools: [],
     };
   }
