@@ -279,6 +279,26 @@ export class SqliteHandoffIndex implements SessionService {
    * store is not fixed by retrying at all.
    */
   private lastLiteralUnreadable: string[] = [];
+
+  /**
+   * Forget the last literal pass's advice, at the start of every retrieval.
+   *
+   * Both fields above were written by a literal search and never cleared,
+   * while `getIndexProgress` — which every tool calls — reports them. So one
+   * truncated literal search attached "The literal pass stopped at its limit
+   * or time budget. Narrow the query or raise `limit`." to every later
+   * `xtctx_recent_sessions` and `xtctx_session_detail` answer, calls that
+   * carry no query to narrow.
+   *
+   * The advice belongs to the call that produced it, not to the index. Cleared
+   * on entry rather than consumed on read, because a literal search sets them
+   * after this runs and before its own progress note is built, and nothing
+   * then depends on how many times that note is asked for.
+   */
+  private clearLiteralAdvice(): void {
+    this.lastLiteralWasExhaustive = undefined;
+    this.lastLiteralUnreadable = [];
+  }
   private readonly embeddingWarmBudgetMs: number;
   private readonly vectorBudgetMs: number;
   private scanStartedMs = 0;
@@ -347,6 +367,7 @@ export class SqliteHandoffIndex implements SessionService {
     toolFilter?: string[],
     branchFilter?: string[],
   ): Promise<SessionSummary[]> {
+    this.clearLiteralAdvice();
     await this.refresh({ toolFilter });
     const db = this.getDb();
     const normalizedLimit = normalizeLimit(limit, DEFAULT_LIMIT);
@@ -426,6 +447,7 @@ export class SqliteHandoffIndex implements SessionService {
     offset: number,
     limit: number,
   ): Promise<SessionMessage[]> {
+    this.clearLiteralAdvice();
     await this.refresh({ sessionRef });
     const db = this.getDb();
     const normalizedOffset = Number.isFinite(offset) && offset > 0 ? Math.floor(offset) : 0;
@@ -459,6 +481,7 @@ export class SqliteHandoffIndex implements SessionService {
     mode: SessionSearchMode = "hybrid",
     branchFilter?: string[],
   ): Promise<SessionSummary[]> {
+    this.clearLiteralAdvice();
     const normalizedModeForRefresh = normalizeSearchMode(mode);
     // A literal pass reads the stores, not the index, so it starts the scan
     // and moves on rather than waiting out the refresh budget in front of its

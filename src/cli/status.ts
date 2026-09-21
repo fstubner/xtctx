@@ -285,10 +285,28 @@ export async function renderStatusBlock(
   lines.push("");
   if (!configPresent) {
     lines.push("Next     This project is not set up yet. Run: xtctx setup");
+  } else if (services.config.error) {
+    // Checked before everything below it, because nothing below it can be
+    // true while this holds. Nothing is scanned at all with an unreadable
+    // config, so "ask an agent to call xtctx_recent_sessions" is advice that
+    // cannot work, and with an index left over from before the file broke the
+    // old branch cheerfully reported "Handoff is wired" six lines under
+    // "UNREADABLE ... No transcripts are being read until this is fixed."
+    // The last line is the one people act on.
+    lines.push(`Next     Fix ${services.configPath} — nothing is being read until it parses.`);
   } else if (needsRepair) {
     lines.push("Next     Wiring has drifted. Run: xtctx setup --repair");
   } else if (status.sessions === 0) {
-    lines.push("Next     No sessions are indexed yet. Ask a configured agent to call xtctx_recent_sessions.");
+    // Worded as expected rather than as a fault. Running `status` straight
+    // after `setup` is the obvious way to check setup worked, and it lands
+    // here: nothing is indexed until an agent calls a tool, so `Scan never`
+    // and `0 sessions` are what a correct install looks like at this point.
+    lines.push(
+      "Next     Nothing is indexed yet, which is expected until an agent calls a tool.",
+    );
+    lines.push(
+      "         Restart any agent that was open when setup ran, then ask it for recent context.",
+    );
   } else {
     lines.push("Next     Handoff is wired. Ask a configured agent to call xtctx_recent_sessions.");
   }
