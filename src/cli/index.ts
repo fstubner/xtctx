@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { Command } from "commander";
+import { Command, Option } from "commander";
 import { runCalibrate } from "./calibrate.js";
 import { runDisconnect } from "./disconnect.js";
 import { runHook } from "./hook.js";
@@ -109,7 +109,13 @@ export async function main(argv = process.argv): Promise<void> {
     .name("xtctx")
     .description(
       [
-        "Local cross-tool handoff for AI coding agents",
+        "Local cross-tool handoff for AI coding agents.",
+        "",
+        "Your coding agents already write transcripts. xtctx indexes them and",
+        "serves them over MCP, so the next agent you open can read what the",
+        "last one did in this repo.",
+        "",
+        "Start with:  xtctx setup",
         "",
         "Run with no command and non-interactive stdio and xtctx starts its MCP",
         "server over stdio. Set XTCTX_NO_AUTO_MCP=1 to print this help instead,",
@@ -126,7 +132,7 @@ export async function main(argv = process.argv): Promise<void> {
     .option("-y, --yes", "Apply setup without prompting", false)
     .option("--repair", "Remove legacy generated xtctx config before writing current setup", false)
     .option("--global-mcp", "Also configure Copilot CLI global MCP (Antigravity MCP is always configured)", false)
-    .description("Configure MCP, hooks, managed handoff instructions, and synced skills")
+    .description("Set this project up so agents can read each other's history here")
     .action(
       async (
         projectPath: string | undefined,
@@ -145,7 +151,7 @@ export async function main(argv = process.argv): Promise<void> {
   program
     .command("status")
     .option("-p, --project <path>", "Project root (defaults to cwd)")
-    .description("Diagnose xtctx handoff wiring and local transcript index")
+    .description("Check whether handoff is working here, and what to do if not")
     .action(async (options: { project?: string }) => {
       const globalOptions = program.opts<{ project?: string }>();
       await runStatus({ projectPath: options.project ?? globalOptions.project });
@@ -163,7 +169,7 @@ export async function main(argv = process.argv): Promise<void> {
       "--no-calibrate",
       "With --embed, skip measuring which device embeds fastest on this machine",
     )
-    .description("Scan the enabled transcript stores into this project's index, then exit")
+    .description("Index this project's transcripts now instead of waiting for an agent to ask")
     .action(async (options: { project?: string; embed?: boolean; calibrate?: boolean }) => {
       const globalOptions = program.opts<{ project?: string }>();
       await runScan({
@@ -176,7 +182,7 @@ export async function main(argv = process.argv): Promise<void> {
   program
     .command("calibrate")
     .option("--force", "Measure again even if this machine already has a verdict", false)
-    .description("Time the embedding model on this machine's GPU and CPU, and use the faster")
+    .description("Find the fastest device on this machine for indexing, and use it")
     .action(async (options: { force: boolean }) => {
       await runCalibrate({ force: options.force });
     });
@@ -192,7 +198,7 @@ export async function main(argv = process.argv): Promise<void> {
     )
     .option("-p, --project <path>", "Project root")
     .option("-y, --yes", "Apply disconnect without prompting", false)
-    .description("Remove xtctx management from a tool without deleting transcript data")
+    .description("Stop xtctx managing a tool here, leaving your transcripts untouched")
     .action(
       async (
         tool: string | undefined,
@@ -210,8 +216,13 @@ export async function main(argv = process.argv): Promise<void> {
     );
 
   program
-    .option("--hook <event>", "Internal hook event name")
-    .option("--tool <tool>", "Tool invoking an internal hook")
+    // Hidden, not removed: these are how a tool's hook re-enters this CLI,
+    // never something a person types. Listed among `--project` and
+    // `--version`, they read as options a newcomer is expected to understand,
+    // and the first thing `xtctx --help` showed was two knobs for a mechanism
+    // that is entirely internal.
+    .addOption(new Option("--hook <event>", "Internal hook event name").hideHelp())
+    .addOption(new Option("--tool <tool>", "Tool invoking an internal hook").hideHelp())
     .option("-p, --project <path>", "Project root");
 
   program.action(async () => {
