@@ -56,7 +56,10 @@ Single-user, single-machine. There is no team, sync, or server component.
 - Five read-only MCP tools: recent sessions, session detail, search,
   continuity status, handoff manifest.
 - CLI: `setup` (wire MCP config, managed instruction blocks, skills, and the
-  Claude Code SessionStart hook), `status`, `disconnect`.
+  Claude Code SessionStart hook), `status`, `scan` (read the stores into the
+  index now, `--embed` to finish vectorizing too), `calibrate` (time the
+  embedding model on this machine's devices and use the fastest),
+  `disconnect`.
 
 Out of scope (deliberately, and documented everywhere the product speaks):
 no daemon, no API server, no dashboard, no generated summaries or briefs,

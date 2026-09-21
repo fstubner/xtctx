@@ -1,15 +1,25 @@
 # Embedding providers
 
 Design for letting a project embed through an OpenAI-compatible endpoint
-instead of the bundled local model. Nothing here is built yet.
+instead of the bundled local model.
+
+**Built on 2026-09-21**, with two deliberate deviations and two parts left
+out. Deviations: the local vector identity stays the bare HuggingFace id
+rather than gaining a `local:` prefix (every remote identity is
+`openai:`-prefixed and cannot collide with one, while renaming the local one
+would discard every existing project's vectors for no gain), and remote
+vectors are normalized on receipt to match the local pipeline. Left out: the
+"thresholds unswept for this model" warning described under Status surface,
+and any threshold sweep run against a remote provider. `xtctx status` does
+print the endpoint. Where this document and the code disagree, the code is
+current.
 
 ## What stays true
 
-xtctx ships local-only and stays local-only by default. The default MiniLM
-model — downloaded on first use, not bundled in the package, which ships
-`dist` only — is what runs when nobody configures anything, and that is the
-behaviour
-every existing claim describes.
+xtctx ships local-only and stays local-only by default. The default model —
+`Xenova/bge-small-en-v1.5` since 2026-09-21, downloaded on first use rather
+than bundled, since the package ships `dist` only — is what runs when nobody
+configures anything.
 
 An endpoint is opt-in, per project, and never inferred — no environment
 variable that happens to be set, no auto-detection of a local server on a
@@ -30,15 +40,20 @@ xtctx does on its own and should say so:
 Two cases, and the local one is the stronger of the two.
 
 **A local inference server.** Ollama and LM Studio both expose
-`/v1/embeddings`, both keep everything on the machine, and both can use a GPU
-that xtctx's in-process ONNX runtime is not currently using. Measured on this
+`/v1/embeddings`, both keep everything on the machine, and both can use a GPU.
+That last point was the stronger half of this argument until 2026-09-21, when
+`xtctx calibrate` gave the in-process runtime the same GPU — so an endpoint is
+now a way to reach a *different* model, not the only way to reach the
+hardware. Measured on this
 machine, DirectML embedded the same segments about six times faster than the
 CPU path and produced numerically identical vectors (mean cosine 1.000000
 against CPU, worst pair 0.999999). An endpoint is one way to reach that
 hardware without xtctx owning the GPU problem itself.
 
-**A hosted model.** Better retrieval than a 22M-parameter model can give, for
-someone who has already decided their transcripts may leave the machine.
+**A hosted model.** Better retrieval than a small local model can give, for
+someone who has already decided their transcripts may leave the machine. (The
+"22M-parameter" figure this line used to quote was MiniLM's, which is no
+longer the local default.)
 
 ## Interface
 
@@ -70,8 +85,8 @@ embedding:
   apiKeyEnv: OLLAMA_API_KEY       # name of an env var, never the key itself
   batchSize: 32
   timeoutMs: 30000
-  minSemanticCosine: 0.15         # see Thresholds
-  minConfidentCosine: 0.36
+  minSemanticCosine: 0.62         # see Thresholds; defaults track the
+  minConfidentCosine: 0.64         # local model and moved with it
 ```
 
 `apiKeyEnv` names an environment variable. The key is never written to
@@ -92,8 +107,14 @@ identity therefore includes the endpoint:
 
 ```
 openai:https://api.openai.com/v1:text-embedding-3-small
-local:Xenova/all-MiniLM-L6-v2
+Xenova/bge-small-en-v1.5
 ```
+
+The local form is the bare HuggingFace id, not `local:`-prefixed as an earlier
+draft of this document had it. Remote identities all begin `openai:` and
+cannot collide with a HuggingFace id, so the prefix buys nothing — and adding
+it would make `dropVectorsFromOtherModels` discard every vector in every
+existing project on the first open after the upgrade.
 
 Changing the endpoint or the model then invalidates vectors the same way
 changing the local model already does. Dimensions then need no separate
@@ -189,10 +210,10 @@ partially.
 2. **Should `scan --embed` behave differently against an endpoint?** It
    currently runs uncapped, which is right for local compute and possibly
    expensive against a metered API.
-3. **Is a per-provider threshold sweep something xtctx can run itself?** The
-   sweeps recorded in this repository were done by hand, against a temporarily
-   patched constant; the eval harness runs one fixed provider and has no way to
-   select a model or vary a threshold. A
+3. **Is a per-provider threshold sweep something xtctx can run itself?**
+   `scripts/embedding-bakeoff.ts` now sweeps thresholds and selects a model,
+   but against the synthetic eval corpus rather than a project's own index,
+   and only for local models. A
    `xtctx calibrate` that sweeps against the project's own index would remove
    the unswept-threshold warning entirely, and is a larger piece of work than
    the provider itself.

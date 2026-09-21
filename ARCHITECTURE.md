@@ -7,8 +7,8 @@ boundaries between them, and what each part is allowed to trust.
 
 ## Parts
 
-- **CLI** (`src/cli/`) — `setup`, `status`, `disconnect`, and the internal
-  `--hook session-start` entry point. Bare `xtctx` on a non-TTY stdio pair
+- **CLI** (`src/cli/`) — `setup`, `status`, `scan`, `calibrate`,
+  `disconnect`, and the internal `--hook session-start` entry point. Bare `xtctx` on a non-TTY stdio pair
   starts the MCP server.
 - **MCP server** (`src/mcp/`) — stdio JSON-RPC server exposing exactly five
   read-only tools. Spawned by coding agents via `npx -y xtctx`.
@@ -19,7 +19,7 @@ boundaries between them, and what each part is allowed to trust.
 - **Handoff index** (`src/handoff/`) — per-project SQLite database
   (`.xtctx/state/xtctx.db`, WAL, schema-versioned) holding sessions,
   messages, retrieval windows, FTS index, and embedding vectors. Refreshed
-  on demand from the scrapers; fully derived, rebuilt from scratch on
+  on demand from the scrapers and at MCP server start; fully derived, rebuilt from scratch on
   corruption or schema mismatch.
 - **Drift log** (`src/scrapers/drift-log.ts`) — per-tool record of the
   places another tool's transcripts did not match what the scraper expected,

@@ -168,6 +168,19 @@ per-file offset, so after the first pass it reads only what each tool has
 appended. The first pass over a large history is the expensive one — see the
 note above.
 
+`xtctx scan --embed` additionally vectorizes every window the scan leaves
+without one, running to completion however long that takes rather than to a
+budget. You need it when `xtctx status` says the backlog is too large to
+finish in the background — otherwise the server gets there on its own.
+
+`xtctx calibrate` times the embedding model on each execution provider this
+machine offers and remembers the fastest in `~/.xtctx/device.json`. On a
+machine with a usable GPU that has measured roughly six times faster than the
+CPU; on one without, it picks the CPU and nothing changes. `scan --embed`
+runs it automatically the first time, because it is about to spend far longer
+than the measurement costs; `--no-calibrate` skips that. Vectors are identical
+whichever device wins, so this changes speed and nothing else.
+
 Generated MCP clients should use:
 
 ```json
@@ -237,9 +250,12 @@ startup hooks; others receive MCP config plus managed instructions only.
 - Transcript formats belong to each upstream tool and can drift. The drift
   tests and format fingerprints exist to catch parser breakage, but `xtctx status`
   is still the source of truth for your machine.
-- Semantic search is lazy. The first semantic or hybrid query may initialize
-  the local embedding provider and create local vectors; hybrid search falls
-  back to keyword search if vector generation is unavailable.
+- Vectors are built incrementally, and the MCP server also works the backlog
+  down in the background when it starts, as long as this machine's measured
+  rate says the remainder fits in fifteen minutes. Above that nothing drains
+  it on its own and `xtctx status` says so, naming `xtctx scan --embed`.
+  Hybrid search falls back to keyword whenever vectors are missing or the
+  embedding model is unavailable, and `xtctx status` reports the reason.
 - Antigravity conversation `.pb` files are not parsed directly; retrieval uses
   the local language-server API when available, otherwise readable `brain`
   artifacts.
