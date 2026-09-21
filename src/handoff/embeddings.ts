@@ -120,7 +120,44 @@ export const DEFAULT_EMBEDDING_DTYPE = "fp32";
 const MAX_SEQ_TOKENS = 256;
 /** ~4 characters per token, the budget splitTextForEmbedding segments to. */
 export const MAX_SEQ_CHARS = MAX_SEQ_TOKENS * 4;
-const MAX_BATCH_SIZE = 32;
+/**
+ * Segments handed to the model in one forward pass.
+ *
+ * Sixteen, measured on the real path rather than on a benchmark — and the
+ * difference between those two is the whole story here.
+ *
+ * `scripts/probe-batch-size.mjs` embeds uniform 1000-character segments and
+ * said the GPU wanted the largest batch available: 4.0ms/segment at 128
+ * against 5.3 at 32, a 1.37x win that reproduced across runs. Acting on it
+ * would have been a 5x REGRESSION. Measured instead by running
+ * `xtctx scan --embed` over this project's own index from an empty vector
+ * table, 150 seconds each on DirectML:
+ *
+ *   batch      ms/window
+ *   8          123.4
+ *   16         107.8, 107.9
+ *   32         123.4
+ *   128        542.9
+ *
+ * The benchmark's segments were all exactly the same length. Real ones are
+ * not — windows hold a median of 4 segments and a 95th percentile of 17, of
+ * varying size — and a batch is padded to its longest member, so a wide batch
+ * of mixed lengths spends most of its work on padding. Uniform inputs hide
+ * the dominant cost of the real workload entirely.
+ *
+ * This is the same mistake as the "18ms per embed" figure recorded on
+ * `DEFAULT_EMBEDDING_MODEL`, which was taken on strings like "warm query
+ * number 5" and drove a model change that had to be reverted. Measure this on
+ * real content, through the real path, or do not move it.
+ *
+ * One constant, not one per device. An earlier version of this change made it
+ * device-dependent on the strength of the benchmark above; the real-path
+ * measurement removed the reason. The independent CPU measurement in
+ * `docs/embedding-performance.md` — also taken on real segments from this
+ * index — put 16 ahead of 32 by 10-20%, which is the same answer and the same
+ * margin as the GPU rows above.
+ */
+const MAX_BATCH_SIZE = 16;
 
 export interface EmbeddingProvider {
   readonly model: string;

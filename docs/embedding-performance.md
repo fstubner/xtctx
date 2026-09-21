@@ -167,12 +167,31 @@ Three paired runs on CPU, fp32, same segments each time:
 | 32 | 100.5 | 88.7 | 81.4 |
 | 64 | 99.9 | | |
 
-16 wins every pairing against 32, by roughly 10–20%. `MAX_BATCH_SIZE` is
-currently 32.
+16 wins every pairing against 32, by roughly 10–20%.
 
-The absolute numbers are noisy and the sample is three pairs, so this is a
-consistent direction rather than a settled figure. Before changing the
-constant it deserves more repetitions on a quiet machine, including 24.
+**Settled 2026-09-21, and `MAX_BATCH_SIZE` is 16.** The direction above turned
+out to be right, but nothing above it is why. Measured by running
+`xtctx scan --embed` over this project's own index from an empty vector table,
+150 seconds per size, on DirectML:
+
+| batch | ms/window |
+| --- | --- |
+| 8 | 123.4 |
+| **16** | **107.8, 107.9** |
+| 32 | 123.4 |
+| 128 | 542.9 |
+
+`scripts/probe-batch-size.mjs` was written first and said the opposite for the
+GPU — 4.0ms/segment at 128 against 5.3 at 32, a 1.37x win reproducing across
+runs. Acting on that would have been a 5x regression. Its segments are all
+exactly 1000 characters; real ones are not, and a batch is padded to its
+longest member, so a wide batch of mixed lengths spends most of its work on
+padding. Uniform inputs hide the dominant cost of the real workload.
+
+That is the same failure as the "18ms per embed" figure at the top of this
+file. A benchmark that does not reproduce the shape of the real input is not
+weak evidence, it is evidence for the wrong question — and it reproduced
+cleanly three times while pointing the wrong way.
 
 ## Quantized weights: rejected
 
@@ -279,9 +298,7 @@ Ranked by value against effort, on the evidence above:
 
 1. **GPU chosen by measurement.** Done — `xtctx calibrate`, and automatically
    inside `xtctx scan --embed`. See below.
-2. **Batch size 16.** ~10–20%, no vector change, one constant. Still blocked
-   on a cleaner measurement — and worth re-taking on the GPU, since every
-   figure in that table is a CPU one.
+2. **Batch size 16.** Done — measured on the real path, ~13% on the GPU.
 3. **bge-small with its own thresholds.** Done, at 0.62/0.64.
 
 Closed, with reasons above: quantization, segment caching, multi-process
