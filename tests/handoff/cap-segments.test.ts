@@ -14,12 +14,20 @@ describe("capSegments", () => {
     const segments = Array.from({ length: 100 }, (_, index) => `s${index}`);
     const capped = capSegments(segments, 4);
 
-    expect(capped).toHaveLength(4);
-    expect(capped[0]).toBe("s0");
-    expect(capped[capped.length - 1]).not.toBe("s1");
+    // The whole sample, not its endpoints. Asserting only the first and last
+    // element left this passing against `segments.slice(0, limit)` — proven by
+    // replacing the body with exactly that and watching the file stay green,
+    // which meant the behaviour the function exists for was undefended.
+    expect(capped).toEqual(["s0", "s25", "s50", "s75"]);
+
     // Order preserved, so pooling stays deterministic.
     const indexes = capped.map((s) => Number(s.slice(1)));
     expect([...indexes].sort((a, b) => a - b)).toEqual(indexes);
+
+    // The property the exact values above encode: every element comes from a
+    // different quarter of the window, which truncation cannot satisfy.
+    const spread = indexes[indexes.length - 1] - indexes[0];
+    expect(spread).toBeGreaterThan(segments.length / 2);
   });
 
   it("never returns more than the limit, at any size", () => {
@@ -29,10 +37,15 @@ describe("capSegments", () => {
     }
   });
 
-  it("keeps the default above the 95th percentile of real windows", () => {
+  it("pins the cap against being lowered", () => {
     // Measured over this project's 1,770 windows: median 4 segments, p95 17,
     // max 392. A cap below the bulk of the distribution would be trading
     // quality for speed on ordinary windows rather than trimming the tail.
+    // A floor, not a property: `>= 16` against a constant of 16 only restates
+    // the value, so this catches the cap being lowered and nothing else. It
+    // does NOT establish what the heading claims — p95 is 17, so 16 already
+    // clips part of that bucket, deliberately. Raising the cap to 17 is a cost
+    // decision about embedding time, not a test fix, and is not made here.
     expect(MAX_SEGMENTS_PER_UNIT).toBeGreaterThanOrEqual(16);
   });
 });

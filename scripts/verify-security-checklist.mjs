@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { statSync } from "node:fs";
 import { resolve } from "node:path";
 
 const checklistPath = resolve(process.cwd(), "docs", "security", "owasp-asvs-lite.md");
@@ -19,7 +19,10 @@ for (const heading of requiredHeadings) {
   }
 }
 
-const unchecked = [...content.matchAll(/^- \[ \] (.+)$/gm)].map((match) => match[1]);
+// `^\s*`, not `^`: the checklist nests continuation bullets under their
+// parent, so an anchored matcher could not see an unchecked control that had
+// been indented — the gate passed on a checklist with open items in it.
+const unchecked = [...content.matchAll(/^\s*- \[ \] (.+)$/gm)].map((match) => match[1]);
 if (unchecked.length > 0) {
   const summary = unchecked.map((item) => `- ${item}`).join("\n");
   throw new Error(
@@ -46,7 +49,17 @@ const cited = [...content.matchAll(/<!--\s*verified-by:\s*([^>]+?)\s*-->/g)]
 
 const missingEvidence = [];
 for (const relative of cited) {
-  if (!existsSync(resolve(process.cwd(), relative))) {
+  // `isFile`, not `existsSync`: a citation left pointing at a directory after
+  // the named test was deleted still "existed", and the summary went on
+  // claiming the citation had been verified.
+  const cursor = resolve(process.cwd(), relative);
+  let isFile = false;
+  try {
+    isFile = statSync(cursor).isFile();
+  } catch {
+    isFile = false;
+  }
+  if (!isFile) {
     missingEvidence.push(relative);
   }
 }
