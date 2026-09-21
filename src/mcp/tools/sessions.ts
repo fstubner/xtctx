@@ -30,7 +30,8 @@ export type { SessionService };
 export class ToolInputError extends Error {}
 
 /** Hard cap on a single message body returned to the model. */
-const MAX_MESSAGE_CHARS = 16_000;
+/** @internal Exported so the budget test can pin the real boundary. */
+export const MAX_MESSAGE_CHARS = 16_000;
 
 /**
  * A filter the caller got wrong is refused, not ignored.

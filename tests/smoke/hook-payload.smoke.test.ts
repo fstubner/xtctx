@@ -171,5 +171,11 @@ describe("session-start hook payload trust", () => {
     // The hook runs inside the host agent's startup. Rejecting a payload must
     // never become a startup error there.
     expect(await runHook({ cwd: 42, transcript_path: ["not", "a", "string"] })).toBe(0);
+
+    // Exiting 0 is only half of it. A hook that ACTED on the hostile payload
+    // and then exited cleanly passes the line above while having recorded a
+    // store directory it was never given — which is the failure the sibling
+    // cases here exist to catch, and the one an exit code cannot see.
+    expect(await recordedStoreDirs()).toBeNull();
   });
 });

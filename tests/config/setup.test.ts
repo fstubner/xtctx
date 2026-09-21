@@ -181,6 +181,39 @@ describe("setupProject", () => {
         "skill:claude-code:xtctx-handoff",
       ]),
     );
+
+    // The PATHS, not only the kinds. This is the user's one chance to see
+    // which files are about to change, and asserting kinds alone let every
+    // path in the plan be wrong — the plan is a hand-kept literal list, never
+    // compared to what setup writes, which is the hazard
+    // `disconnect-planned-paths.test.ts` exists for on the other side.
+    const planned = new Map(plan.writes.map((write) => [write.kind, write.path]));
+    expect(planned.get("config")).toBe(join(projectRoot, ".xtctx", "config.yaml"));
+    expect(planned.get("mcp:claude-code")).toBe(join(projectRoot, ".mcp.json"));
+    expect(planned.get("mcp:cursor")).toBe(join(projectRoot, ".cursor", "mcp.json"));
+    expect(planned.get("mcp:copilot")).toBe(join(projectRoot, ".vscode", "mcp.json"));
+    expect(planned.get("mcp:codex")).toBe(join(projectRoot, ".codex", "config.toml"));
+    expect(planned.get("hook:claude-code")).toBe(
+      join(projectRoot, ".claude", "settings.json"),
+    );
+  });
+
+  it("plans every file setup actually writes", async () => {
+    // The plan and the writes are two independent lists. Nothing compared
+    // them, so a file setup touches could be absent from the notice the user
+    // confirms — which is the whole point of showing it.
+    const plan = describeSetupPlan(projectRoot);
+    const result = await setupProject({ projectPath: projectRoot, homeDir, yes: true });
+
+    const planned = new Set(plan.writes.map((write) => write.path));
+    const unannounced = result.writes
+      .map((write) => write.path)
+      // Global configs are only planned with `includeGlobalMcp`, and setup
+      // only writes them under the same flag; both are off here.
+      .filter((path) => path.startsWith(projectRoot))
+      .filter((path) => !planned.has(path));
+
+    expect(unannounced).toEqual([]);
   });
 
   it("writes Copilot CLI global MCP only when explicitly requested", async () => {

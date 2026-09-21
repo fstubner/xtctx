@@ -134,7 +134,7 @@ export const site: SiteData = {
     badge: 'Local transcript retrieval for AI coding tools',
     heading: 'Keep project context portable across coding tools.',
     subhead:
-      'Move between supported coding agents without starting over. xtctx indexes the transcript files your tools already write and serves them over MCP, so the next agent can pick up recent context. Install the plugin and retrieval works — no project setup required.',
+      'Move between supported coding agents without starting over. xtctx indexes the transcript files your tools already write and serves them over MCP, so the next agent can pick up recent context. Install the plugin and retrieval works, with no project setup required.',
     proof: ['No project setup required', 'Raw transcripts stay local', 'Five MCP tools'],
     quickInstall: 'claude plugin marketplace add fstubner/xtctx && claude plugin install xtctx@xtctx',
     installLinkLabel: 'Get started',
@@ -244,7 +244,7 @@ export const site: SiteData = {
         label: 'Install the plugin',
         command: 'claude plugin marketplace add fstubner/xtctx && claude plugin install xtctx@xtctx',
         hint:
-          'Registers the MCP server and the handoff skill, and writes nothing into your project. Retrieval works straight away — the tools resolve the project from the working directory. Codex, Copilot, Cursor and Antigravity install from the same marketplace; see the README for their commands.',
+          'Registers the MCP server and the handoff skill, and writes nothing into your project. Retrieval works straight away, because the tools resolve the project from the working directory. Codex, Copilot, Cursor and Antigravity install from the same marketplace; see the README for their commands.',
       },
       {
         label: 'Add project wiring',

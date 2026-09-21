@@ -4,6 +4,7 @@ import {
   createRecentSessionsHandler,
   createSearchSessionsHandler,
   createSessionDetailHandler,
+  MAX_MESSAGE_CHARS,
 } from "@xtctx/mcp/tools/sessions";
 import { sanitizeErrorMessage } from "@xtctx/utils/errors";
 import type {
@@ -186,8 +187,13 @@ describe("response byte budgets", () => {
       messages: SessionMessage[];
     };
 
-    expect(result.messages[0].content.length).toBeLessThan(20_000);
-    expect(result.messages[0].content).toContain("truncated");
+    // The real cap, not a loose bound above it. `< 20_000` against a cap of
+    // 16_000 left 4KB of slack, and nothing pinned the surviving prefix: a
+    // truncation keeping one character would have passed.
+    const content = result.messages[0].content;
+    expect(content.startsWith("a".repeat(MAX_MESSAGE_CHARS))).toBe(true);
+    expect(content).toContain(`truncated ${64_000 - MAX_MESSAGE_CHARS} chars`);
+    expect(content.length).toBeLessThan(MAX_MESSAGE_CHARS + 100);
   });
 });
 
@@ -199,6 +205,45 @@ describe("status path disclosure", () => {
 
     expect(JSON.stringify(result)).not.toContain("store_paths");
     expect(JSON.stringify(result)).not.toContain("/home/user");
+
+    // Both assertions above are negative, and the fixture's only `/home/user`
+    // lives inside `store_paths` — so they tested the same omission twice, and
+    // returning `{ sessions, messages }` and nothing else passed both. The
+    // diagnostic has to still be a diagnostic: this is the part that says the
+    // omission is a redaction rather than an empty payload.
+    expect(result).toMatchObject({
+      vector_model: "fixture",
+      tools: [{ tool: "codex", detected: true }],
+    });
+  });
+
+  it("redacts a path carried inside a tool's error message", async () => {
+    // The path that matters is not always in `store_paths`. `last_error` is a
+    // raw error string from a scraper, and the fixture set it to null — so
+    // both `sanitizeErrorMessage` calls on this surface were dead code the
+    // test never reached.
+    class FailingToolService extends DetailFixtureService {
+      async getStatus(): Promise<HandoffStatus> {
+        const status = await super.getStatus();
+        return {
+          ...status,
+          tools: [
+            {
+              ...status.tools[0],
+              last_error: "EACCES: permission denied, open '/home/user/.codex/sessions/a.jsonl'",
+            },
+          ],
+        };
+      }
+    }
+
+    const handlers = createToolHandlers({ sessions: new FailingToolService([]) });
+    const result = await handlers.get("xtctx_continuity_status")?.({ format: "json" });
+    const payload = JSON.stringify(result);
+
+    expect(payload).not.toContain("/home/user");
+    // Redacted, not dropped: the operator still has to learn the store failed.
+    expect(payload).toContain("EACCES");
   });
 });
 
