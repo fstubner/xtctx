@@ -4,10 +4,15 @@
  * measured on a live 9,232-window project, covering the corpus that way
  * needed on the order of 570 searches.
  *
- * The default matters more than the flag. The session-start hook launches
- * `scan` detached, so a scan that drained unconditionally would start hours
- * of embedding every time an agent opened a large project. That is the
- * assertion below: without the flag, nothing calls the drain at all.
+ * The default matters more than the flag: without it, nothing calls the drain
+ * at all. That is the assertion below.
+ *
+ * These tests also pin that `scan --embed` touches no model when
+ * `XTCTX_DISABLE_EMBEDDINGS=1` is set. Auto-calibration was added to that path
+ * and did not check the switch, so it spawned two or three child processes
+ * that each loaded the real model — which timed both of these out at 60s on a
+ * CI runner, and would have cost a user minutes on a command they had told
+ * not to embed.
  */
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -54,6 +59,39 @@ describe("xtctx scan and the embedding backlog", () => {
 
     expect(drain).not.toHaveBeenCalled();
   }, 60_000);
+
+  it("does not calibrate when embeddings are switched off", async () => {
+    // `XTCTX_DISABLE_EMBEDDINGS=1` means the model is never loaded. Auto
+    // calibration loads it in a child process per device, so ignoring the
+    // switch turned "scan without touching a model" into minutes of doing
+    // exactly that — caught as a 60s timeout on a CI runner, where these two
+    // tests had always passed before.
+    // Home redirected at the empty temp dir, so the developer's own cached
+    // verdict cannot make this pass for the wrong reason: with one present,
+    // calibration is skipped regardless and the guard under test is never
+    // reached. That is exactly why these tests passed here and failed on CI.
+    const realHome = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+    process.env.HOME = homeDir;
+    process.env.USERPROFILE = homeDir;
+
+    const written: string[] = [];
+    const write = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(((chunk: unknown) => {
+        written.push(String(chunk));
+        return true;
+      }) as typeof process.stdout.write);
+
+    try {
+      await runScan({ projectPath: projectRoot, embed: true });
+    } finally {
+      write.mockRestore();
+      process.env.HOME = realHome.HOME;
+      process.env.USERPROFILE = realHome.USERPROFILE;
+    }
+
+    expect(written.join("")).not.toContain("Measuring this machine's embedding devices");
+  });
 
   it("drains it with --embed", async () => {
     const drain = vi.spyOn(SqliteHandoffIndex.prototype, "embedBacklog");

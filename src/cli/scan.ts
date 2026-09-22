@@ -43,6 +43,14 @@ interface ScanOptions {
  * reopening it with a different provider.
  */
 async function calibrateIfNeeded(): Promise<void> {
+  // `XTCTX_DISABLE_EMBEDDINGS=1` means the model is never loaded, and
+  // calibration loads it in two or three child processes — so ignoring the
+  // switch here made a scan that was supposed to touch no model spend minutes
+  // doing exactly that. It timed out two tests on a CI runner, which is the
+  // cheap version of the same surprise a user would get.
+  if (process.env.XTCTX_DISABLE_EMBEDDINGS === "1") {
+    return;
+  }
   if (await readDeviceVerdict()) {
     return;
   }

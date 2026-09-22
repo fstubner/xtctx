@@ -17,6 +17,15 @@ interface CalibrateOptions {
  * what every machine did before this existed.
  */
 export async function runCalibrate(options: CalibrateOptions = {}): Promise<void> {
+  // Asked for directly, so this says why nothing happened rather than
+  // silently doing nothing — unlike the automatic path in `scan --embed`.
+  if (process.env.XTCTX_DISABLE_EMBEDDINGS === "1") {
+    process.stdout.write(
+      "XTCTX_DISABLE_EMBEDDINGS=1 is set, so there is no model to time. Unset it and run this again.\n",
+    );
+    return;
+  }
+
   const existing = await readDeviceVerdict();
   if (existing && !options.force) {
     process.stdout.write(
