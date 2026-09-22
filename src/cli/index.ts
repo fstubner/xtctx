@@ -11,6 +11,7 @@ import { startMcpServer } from "../mcp/server.js";
 import type { SessionService } from "../handoff/types.js";
 import { readXtctxPackage } from "../utils/package-info.js";
 import { BACKGROUND_EMBED_BUDGET_MS, estimateVectorBacklog } from "../utils/duration.js";
+import { calibrateEmbeddingDevice, readDeviceVerdict } from "../handoff/device.js";
 
 const { version: CLI_VERSION } = readXtctxPackage(import.meta.url);
 
@@ -301,6 +302,37 @@ async function drainVectorsIfAffordable(sessions: SessionService): Promise<void>
   if (remaining === 0) {
     return;
   }
+
+  // Calibrate before judging affordability, not after — otherwise the
+  // uncalibrated state perpetuates itself.
+  //
+  // The estimate below is computed from the rate of whatever device is in use,
+  // which is the CPU until something calibrates. A large history on the CPU
+  // estimates well past the budget, so the drain is skipped; the drain was the
+  // only thing that would have made the project fast; and the machine stays on
+  // the CPU forever. The user who loses most is the one with the largest
+  // history, which is the one this whole mechanism is for.
+  //
+  // Only when there is a backlog to justify it, and never in front of a tool
+  // call — this runs detached from the server's start, alongside a drain that
+  // already takes minutes.
+  //
+  // It takes effect NEXT session, not this one. The provider was constructed
+  // with the device that was known at startup and keeps using it, so this
+  // session's drain still runs at the old speed and is still judged by the old
+  // estimate. Deliberately not relaxed on the strength of a verdict the
+  // running provider is not using: that would start an hour of CPU work on the
+  // promise of a GPU that is not attached until next time.
+  //
+  // `XTCTX_DISABLE_EMBEDDINGS=1` means no model is ever loaded, and
+  // calibration loads one per device.
+  if (process.env.XTCTX_DISABLE_EMBEDDINGS !== "1" && !(await readDeviceVerdict())) {
+    await calibrateEmbeddingDevice().catch(() => {
+      // Best-effort. Failing to find the fastest device is not a reason to
+      // stop using the one that has always worked.
+    });
+  }
+
   // No estimate means nothing has embedded yet on this machine, so there is no
   // measured rate to judge affordability by. Searches still vectorize
   // incrementally, which is what produces the rate this needs.
