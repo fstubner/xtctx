@@ -153,10 +153,14 @@ export async function setupProject(options: SetupOptions = {}): Promise<SetupRes
     });
   }
 
+  const claudeHook = await installClaudeHook(projectRoot);
+  if (claudeHook.failure) {
+    failures.push(claudeHook.failure);
+  }
   writes.push({
     path: join(projectRoot, ".claude", "settings.json"),
     kind: "hook:claude-code",
-    changed: await installClaudeHook(projectRoot),
+    changed: claudeHook.changed,
   });
 
   // The half setup cannot do. Claude Code ignores `permissions.allow` outright

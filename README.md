@@ -87,7 +87,10 @@ cursor-agent plugin marketplace add https://github.com/fstubner/xtctx
 
 VS Code reads the same package but has no CLI route: its plugin management
 lives in the Chat view, behind the `chat.plugins.enabled` setting. opencode
-has no plugin format yet, so `setup` is the only route there.
+has its own plugin system — JavaScript modules under `.opencode/plugins/`, or
+npm packages named in `opencode.json` — but does not implement the Agent
+Plugins standard the package above is built against, so `setup` is the only
+route there.
 
 Either route registers the same MCP server (`npx -y xtctx`) and the same
 handoff skill. Because the plugin writes no project config, `xtctx status`
@@ -136,8 +139,10 @@ pass `--global-mcp` (as with `setup`) to remove xtctx from them as well.
 `xtctx scan` reads every enabled transcript store into the project's index and
 exits. The MCP server does the same thing on its own every time it starts, so
 the session after another tool's work starts with that work already indexed.
-The scan is incremental and runs in the background; against a 19 GB Codex
-store it measured under ten seconds.
+The scan is incremental and runs in the background: it resumes from a
+per-file offset, so after the first pass it reads only what each tool has
+appended. The first pass over a large history is the expensive one — see the
+note above.
 
 Generated MCP clients should use:
 
@@ -261,6 +266,12 @@ npm run demo:public
 processes and load a real embedding model. What each suite defends, what it
 structurally cannot catch, and how that was measured is in
 [`docs/testing-strategy.md`](docs/testing-strategy.md).
+
+Indexing throughput — what has been measured, what was tried and rejected, and
+what is still open — is in
+[`docs/embedding-performance.md`](docs/embedding-performance.md). Read it
+before optimizing the embedding path; several of the obvious ideas have
+already been measured and lost.
 
 `npm run demo:public` creates synthetic Claude Code and Codex transcript stores
 in a temporary project, starts the built MCP server, and calls the public
