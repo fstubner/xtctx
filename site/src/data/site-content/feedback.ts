@@ -17,6 +17,7 @@ import type { Feedback } from './types';
 export const feedback: Feedback = {
   enabled: true,
   prompt: 'Something wrong, or missing?',
+  repo: 'fstubner/xtctx',
   problem: {
     label: 'Report a problem',
     template: 'bug.yml',

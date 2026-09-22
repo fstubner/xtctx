@@ -1,62 +1,60 @@
 import type { Platform, PlatformInstall, SectionCopy, TryCommand } from './types';
 
 export const installCopy: SectionCopy = {
-  heading: 'Install',
-  leadHtml: 'Pick a platform. Position 0 in each list is the recommended route and renders as the card; the rest are alternatives.',
+  heading: 'Install, then check',
+  leadHtml:
+    'The plugin gets you the MCP tools in every project. Add setup where you want the handoff delivered automatically, and use status to check what is wired.',
 };
 
-const RELEASE = 'https://github.com/your-org/example/releases/latest/download';
+// Source install is a flat list, not per-OS. Same CLI entries on every
+// platform; no desktop build.
+const cliEntries = [
+  {
+    label: 'Install the plugin',
+    command: 'claude plugin marketplace add fstubner/xtctx && claude plugin install xtctx@xtctx',
+    hint:
+      'Registers the MCP server and the handoff skill machine-wide, and writes nothing into your project. The tools then reach every project; each one answers once it has been set up, and names the command until then. Codex, Copilot, Cursor and Antigravity install from the same marketplace; see the README for their commands.',
+  },
+  {
+    label: 'Add project wiring',
+    command: 'npx -y xtctx setup',
+    hint:
+      'Optional upgrade. Writes managed instruction blocks so the next agent receives the handoff without calling a tool, plus the SessionStart hook, per-tool MCP config, and skill sync. The only route for opencode.',
+  },
+  {
+    label: 'Check what is wired',
+    command: 'npx -y xtctx status',
+    hint:
+      'Reports configured tools, cached transcript freshness, skill drift, managed blocks, and repair hints.',
+  },
+  {
+    label: 'Start MCP over stdio',
+    command: 'npx -y xtctx',
+    hint:
+      'Starts the MCP server for clients. In a normal terminal it prints setup and status help.',
+  },
+];
 
 export const installByPlatform: Record<Platform, PlatformInstall> = {
-  windows: {
-    cli: [
-      { label: 'winget', command: 'winget install example' },
-      { label: 'Scoop', command: 'scoop install example' },
-      { label: 'Install script', command: 'iwr -useb https://example.com/install.ps1 | iex' },
-    ],
-    desktop: [
-      {
-        label: 'Windows installer',
-        href: `${RELEASE}/example-windows-x86_64.msi`,
-        hint: 'Unsigned: SmartScreen will ask before it runs.',
-      },
-    ],
-  },
-  macos: {
-    cli: [
-      { label: 'Homebrew', command: 'brew install example' },
-      { label: 'Install script', command: 'curl -fsSL https://example.com/install.sh | bash' },
-    ],
-    desktop: [
-      { label: 'Apple silicon', href: `${RELEASE}/example-macos-aarch64.dmg` },
-      { label: 'Intel', href: `${RELEASE}/example-macos-x86_64.dmg` },
-    ],
-  },
-  linux: {
-    cli: [
-      { label: 'apt', command: 'apt install example' },
-      { label: 'Install script', command: 'curl -fsSL https://example.com/install.sh | bash' },
-      { label: 'Binary', href: `${RELEASE}/example-linux-x86_64.tar.gz`, hint: 'x86_64' },
-    ],
-    desktop: [{ label: 'AppImage', href: `${RELEASE}/example-linux-x86_64.AppImage` }],
-  },
+  windows: { cli: cliEntries, desktop: [] },
+  macos: { cli: cliEntries, desktop: [] },
+  linux: { cli: cliEntries, desktop: [] },
 };
 
 // The "try it" block: the first few commands someone runs after installing.
+// Source tryCommands are bare strings; no comments in source.
 export const tryCommands: TryCommand[] = [
-  { comment: 'Run it once', command: 'example run' },
-  { comment: 'Read the output from a script', command: 'example run --json' },
-  { comment: 'See every flag', command: 'example --help' },
+  { comment: '', command: 'npx -y xtctx setup' },
+  { comment: '', command: 'npx -y xtctx status' },
+  { comment: '', command: 'npx -y xtctx --help' },
 ];
 
 export const installBinariesNote =
-  'Prebuilt binaries are attached to every GitHub release for Windows, macOS and Linux.';
+  'Read the <a href="https://github.com/fstubner/xtctx#readme">README</a> for supported tools and local transcript notes.';
 
 // Two things /llms.txt says that no page does: a build-from-source route and
 // any caveat a reader acting on the install list needs. One line each.
-export const installFromSource = 'cargo install example';
+// No source fromSource / installNotes.
+export const installFromSource = '';
 
-export const installNotes = [
-  'Example needs no runtime: the binary is self-contained on all three',
-  'platforms.',
-];
+export const installNotes: string[] = [];
