@@ -1052,6 +1052,12 @@ export class SqliteHandoffIndex implements SessionService {
    * background embedding is what would make a large project on a CPU
    * unusable.
    */
+  /** See `SessionService.retargetEmbeddingDevice`. */
+  retargetEmbeddingDevice(device: string | undefined): boolean {
+    const provider = this.embeddingProvider as { retargetDevice?: (d: string | undefined) => boolean };
+    return provider.retargetDevice?.(device) ?? false;
+  }
+
   async embedBacklog(onProgress?: (embedded: number, total: number) => void): Promise<number> {
     await this.whenScanSettled();
     // No `isReady` check and no degrading to keyword: `embedBatch` loads the

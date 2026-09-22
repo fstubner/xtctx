@@ -247,9 +247,40 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
      * the CPU on this machine, because the one configuration where a GPU is
      * catastrophic is also the one where it does not fail.
      */
-    readonly device?: string,
+    device?: string,
   ) {
     this.model = model;
+    this.deviceName = device;
+  }
+
+  private deviceName: string | undefined;
+
+  get device(): string | undefined {
+    return this.deviceName;
+  }
+
+  /**
+   * Point this provider at a device, if it is not too late to matter.
+   *
+   * The device is only read when the pipeline loads, and loading is lazy, so
+   * until then changing it is free. This exists so calibration can take effect
+   * in the session that ran it rather than the next one: the server starts,
+   * finds no verdict and a backlog worth draining, measures the devices in
+   * child processes, and points the not-yet-loaded provider at the winner
+   * before anything embeds.
+   *
+   * Refuses once the model is loaded or loading, and says so by returning
+   * false. Swapping the device under a loaded pipeline would mean discarding
+   * it and paying the load again, possibly while a tool call is waiting on it,
+   * to save time on work that is already running. The caller reports the
+   * verdict as taking effect next session instead.
+   */
+  retargetDevice(device: string | undefined): boolean {
+    if (this.extractor !== null || this.loading !== null) {
+      return false;
+    }
+    this.deviceName = device;
+    return true;
   }
 
   async embed(text: string): Promise<Float32Array> {
@@ -323,7 +354,7 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
     };
     const extractor = await transformers.pipeline("feature-extraction", this.model, {
       dtype: this.dtype,
-      ...(this.device === undefined ? {} : { device: this.device }),
+      ...(this.deviceName === undefined ? {} : { device: this.deviceName }),
     });
 
     // `model_max_length` is a getter with no setter in @huggingface/transformers,

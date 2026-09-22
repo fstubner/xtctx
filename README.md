@@ -173,13 +173,19 @@ without one, running to completion however long that takes rather than to a
 budget. You need it when `xtctx status` says the backlog is too large to
 finish in the background — otherwise the server gets there on its own.
 
-`xtctx calibrate` times the embedding model on each execution provider this
-machine offers and remembers the fastest in `~/.xtctx/device.json`. On a
-machine with a usable GPU that has measured roughly six times faster than the
-CPU; on one without, it picks the CPU and nothing changes. `scan --embed`
-runs it automatically the first time, because it is about to spend far longer
-than the measurement costs; `--no-calibrate` skips that. Vectors are identical
-whichever device wins, so this changes speed and nothing else.
+Indexing picks a device by measuring it, and **you do not have to do anything
+to get that**. The first time a machine has embedding work worth doing — the
+MCP server finding a backlog at session start, or `xtctx scan --embed` — it
+times the embedding model on each execution provider available and remembers
+the fastest in `~/.xtctx/device.json`, once per machine. On a machine with a
+usable GPU that has measured roughly six times faster than the CPU; on one
+without, it picks the CPU and nothing changes. Vectors are identical whichever
+device wins, so this changes speed and nothing else.
+
+`xtctx calibrate` runs that measurement on demand and prints it. You need it
+only to re-measure after the hardware changes (`--force`) or to see the
+numbers — it is not a setup step. `scan --no-calibrate` skips the automatic
+run for anyone who would rather start embedding immediately.
 
 Generated MCP clients should use:
 

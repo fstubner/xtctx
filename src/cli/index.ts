@@ -317,26 +317,50 @@ async function drainVectorsIfAffordable(sessions: SessionService): Promise<void>
   // call — this runs detached from the server's start, alongside a drain that
   // already takes minutes.
   //
-  // It takes effect NEXT session, not this one. The provider was constructed
-  // with the device that was known at startup and keeps using it, so this
-  // session's drain still runs at the old speed and is still judged by the old
-  // estimate. Deliberately not relaxed on the strength of a verdict the
-  // running provider is not using: that would start an hour of CPU work on the
-  // promise of a GPU that is not attached until next time.
+  // It applies to THIS session where it can. The provider loads its model
+  // lazily, so until something embeds, pointing it at a different device costs
+  // nothing — and the whole point of measuring is undone if the answer only
+  // arrives next time. `retargetEmbeddingDevice` returns false once the model
+  // is loaded or loading, which is the case where the drain below is already
+  // running on the old device and swapping it would mean paying the load again
+  // to speed up work in flight.
   //
   // `XTCTX_DISABLE_EMBEDDINGS=1` means no model is ever loaded, and
   // calibration loads one per device.
+  let applied = false;
+  let calibrated: Awaited<ReturnType<typeof calibrateEmbeddingDevice>> | undefined;
   if (process.env.XTCTX_DISABLE_EMBEDDINGS !== "1" && !(await readDeviceVerdict())) {
-    await calibrateEmbeddingDevice().catch(() => {
-      // Best-effort. Failing to find the fastest device is not a reason to
-      // stop using the one that has always worked.
-    });
+    calibrated = await calibrateEmbeddingDevice().catch(() => undefined);
+    if (calibrated) {
+      applied = sessions.retargetEmbeddingDevice?.(calibrated.device) ?? false;
+    }
   }
+
+  // Judge affordability by the rate that will actually apply.
+  //
+  // `etaMs` above was built from `vector_ms_per_segment`, which was measured
+  // on the device in use before calibration — the CPU. Keeping it would skip
+  // the drain on exactly the machines calibration just made fast, which is the
+  // trap this whole branch exists to close.
+  //
+  // The substituted rate is not a projection: calibration measured
+  // milliseconds per segment for this model on the chosen device, and
+  // `estimateVectorBacklog` multiplies a per-segment rate by the segment
+  // backlog. Same arithmetic, fresher measurement of the same quantity.
+  let effectiveEtaMs = etaMs;
+  if (applied) {
+    const fresh = await sessions.getStatus();
+    const chosen = calibrated?.measured.find((row) => row.device === calibrated.device);
+    if (chosen?.msPerSegment != null) {
+      effectiveEtaMs = fresh.vector_segment_backlog * chosen.msPerSegment;
+    }
+  }
+  const current = { etaMs: effectiveEtaMs };
 
   // No estimate means nothing has embedded yet on this machine, so there is no
   // measured rate to judge affordability by. Searches still vectorize
   // incrementally, which is what produces the rate this needs.
-  if (etaMs === null || etaMs > BACKGROUND_EMBED_BUDGET_MS) {
+  if (current.etaMs === null || current.etaMs > BACKGROUND_EMBED_BUDGET_MS) {
     return;
   }
 

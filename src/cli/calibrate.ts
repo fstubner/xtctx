@@ -9,12 +9,19 @@ interface CalibrateOptions {
  * Time the embedding model on every execution provider this machine offers,
  * and remember the fastest.
  *
- * A command rather than something that happens on its own, because it costs
- * real seconds and loads the model once per device. The MCP server only ever
- * *reads* the verdict; nothing spawns processes behind an agent's tool call.
+ * Nobody needs to run this. Both automatic paths cover it: `xtctx scan
+ * --embed` calibrates before a long embed, and the MCP server calibrates at
+ * start when it finds a backlog and no verdict, applying the result to the
+ * not-yet-loaded provider in the same session.
  *
- * Running it is optional. A machine that never does stays on CPU, which is
- * what every machine did before this existed.
+ * It stays as a command for the two things automation cannot do: `--force`
+ * after the hardware changes, and showing the measurements to someone who
+ * wants to see them. It is not a step in getting set up, and nothing should
+ * tell a user it is.
+ *
+ * Still never behind an agent's tool call. That line is about where the cost
+ * lands, not about whether it is automatic: both automatic callers are
+ * background work that was already going to take minutes.
  */
 export async function runCalibrate(options: CalibrateOptions = {}): Promise<void> {
   // Asked for directly, so this says why nothing happened rather than

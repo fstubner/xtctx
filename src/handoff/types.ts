@@ -156,6 +156,13 @@ export interface SessionService {
    * between commands to work the backlog down.
    */
   embedBacklog?(onProgress?: (embedded: number, total: number) => void): Promise<number>;
+  /**
+   * Point the embedding provider at a device, returning whether it applied.
+   *
+   * False means the model is already loaded or loading, so the choice arrives
+   * too late for this session and will be picked up on the next start.
+   */
+  retargetEmbeddingDevice?(device: string | undefined): boolean;
 }
 
 export interface IndexProgress {
