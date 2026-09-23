@@ -88,9 +88,20 @@ export class OpenAiEmbeddingProvider implements EmbeddingProvider {
       // its connection open in undici until it is garbage collected, and a
       // vectorizing pass makes this call hundreds of times.
       await response.body?.cancel().catch(() => {});
+      // A 429 is the server asking to be asked later, so the retry waits —
+      // for `Retry-After` when it says, bounded so one call cannot stall a
+      // pass. Retrying a rate limit instantly almost always earns a second 429.
+      // A 5xx retries at once: that one is not a request to slow down.
+      if (response.status === 429) {
+        await sleep(retryDelayMs(response.headers.get("retry-after")));
+      }
       response = await this.postEmbeddings(texts);
     }
     if (!response.ok) {
+      // Same reason as above, on the path that gives up: a misconfigured
+      // endpoint answers every call with an error, and each unread body held a
+      // connection until GC — one per chunk across a whole pass.
+      await response.body?.cancel().catch(() => {});
       throw new Error(safeHttpError(response.status));
     }
 
@@ -132,6 +143,28 @@ export class OpenAiEmbeddingProvider implements EmbeddingProvider {
     }
     return value;
   }
+}
+
+/** Longest a single 429 retry waits, whatever `Retry-After` asks for. */
+const MAX_RETRY_DELAY_MS = 5_000;
+/** Wait when a 429 gives no `Retry-After`. */
+const DEFAULT_RETRY_DELAY_MS = 1_000;
+
+/** `Retry-After` in seconds or as an HTTP date, clamped; see `embedChunk`. */
+export function retryDelayMs(header: string | null, now = Date.now()): number {
+  if (header === null) {
+    return DEFAULT_RETRY_DELAY_MS;
+  }
+  const seconds = Number(header);
+  const delay = Number.isFinite(seconds) ? seconds * 1_000 : Date.parse(header) - now;
+  if (!Number.isFinite(delay) || delay < 0) {
+    return DEFAULT_RETRY_DELAY_MS;
+  }
+  return Math.min(delay, MAX_RETRY_DELAY_MS);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function safeHttpError(status: number): string {

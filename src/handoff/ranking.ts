@@ -56,16 +56,16 @@ export const MIN_SEMANTIC_COSINE = 0.62;
  *
  *   0.28   mrr 0.571  recall@5 0.783  top1 0.433   (false positives 0.05)
  *   0.32   mrr 0.581  recall@5 0.800  top1 0.433
- *   0.36   mrr 0.598  recall@5 0.850  top1 0.450   <- here
+ *   0.36   mrr 0.598  recall@5 0.850  top1 0.450   <- was, for MiniLM
  *   0.40   mrr 0.592  recall@5 0.850  top1 0.433
  *
- * This sweep predates #318, which rebuilt the eval corpus to use realistic
- * session lengths because the old one "has been measuring a world that does
- * not exist". The committed baseline moved with it — MiniLM hybrid reads
- * 0.333 / 0.533 / 0.183 today — so the SHAPE of the sweep is what survives,
- * not the absolute figures. The threshold has not been re-swept against the
- * current corpus; 0.36 is inherited rather than re-derived, which is worth
- * knowing before treating it as measured.
+ * That table is MiniLM's, and HISTORICAL: the default model is bge-small now,
+ * and its floor is 0.64, swept on 2026-09-21 with `scripts/embedding-bakeoff.ts`
+ * against the current corpus (see `DEFAULT_EMBEDDING_MODEL` for the figures).
+ * It is kept because it is the clearest record of why the number belongs to
+ * the model. It also predates #318, which rebuilt the eval corpus to use
+ * realistic session lengths — so even for MiniLM its absolute figures are not
+ * comparable with today's baseline.
  *
  * The trap worth naming: held at 0.36 while the default was mpnet, that model
  * looked like it regressed false positives to 0.10. It had not — the

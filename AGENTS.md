@@ -77,7 +77,7 @@ Do not rely on this block for a generated summary; raw local transcripts are aut
 - Transport: stdio
 
 ## Notes
-- Indexing is on-demand from MCP recent, detail, and search calls.
+- Indexing runs when the MCP server starts and on recent, detail, and search calls; `xtctx scan` does it on demand.
 - There is no xtctx daemon, API server, dashboard, durable memory, or generated brief.
 - Content outside this managed block is preserved.
 <!-- xtctx:end -->

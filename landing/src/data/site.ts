@@ -135,7 +135,7 @@ export const site: SiteData = {
     heading: 'Keep project context portable across coding tools.',
     subhead:
       'Move between supported coding agents without starting over. xtctx indexes the transcript files your tools already write and serves them over MCP, so the next agent can pick up recent context. Install the plugin once to reach the tools everywhere, then opt each project in with a single setup command.',
-    proof: ['One command per project', 'Raw transcripts stay local', 'Five MCP tools'],
+    proof: ['One command per project', 'Local by default', 'Five MCP tools'],
     quickInstall: 'claude plugin marketplace add fstubner/xtctx && claude plugin install xtctx@xtctx',
     installLinkLabel: 'Get started',
     sourceUrl: REPO_URL,
@@ -218,11 +218,11 @@ export const site: SiteData = {
       body:
         'Status reports configured tools, transcript freshness, selected skills, managed blocks, and unsupported targets.',
       codeHtml: `<span class="dim">$</span> <span class="cmd-text">npx -y xtctx status</span>
-<span class="success-text">configured</span>
-<span class="info-text">mcp command</span> npx -y xtctx
-<span class="info-text">cache</span> 12 sessions
-<span class="info-text">codex</span> instruction only
-<span class="info-text">claude-code</span> executable hook`,
+<span class="info-text">MCP</span>      npx -y xtctx
+<span class="info-text">Data</span>     12 sessions, 1840 messages, 460 retrieval windows, 460 vectorized
+<span class="info-text">Tools:</span>
+  <span class="success-text">+</span> codex         detected; 7 sessions; hook: instruction-only
+  <span class="success-text">+</span> claude-code   detected; 5 sessions; hook: executable`,
     },
     {
       title: 'Search stays local',
@@ -285,7 +285,7 @@ export const site: SiteData = {
     },
     {
       q: 'Does xtctx run a background service?',
-      a: 'No. xtctx has no daemon, API server, dashboard, watcher, or web service. MCP retrieval calls update the local cache on demand.',
+      a: 'No. xtctx has no daemon, API server, dashboard, watcher, or web service. Each agent starts its own xtctx MCP server, which indexes when it starts and when it is called, and stops when the agent does.',
     },
     {
       q: 'Does xtctx sync skills?',
@@ -297,7 +297,7 @@ export const site: SiteData = {
     },
     {
       q: 'What are the limits?',
-      a: 'xtctx is local-only. Transcript formats can change upstream, semantic vectors are created lazily, and keyword fallback is expected when local vector generation is unavailable.',
+      a: 'xtctx is local-only by default; sending window text to an external embedding endpoint is something a project has to opt into by hand. Transcript formats can change upstream, semantic vectors are built incrementally in the background, and search falls back to keyword while vectors are missing or the local model is unavailable.',
     },
     {
       q: 'Can I test it without private transcripts?',

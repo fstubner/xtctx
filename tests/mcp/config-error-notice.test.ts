@@ -14,6 +14,11 @@
 import { describe, expect, it } from "vitest";
 import { createToolHandlers } from "@xtctx/mcp/server";
 
+/** The prose, whether the notice came back as text or as a JSON payload. */
+function prose(answer: unknown): string {
+  return typeof answer === "string" ? answer : String((answer as { message?: unknown }).message);
+}
+
 const DETAILS = {
   projectRoot: "/repo",
   configPath: "/repo/.xtctx/config.yaml",
@@ -26,7 +31,7 @@ describe("an unreadable config over MCP", () => {
 
     expect(handlers.size).toBeGreaterThan(0);
     for (const [name, handler] of handlers) {
-      const answer = String(await handler({}));
+      const answer = prose(await handler({}));
 
       expect(answer, name).toContain(".xtctx/config.yaml");
       expect(answer, name).toContain("Flow sequence must end with a ]");
@@ -37,7 +42,7 @@ describe("an unreadable config over MCP", () => {
   it("says the history is unread rather than absent", async () => {
     const [, handler] = [...createToolHandlers({ configError: DETAILS })][0];
 
-    const answer = String(await handler({}));
+    const answer = prose(await handler({}));
 
     expect(answer).toMatch(/not an empty history/);
     expect(answer).toContain("Nothing has been changed.");
@@ -48,7 +53,33 @@ describe("an unreadable config over MCP", () => {
     // agent "helpfully" rewriting it would be widening their own access.
     const [, handler] = [...createToolHandlers({ configError: DETAILS })][0];
 
-    expect(String(await handler({}))).toMatch(/Do not edit it unprompted/);
+    expect(prose(await handler({}))).toMatch(/Do not edit it unprompted/);
+  });
+
+  it("answers the manifest in JSON, which is what an orchestrator parses", async () => {
+    // The manifest defaults to JSON and documents a versioned contract. These
+    // notices used to be one prose string for every tool, so an orchestrator
+    // calling it in a broken project got English it could not parse.
+    const handler = createToolHandlers({ configError: DETAILS }).get("xtctx_handoff_manifest")!;
+
+    const answer = (await handler({})) as Record<string, unknown>;
+
+    expect(answer.status).toBe("config_unreadable");
+    expect(answer.config_path).toBe("/repo/.xtctx/config.yaml");
+    expect(String(answer.message)).toContain("Do not edit it unprompted");
+  });
+
+  it("answers any tool in JSON when asked for JSON", async () => {
+    const handler = createToolHandlers({ unconfiguredProjectRoot: "/repo" }).get(
+      "xtctx_recent_sessions",
+    )!;
+
+    const answer = (await handler({ format: "json" })) as Record<string, unknown>;
+
+    expect(answer.status).toBe("not_configured");
+    expect(answer.setup_command).toBe("npx -y xtctx setup");
+    // And stays prose when not asked.
+    expect(typeof (await handler({}))).toBe("string");
   });
 
   it("leaves the not-configured case alone, which means something different", async () => {
@@ -56,6 +87,6 @@ describe("an unreadable config over MCP", () => {
     const handlers = createToolHandlers({ unconfiguredProjectRoot: "/repo" });
     const [, handler] = [...handlers][0];
 
-    expect(String(await handler({}))).toContain("not configured for xtctx");
+    expect(prose(await handler({}))).toContain("not configured for xtctx");
   });
 });

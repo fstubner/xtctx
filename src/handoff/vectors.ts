@@ -9,6 +9,7 @@ import {
 } from "./embeddings.js";
 import { type CountRow, placeholders, setSetting } from "./schema.js";
 import { serializeVector } from "./vector.js";
+import { PROJECT_ROOT_SQL } from "./queries.js";
 
 /** Poll interval while waiting for the model; see `waitUntilEmbeddingReady`. */
 const EMBEDDING_WARM_POLL_MS = 100;
@@ -77,7 +78,17 @@ export function dropVectorsFromOtherModels(db: DatabaseHandle, model: string): v
  * Computed in SQL rather than by reading content out: the whole point is to
  * cost the backlog without loading it.
  */
-export function countUnvectorizedSegments(db: DatabaseHandle, model: string): number {
+export function countUnvectorizedSegments(
+  db: DatabaseHandle,
+  model: string,
+  /**
+   * Count only this project's windows. `xtctx status` shows a per-project
+   * window count beside this, and without the scope the two disagreed in any
+   * index that holds another project's sessions (a copied `.xtctx/`, a renamed
+   * root): "N windows outstanding" with a duration computed from more than N.
+   */
+  scopedRoot?: string,
+): number {
   const row = db
     .prepare(
       // Integer ceiling, then the same cap `capSegments` applies. At least one
@@ -88,9 +99,10 @@ export function countUnvectorizedSegments(db: DatabaseHandle, model: string): nu
          ON v.unit_id = u.id
         AND v.model = ?
         AND v.content_hash = u.content_hash
-       WHERE v.unit_id IS NULL`,
+       WHERE v.unit_id IS NULL
+       ${scopedRoot === undefined ? "" : `AND u.session_ref IN (SELECT session_ref FROM sessions WHERE ${PROJECT_ROOT_SQL} = ?)`}`,
     )
-    .get(model) as CountRow | undefined;
+    .get(...(scopedRoot === undefined ? [model] : [model, scopedRoot])) as CountRow | undefined;
   return row?.count ?? 0;
 }
 

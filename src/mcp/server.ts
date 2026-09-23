@@ -210,17 +210,23 @@ export function createToolHandlers(
   const handlers = new Map<string, ToolHandler>();
 
   if (dependencies.unconfiguredProjectRoot) {
-    const notice = notConfigured(dependencies.unconfiguredProjectRoot);
     for (const name of TOOL_NAMES) {
-      handlers.set(name, notice);
+      handlers.set(name, asRequestedFormat(name, notConfigured(dependencies.unconfiguredProjectRoot), {
+        status: "not_configured",
+        project_root: dependencies.unconfiguredProjectRoot,
+        setup_command: "npx -y xtctx setup",
+      }));
     }
     return handlers;
   }
 
   if (dependencies.configError) {
-    const notice = configUnreadable(dependencies.configError);
     for (const name of TOOL_NAMES) {
-      handlers.set(name, notice);
+      handlers.set(name, asRequestedFormat(name, configUnreadable(dependencies.configError), {
+        status: "config_unreadable",
+        config_path: dependencies.configError.configPath,
+        error: dependencies.configError.message,
+      }));
     }
     return handlers;
   }
@@ -372,6 +378,40 @@ function configUnreadable(details: {
       "the same error. Do not edit it unprompted: it records which transcript",
       "stores they allowed to be read.",
     ].join("\n");
+}
+
+/**
+ * Answer a notice in the format the caller asked for.
+ *
+ * Both notices used to be one prose string for every tool. `xtctx_handoff_manifest`
+ * defaults to JSON and documents a versioned contract for orchestrators, so a
+ * program calling it in an unconfigured directory got English it could not
+ * parse and no `structuredContent` — while an agent reading markdown was fine.
+ * The prose stays in the payload, because the words are what tell a person
+ * what to do.
+ */
+function asRequestedFormat(
+  toolName: string,
+  prose: ToolHandler,
+  fields: Record<string, unknown>,
+): ToolHandler {
+  return async (params: ToolParams) => {
+    const text = await prose(params);
+    const format = (params as { format?: unknown } | undefined)?.format;
+    const wantsJson =
+      format === "json" || (format === undefined && toolName === "xtctx_handoff_manifest");
+    if (!wantsJson) {
+      return text;
+    }
+    // Paths go through the same untrusted-text handling as the prose copy.
+    const safeFields = Object.fromEntries(
+      Object.entries(fields).map(([key, value]) => [
+        key,
+        typeof value === "string" ? inlineSafe(value) : value,
+      ]),
+    );
+    return { ...safeFields, message: text };
+  };
 }
 
 function missingDependency(dependency: string): ToolHandler {

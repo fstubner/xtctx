@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   OpenAiEmbeddingProvider,
   openAiEmbeddingIdentity,
+  retryDelayMs,
 } from "@xtctx/handoff/openai-embeddings";
 import { DEFAULT_EMBEDDING_MODEL, TransformersEmbeddingProvider } from "@xtctx/handoff/embeddings";
 import { parseEmbeddingConfig } from "@xtctx/handoff/embedding-config";
@@ -134,7 +135,7 @@ describe("OpenAiEmbeddingProvider", () => {
     globalThis.fetch = vi.fn(async () => {
       calls += 1;
       if (calls === 1) {
-        return new Response("rate limited", { status: 429 });
+        return new Response("rate limited", { status: 429, headers: { "retry-after": "0" } });
       }
       return jsonResponse({ data: [{ embedding: [1, 1] }] });
     }) as typeof fetch;
@@ -220,6 +221,54 @@ describe("OpenAiEmbeddingProvider", () => {
     } finally {
       delete process.env.XTCTX_TEST_EMBED_KEY;
     }
+  });
+});
+
+describe("retrying a rate limit", () => {
+  it("waits for what Retry-After asks, in seconds or as a date", () => {
+    expect(retryDelayMs("2")).toBe(2_000);
+    const now = Date.parse("2026-09-23T10:00:00.000Z");
+    expect(retryDelayMs("Wed, 23 Sep 2026 10:00:03 GMT", now)).toBe(3_000);
+  });
+
+  it("never waits longer than the cap, however long it is asked to", () => {
+    // One stalled call must not stall a whole vectorizing pass.
+    expect(retryDelayMs("3600")).toBe(5_000);
+  });
+
+  it("waits a default second when the header is absent or unreadable", () => {
+    expect(retryDelayMs(null)).toBe(1_000);
+    expect(retryDelayMs("soon")).toBe(1_000);
+    expect(retryDelayMs("-5")).toBe(1_000);
+  });
+});
+
+describe("error responses", () => {
+  const originalFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("releases the body of a response it gives up on", async () => {
+    // A misconfigured endpoint answers every chunk with an error, and each
+    // unread body held its connection until garbage collection.
+    let cancelled = false;
+    globalThis.fetch = vi.fn(async () => {
+      const body = new ReadableStream({
+        cancel() {
+          cancelled = true;
+        },
+      });
+      return new Response(body, { status: 404 });
+    }) as typeof fetch;
+
+    const provider = new OpenAiEmbeddingProvider({
+      baseUrl: "http://localhost:11434/v1",
+      model: "nomic-embed-text",
+    });
+
+    await expect(provider.embedBatch(["x"])).rejects.toThrow(/HTTP 404/);
+    expect(cancelled).toBe(true);
   });
 });
 

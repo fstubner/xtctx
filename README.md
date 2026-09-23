@@ -174,9 +174,8 @@ budget. You need it when `xtctx status` says the backlog is too large to
 finish in the background — otherwise the server gets there on its own.
 
 Indexing picks a device by measuring it, and **you do not have to do anything
-to get that**. The first time a machine has embedding work worth doing — the
-MCP server finding a backlog at session start, or `xtctx scan --embed` — it
-times the embedding model on each execution provider available and remembers
+to get that**. The first time the MCP server starts on a machine, or the
+first `xtctx scan --embed`, it times the embedding model on each execution provider available and remembers
 the fastest in `~/.xtctx/device.json`, once per machine. On a machine with a
 usable GPU that has measured roughly six times faster than the CPU; on one
 without, it picks the CPU and nothing changes. Vectors are identical whichever

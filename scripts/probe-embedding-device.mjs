@@ -47,12 +47,15 @@ import { pathToFileURL } from "node:url";
  * Candidates, in the order a fallback chain would try them.
  *
  * `auto` is what @huggingface/transformers picks when `device` is not passed —
- * which is what xtctx does today, so it is the baseline any change is measured
- * against, not a fourth option.
+ * which is what xtctx did before calibration existed, so it is the baseline any
+ * change is measured against, not a fourth option.
  */
 const DEVICES = ["cpu", "dml", "webgpu", "auto"];
 
-const MODEL = "Xenova/all-MiniLM-L6-v2";
+// Kept in step with DEFAULT_EMBEDDING_MODEL in src/handoff/embeddings.ts by
+// hand: this runs without a build, so it cannot import the TypeScript. It was
+// still measuring MiniLM for two days after the default moved to bge-small.
+const MODEL = "Xenova/bge-small-en-v1.5";
 const DTYPE = "fp32";
 /**
  * Enough segments for a timing to mean something, few enough that a CI runner

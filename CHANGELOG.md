@@ -7,6 +7,11 @@ Entries are written by the `release` workflow when a release is cut by hand.
 
 ## [0.21.8](https://github.com/fstubner/xtctx/compare/xtctx-v0.21.7...xtctx-v0.21.8) (2026-08-31)
 
+> **Not on npm.** 0.20.0 through 0.21.8 were tagged and given GitHub
+> Releases, but none of them was ever published to npm — the last version
+> published before them is 0.19.0. Everything listed from here down to 0.20.0
+> reaches `npx -y xtctx` users only in the next version that is published.
+
 
 ### Bug Fixes
 

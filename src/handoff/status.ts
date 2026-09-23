@@ -114,7 +114,7 @@ export async function buildStatus(inputs: StatusInputs): Promise<HandoffStatus> 
     retrieval_units: retrievalUnitCount,
     vectorized_units: vectorizedUnitCount,
     vector_ms_per_unit: numericSetting(db, "vector_ms_per_unit"),
-    vector_segment_backlog: countUnvectorizedSegments(db, vectorModel),
+    vector_segment_backlog: countUnvectorizedSegments(db, vectorModel, scopedRoot),
     vector_ms_per_segment: numericSetting(db, "vector_ms_per_segment"),
     vector_model: vectorModel,
     vector_device: vectorDevice,

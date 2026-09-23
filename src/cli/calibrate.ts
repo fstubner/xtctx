@@ -11,8 +11,8 @@ interface CalibrateOptions {
  *
  * Nobody needs to run this. Both automatic paths cover it: `xtctx scan
  * --embed` calibrates before a long embed, and the MCP server calibrates at
- * start when it finds a backlog and no verdict, applying the result to the
- * not-yet-loaded provider in the same session.
+ * start on a machine with no verdict, deferring the model's first load until
+ * the result is in so it applies in the same session (`runtime/background.ts`).
  *
  * It stays as a command for the two things automation cannot do: `--force`
  * after the hardware changes, and showing the measurements to someone who

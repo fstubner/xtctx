@@ -339,11 +339,17 @@ count, model and dtype. `xtctx scan --embed` runs it automatically when the
 machine has no verdict yet — a minute against the hours that command is about
 to spend — and `--no-calibrate` skips it.
 
-Nothing else calibrates. The MCP server answers a tool call inside a
-four-second budget and must not spawn three model-loading processes behind it;
-it reads the verdict and nothing more. `xtctx status` prints the device, read
-off the provider rather than off the cache file, so the line is evidence that
-the indexer is using it rather than evidence that a file exists.
+The MCP server calibrates too, in the background when it starts on a machine
+with no verdict — never behind a tool call, which has a four-second budget.
+It starts calibration before its first scan and makes the model's first load
+wait for the result, so the session that paid for the measurement is the one
+that uses it. (An earlier version calibrated after the scan and tried to
+retarget the provider, which every scan had already started loading; the
+verdict only ever reached the next session, and this paragraph said the server
+did not calibrate at all.) One server calibrates at a time, under a
+machine-wide lock. `xtctx status` prints the device, read off the provider
+rather than off the cache file, so the line is evidence that the indexer is
+using it rather than evidence that a file exists.
 
 The decision rule is "fastest measured device", with a 1.1x margin over the
 CPU, and every case where no comparison exists resolves to the CPU: a device

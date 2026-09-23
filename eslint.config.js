@@ -7,7 +7,7 @@ export default tseslint.config(
   },
   // TypeScript sources and tests.
   {
-    files: ["src/**/*.ts", "tests/**/*.ts"],
+    files: ["src/**/*.ts", "tests/**/*.ts", "scripts/**/*.ts"],
     extends: [...tseslint.configs.recommended],
     rules: {
       "@typescript-eslint/no-explicit-any": "error",
