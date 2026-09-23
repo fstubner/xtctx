@@ -157,12 +157,13 @@ export interface SessionService {
    */
   embedBacklog?(onProgress?: (embedded: number, total: number) => void): Promise<number>;
   /**
-   * Point the embedding provider at a device, returning whether it applied.
+   * Make the embedding model's first load wait for this device.
    *
-   * False means the model is already loaded or loading, so the choice arrives
-   * too late for this session and will be picked up on the next start.
+   * For calibration running alongside the index: whichever caller asks for the
+   * model first gets a load that waits for the verdict, so the session that
+   * measured the device is the one that uses it.
    */
-  retargetEmbeddingDevice?(device: string | undefined): boolean;
+  deferEmbeddingDeviceUntil?(device: Promise<string | undefined>): void;
 }
 
 export interface IndexProgress {

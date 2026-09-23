@@ -209,7 +209,7 @@ type FeatureExtractionPipeline = (
   options: { pooling: "mean"; normalize: boolean },
 ) => Promise<FeatureExtractionOutput>;
 
-type PipelineFactory = (
+export type PipelineFactory = (
   task: "feature-extraction",
   model: string,
   options?: Record<string, unknown>,
@@ -248,6 +248,13 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
      * catastrophic is also the one where it does not fail.
      */
     device?: string,
+    /**
+     * @internal For tests. Replaces the dynamic import of the real pipeline,
+     * so a test can observe which device a load was asked for without
+     * downloading and running a 130MB model. Which device the model actually
+     * loads on is exactly what went untested while calibration never applied.
+     */
+    private readonly loadPipeline?: PipelineFactory,
   ) {
     this.model = model;
     this.deviceName = device;
@@ -260,28 +267,35 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
   }
 
   /**
-   * Point this provider at a device, if it is not too late to matter.
+   * Hold the model load until the device is known.
    *
-   * The device is only read when the pipeline loads, and loading is lazy, so
-   * until then changing it is free. This exists so calibration can take effect
-   * in the session that ran it rather than the next one: the server starts,
-   * finds no verdict and a backlog worth draining, measures the devices in
-   * child processes, and points the not-yet-loaded provider at the winner
-   * before anything embeds.
+   * Calibration takes about a minute and the model loads lazily, but "lazily"
+   * is not "late enough". An earlier version let calibration retarget the
+   * provider only if nothing had started loading yet — and the server's own
+   * warm scan always started loading first (every scan ends by calling
+   * `warm()`), so the retarget was refused on every run. The verdict never
+   * applied to the session that paid for it, while the comments and the README
+   * said it did.
    *
-   * Refuses once the model is loaded or loading, and says so by returning
-   * false. Swapping the device under a loaded pipeline would mean discarding
-   * it and paying the load again, possibly while a tool call is waiting on it,
-   * to save time on work that is already running. The caller reports the
-   * verdict as taking effect next session instead.
+   * Deferral cannot lose that race. Whoever asks for the model first — the warm
+   * scan, a hybrid search's `warm()`, an explicit vector search — gets a load
+   * that waits for the device, then loads once, on the right one. Hybrid search
+   * is unaffected in practice: it answers from keyword while `isReady()` is
+   * false, which it already did while a model downloads. Only an explicit
+   * `vector` request waits, and only on the first run on a machine.
+   *
+   * A device that resolves to undefined, or a rejected promise, leaves the
+   * device as it was: a failed calibration is not a reason to stop using the
+   * one that has always worked.
    */
-  retargetDevice(device: string | undefined): boolean {
-    if (this.extractor !== null || this.loading !== null) {
-      return false;
-    }
-    this.deviceName = device;
-    return true;
+  deferDeviceUntil(device: Promise<string | undefined>): void {
+    // Handled here rather than at the load, which may never happen: a process
+    // that exits before embedding anything would otherwise report a failed
+    // calibration as an unhandled rejection.
+    this.devicePending = device.catch(() => undefined);
   }
+
+  private devicePending: Promise<string | undefined> | null = null;
 
   async embed(text: string): Promise<Float32Array> {
     const [vector] = await this.embedBatch([text]);
@@ -347,12 +361,22 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
   }
 
   private async loadExtractor(): Promise<FeatureExtractionPipeline> {
+    if (this.devicePending) {
+      const pending = this.devicePending;
+      this.devicePending = null;
+      const device = await pending.catch(() => undefined);
+      if (device !== undefined) {
+        this.deviceName = device;
+      }
+    }
+
     process.stderr.write(`xtctx: Initializing local embedding provider (${this.model})...\n`);
 
-    const transformers = (await import("@huggingface/transformers")) as unknown as {
-      pipeline: PipelineFactory;
-    };
-    const extractor = await transformers.pipeline("feature-extraction", this.model, {
+    const pipeline =
+      this.loadPipeline ??
+      ((await import("@huggingface/transformers")) as unknown as { pipeline: PipelineFactory })
+        .pipeline;
+    const extractor = await pipeline("feature-extraction", this.model, {
       dtype: this.dtype,
       ...(this.deviceName === undefined ? {} : { device: this.deviceName }),
     });

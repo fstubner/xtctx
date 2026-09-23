@@ -18,8 +18,12 @@ export function formatDuration(ms: number | null | undefined): string | null {
   if (ms < 60_000) {
     return `${(ms / 1_000).toFixed(1)}s`;
   }
-  const minutes = Math.floor(ms / 60_000);
-  const seconds = Math.round((ms % 60_000) / 1_000);
+  // Round once, then split. Rounding minutes and seconds separately printed
+  // "1m 60s" for 119.6 seconds — found by a mutation sweep, when swapping this
+  // file's rounding for flooring changed nothing any test could see.
+  const totalSeconds = Math.round(ms / 1_000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
   return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
 }
 

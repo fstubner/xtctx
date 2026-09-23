@@ -1,6 +1,6 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
-import { readFile, mkdir, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { cpus, homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -93,10 +93,92 @@ export async function readDeviceVerdict(options: {
   }
 }
 
+/**
+ * Written to a temporary file and renamed into place.
+ *
+ * Several MCP servers start at once on a fresh machine — one per agent — and a
+ * plain `writeFile` truncates before it writes, so a server reading the verdict
+ * mid-write saw half a file. `readDeviceVerdict` treats that as no verdict,
+ * which is safe but means calibrating again for nothing. A rename is atomic on
+ * one filesystem, so a reader sees the old file or the new one.
+ */
 async function writeDeviceVerdict(verdict: DeviceVerdict, home?: string): Promise<void> {
   const path = cachePath(home);
   await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, `${JSON.stringify(verdict, null, 2)}\n`, "utf-8");
+  const temporary = `${path}.${process.pid}.tmp`;
+  await writeFile(temporary, `${JSON.stringify(verdict, null, 2)}\n`, "utf-8");
+  await rename(temporary, path);
+}
+
+/**
+ * How long a calibration lock is honoured before it is treated as abandoned.
+ *
+ * Longer than any calibration measured (about a minute, three devices, each
+ * with a model load), shorter than a user would notice as "it never
+ * calibrates". A lock older than this belongs to a process that was killed —
+ * the server exits two seconds after its client disconnects, whatever it was
+ * doing — and must not block every later attempt.
+ */
+const LOCK_STALE_MS = 10 * 60 * 1000;
+
+/** Thrown when another process is already calibrating this machine. */
+export class CalibrationBusyError extends Error {
+  constructor() {
+    super("another process is already calibrating this machine");
+  }
+}
+
+/**
+ * Take the machine-wide calibration lock, or throw `CalibrationBusyError`.
+ *
+ * One per machine, not per project, because the verdict is per machine.
+ * Without it, every agent that starts an MCP server on a fresh machine
+ * calibrates at once: three servers, each timing up to three devices, all
+ * loading the model together — and each one's CPU arm timed while the others
+ * compete for the same cores, the measurement contaminated by the act of
+ * measuring.
+ */
+async function acquireCalibrationLock(home?: string): Promise<() => Promise<void>> {
+  const path = `${cachePath(home)}.lock`;
+  await mkdir(dirname(path), { recursive: true });
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const handle = await open(path, "wx");
+      await handle.writeFile(String(process.pid));
+      await handle.close();
+      return () => unlink(path).catch(() => {});
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      const modified = await stat(path).catch(() => null);
+      if (modified && Date.now() - modified.mtimeMs < LOCK_STALE_MS) {
+        throw new CalibrationBusyError();
+      }
+      await unlink(path).catch(() => {});
+    }
+  }
+  throw new CalibrationBusyError();
+}
+
+/**
+ * Calibration workers still running, so they can be killed on exit.
+ *
+ * The MCP server leaves by `process.exit` two seconds after its client goes.
+ * A spawned child is not killed with its parent on Windows, and its timeout
+ * timer lived in the parent — so a session that ended mid-calibration left a
+ * worker loading and timing a model with nothing to report to.
+ */
+const liveWorkers = new Set<ChildProcess>();
+let exitHookInstalled = false;
+
+function trackWorker(child: ChildProcess): void {
+  liveWorkers.add(child);
+  child.once("close", () => liveWorkers.delete(child));
+  if (!exitHookInstalled) {
+    exitHookInstalled = true;
+    process.once("exit", () => {
+      for (const worker of liveWorkers) worker.kill();
+    });
+  }
 }
 
 /** Text at the length real segments have; see the note in the worker. */
@@ -203,22 +285,27 @@ export async function calibrateEmbeddingDevice(options: {
   const timeoutMs = options.timeoutMs ?? 5 * 60 * 1000;
   const measured: DeviceVerdict["measured"] = [];
 
-  for (const device of deviceCandidates()) {
-    options.onProgress?.(device);
-    const result = await timeDevice(device, segmentCount, timeoutMs);
-    measured.push({ device, ...result });
-  }
+  const release = await acquireCalibrationLock(options.home);
+  try {
+    for (const device of deviceCandidates()) {
+      options.onProgress?.(device);
+      const result = await timeDevice(device, segmentCount, timeoutMs);
+      measured.push({ device, ...result });
+    }
 
-  const verdict: DeviceVerdict = {
-    device: chooseDevice(measured),
-    measured,
-    fingerprint: deviceFingerprint(),
-    measuredAt: new Date().toISOString(),
-  };
-  // Best-effort: an unwritable home directory means the calibration is paid
-  // again next time, not that it fails now.
-  await writeDeviceVerdict(verdict, options.home).catch(() => {});
-  return verdict;
+    const verdict: DeviceVerdict = {
+      device: chooseDevice(measured),
+      measured,
+      fingerprint: deviceFingerprint(),
+      measuredAt: new Date().toISOString(),
+    };
+    // Best-effort: an unwritable home directory means the calibration is paid
+    // again next time, not that it fails now.
+    await writeDeviceVerdict(verdict, options.home).catch(() => {});
+    return verdict;
+  } finally {
+    await release();
+  }
 }
 
 /**
@@ -254,6 +341,7 @@ function timeDevice(
       [...workerArgv(), `--device=${device}`, `--segments=${segmentCount}`],
       { stdio: ["ignore", "pipe", "pipe"] },
     );
+    trackWorker(child);
 
     let out = "";
     const timer = setTimeout(() => {

@@ -8,10 +8,8 @@ import { runSetup } from "./setup.js";
 import { runStatus } from "./status.js";
 import { createProjectServices } from "../runtime/services.js";
 import { startMcpServer } from "../mcp/server.js";
-import type { SessionService } from "../handoff/types.js";
 import { readXtctxPackage } from "../utils/package-info.js";
-import { BACKGROUND_EMBED_BUDGET_MS, estimateVectorBacklog } from "../utils/duration.js";
-import { calibrateEmbeddingDevice, readDeviceVerdict } from "../handoff/device.js";
+import { runBackgroundWork } from "../runtime/background.js";
 
 const { version: CLI_VERSION } = readXtctxPackage(import.meta.url);
 
@@ -99,7 +97,7 @@ export async function main(argv = process.argv): Promise<void> {
     // incremental scan this costs measured 9.7s in the background against a
     // 19GB Codex store, and the cursor design keeps it from re-reading.
     if (!unconfiguredProjectRoot && !services.config.error) {
-      void warmIndex(services.sessions);
+      void runBackgroundWork({ sessions: services.sessions });
     }
     return;
   }
@@ -241,130 +239,6 @@ export async function main(argv = process.argv): Promise<void> {
   });
 
   await program.parseAsync(argv);
-}
-
-/**
- * Start a scan and let it run.
- *
- * `listRecentSessions` is the read that starts a scan; its result is not
- * wanted here, and the budget it waits on is short. A failure is not the
- * server's problem to report at startup: the same scan runs again on the
- * first call, where its error is recorded against the tool.
- */
-async function warmIndex(sessions: SessionService): Promise<void> {
-  try {
-    await sessions.listRecentSessions(1);
-    await sessions.whenScanSettled?.();
-    await drainVectorsIfAffordable(sessions);
-  } catch {
-    // Deliberately silent; see above.
-  }
-}
-
-/**
- * Work the vector backlog down in the background, when it is cheap enough.
- *
- * Until this existed, nothing ever finished embedding a real history. Searches
- * vectorize about sixteen windows per call, which by this project's own
- * measurement leaves a 9,232-window project needing on the order of 570
- * searches — so semantic search was keyword-only in practice while still
- * paying six seconds a call for the privilege. The only way out was knowing to
- * run `xtctx scan --embed` by hand, which is not something a user should have
- * to know.
- *
- * Three comments in this repository claimed the session-start hook launched a
- * detached scan that did this, and the hook has not done so since #323 on
- * 2026-09-02, which moved the warm-up here — to the server — on the same day
- * #322 added it. The comments outlived the code they described by nineteen
- * days.
- *
- * (An earlier version of this comment said no such code had ever existed.
- * That was wrong: `launchDetachedScan` was real, in `src/cli/hook.ts`, for a
- * few hours. What it was right about is that nothing launches one now.)
- *
- * Bounded rather than unconditional, because "embed everything in the
- * background" is exactly what would make a large project on a CPU unusable.
- * What changed is that device calibration made the affordable case the common
- * one.
- */
-async function drainVectorsIfAffordable(sessions: SessionService): Promise<void> {
-  if (!sessions.embedBacklog) {
-    return;
-  }
-
-  const status = await sessions.getStatus();
-  const { remaining, etaMs } = estimateVectorBacklog(
-    status.retrieval_units,
-    status.vectorized_units,
-    status.vector_ms_per_unit,
-    { backlog: status.vector_segment_backlog, msPerSegment: status.vector_ms_per_segment },
-  );
-  if (remaining === 0) {
-    return;
-  }
-
-  // Calibrate before judging affordability, not after — otherwise the
-  // uncalibrated state perpetuates itself.
-  //
-  // The estimate below is computed from the rate of whatever device is in use,
-  // which is the CPU until something calibrates. A large history on the CPU
-  // estimates well past the budget, so the drain is skipped; the drain was the
-  // only thing that would have made the project fast; and the machine stays on
-  // the CPU forever. The user who loses most is the one with the largest
-  // history, which is the one this whole mechanism is for.
-  //
-  // Only when there is a backlog to justify it, and never in front of a tool
-  // call — this runs detached from the server's start, alongside a drain that
-  // already takes minutes.
-  //
-  // It applies to THIS session where it can. The provider loads its model
-  // lazily, so until something embeds, pointing it at a different device costs
-  // nothing — and the whole point of measuring is undone if the answer only
-  // arrives next time. `retargetEmbeddingDevice` returns false once the model
-  // is loaded or loading, which is the case where the drain below is already
-  // running on the old device and swapping it would mean paying the load again
-  // to speed up work in flight.
-  //
-  // `XTCTX_DISABLE_EMBEDDINGS=1` means no model is ever loaded, and
-  // calibration loads one per device.
-  let applied = false;
-  let calibrated: Awaited<ReturnType<typeof calibrateEmbeddingDevice>> | undefined;
-  if (process.env.XTCTX_DISABLE_EMBEDDINGS !== "1" && !(await readDeviceVerdict())) {
-    calibrated = await calibrateEmbeddingDevice().catch(() => undefined);
-    if (calibrated) {
-      applied = sessions.retargetEmbeddingDevice?.(calibrated.device) ?? false;
-    }
-  }
-
-  // Judge affordability by the rate that will actually apply.
-  //
-  // `etaMs` above was built from `vector_ms_per_segment`, which was measured
-  // on the device in use before calibration — the CPU. Keeping it would skip
-  // the drain on exactly the machines calibration just made fast, which is the
-  // trap this whole branch exists to close.
-  //
-  // The substituted rate is not a projection: calibration measured
-  // milliseconds per segment for this model on the chosen device, and
-  // `estimateVectorBacklog` multiplies a per-segment rate by the segment
-  // backlog. Same arithmetic, fresher measurement of the same quantity.
-  let effectiveEtaMs = etaMs;
-  if (applied) {
-    const fresh = await sessions.getStatus();
-    const chosen = calibrated?.measured.find((row) => row.device === calibrated.device);
-    if (chosen?.msPerSegment != null) {
-      effectiveEtaMs = fresh.vector_segment_backlog * chosen.msPerSegment;
-    }
-  }
-  const current = { etaMs: effectiveEtaMs };
-
-  // No estimate means nothing has embedded yet on this machine, so there is no
-  // measured rate to judge affordability by. Searches still vectorize
-  // incrementally, which is what produces the rate this needs.
-  if (current.etaMs === null || current.etaMs > BACKGROUND_EMBED_BUDGET_MS) {
-    return;
-  }
-
-  await sessions.embedBacklog();
 }
 
 function shouldStartMcp(argv: string[]): boolean {

@@ -1052,10 +1052,12 @@ export class SqliteHandoffIndex implements SessionService {
    * background embedding is what would make a large project on a CPU
    * unusable.
    */
-  /** See `SessionService.retargetEmbeddingDevice`. */
-  retargetEmbeddingDevice(device: string | undefined): boolean {
-    const provider = this.embeddingProvider as { retargetDevice?: (d: string | undefined) => boolean };
-    return provider.retargetDevice?.(device) ?? false;
+  /** See `SessionService.deferEmbeddingDeviceUntil`. */
+  deferEmbeddingDeviceUntil(device: Promise<string | undefined>): void {
+    const provider = this.embeddingProvider as {
+      deferDeviceUntil?: (d: Promise<string | undefined>) => void;
+    };
+    provider.deferDeviceUntil?.(device);
   }
 
   async embedBacklog(onProgress?: (embedded: number, total: number) => void): Promise<number> {
@@ -1063,13 +1065,30 @@ export class SqliteHandoffIndex implements SessionService {
     // No `isReady` check and no degrading to keyword: `embedBatch` loads the
     // model itself and this command has nothing else it could be asking for,
     // so it waits however long that takes.
-    return ensureVectors({
-      db: this.getDb(),
-      embeddingProvider: this.embeddingProvider,
-      filters: [],
-      vectorBudgetMs: 0,
-      onProgress,
-    });
+    //
+    // A failure is recorded where `xtctx status` and `xtctx_continuity_status`
+    // already look. The MCP server runs this in the background at startup with
+    // nobody waiting on it, and its only caller used to swallow the error — so
+    // an endpoint rejecting every call, or a model that could not load, left
+    // the backlog frozen with no reason given anywhere.
+    try {
+      const remaining = await ensureVectors({
+        db: this.getDb(),
+        embeddingProvider: this.embeddingProvider,
+        filters: [],
+        vectorBudgetMs: 0,
+        onProgress,
+      });
+      clearSetting(this.getDb(), "last_error:embeddings");
+      return remaining;
+    } catch (error) {
+      setSetting(
+        this.getDb(),
+        "last_error:embeddings",
+        error instanceof Error ? error.message : String(error),
+      );
+      throw error;
+    }
   }
 
   private async ensureVectors(toolFilter?: string[]): Promise<void> {

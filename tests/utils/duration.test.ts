@@ -6,6 +6,10 @@ describe("formatDuration", () => {
     expect(formatDuration(340)).toBe("340ms");
     expect(formatDuration(1_400)).toBe("1.4s");
     expect(formatDuration(125_000)).toBe("2m 05s");
+    // Rounded as a whole, not per unit: this printed "1m 60s".
+    expect(formatDuration(119_600)).toBe("2m 00s");
+    // Sub-second values round rather than truncate.
+    expect(formatDuration(339.6)).toBe("340ms");
   });
 
   it("returns null rather than a fabricated duration", () => {
