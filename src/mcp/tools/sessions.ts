@@ -61,6 +61,25 @@ export function validatedFilter(value: unknown, field: string): string[] | undef
     throw new ToolInputError(`${field} must contain only non-empty strings`);
   }
 
+  return value as string[];
+}
+
+/**
+ * `validatedFilter`, plus: every entry must name a tool this build knows.
+ *
+ * A separate function, not a check inside the shared one. It was first written
+ * into `validatedFilter`, which `branch_filter` also goes through — so every
+ * real branch name was rejected as "unknown tool id \"main\"" and branch
+ * filtering became unreachable over MCP, with the whole suite green because no
+ * test passed a well-formed branch array. The two filters share a shape and
+ * nothing else.
+ */
+export function validatedToolFilter(value: unknown, field: string): string[] | undefined {
+  const filter = validatedFilter(value, field);
+  if (filter === undefined) {
+    return undefined;
+  }
+
   // An id that names no tool is rejected, not filtered on.
   //
   // The filter reaches SQLite as `WHERE tool IN (...)`, so an unrecognised id
@@ -73,7 +92,7 @@ export function validatedFilter(value: unknown, field: string): string[] | undef
   // back can fix its own call; one that gets an empty result cannot tell a
   // wrong id from an empty index.
   const known = new Set<string>(SUPPORTED_TOOLS.map((tool) => tool.id));
-  const unknown = (value as string[]).filter((item) => !known.has(item.trim()));
+  const unknown = filter.filter((item) => !known.has(item.trim()));
   if (unknown.length > 0) {
     throw new ToolInputError(
       `${field} contains unknown tool id${unknown.length === 1 ? "" : "s"} ` +
@@ -82,7 +101,7 @@ export function validatedFilter(value: unknown, field: string): string[] | undef
     );
   }
 
-  return value as string[];
+  return filter;
 }
 
 export function createRecentSessionsHandler(service: SessionService) {
@@ -92,7 +111,7 @@ export function createRecentSessionsHandler(service: SessionService) {
     const format = params.format ?? "markdown";
     const sessions = await service.listRecentSessions(
       limit,
-      validatedFilter(params.tool_filter, "tool_filter"),
+      validatedToolFilter(params.tool_filter, "tool_filter"),
       validatedFilter(params.branch_filter, "branch_filter"),
     );
 
@@ -135,7 +154,7 @@ export function createSearchSessionsHandler(service: SessionService) {
     const sessions = await service.searchSessions(
       query,
       limit,
-      validatedFilter(params.tool_filter, "tool_filter"),
+      validatedToolFilter(params.tool_filter, "tool_filter"),
       mode,
       validatedFilter(params.branch_filter, "branch_filter"),
     );

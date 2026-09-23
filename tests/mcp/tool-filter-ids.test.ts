@@ -11,26 +11,26 @@
  * and the MCP schema advertised only `items: { type: "string" }`.
  */
 import { describe, expect, it } from "vitest";
-import { validatedFilter } from "@xtctx/mcp/tools/sessions";
+import { validatedToolFilter } from "@xtctx/mcp/tools/sessions";
 import { SUPPORTED_TOOLS } from "@xtctx/tools/sources";
 
-describe("validatedFilter", () => {
+describe("validatedToolFilter", () => {
   it("accepts every id the tool registry defines", () => {
     const ids = SUPPORTED_TOOLS.map((tool) => tool.id);
 
-    expect(validatedFilter(ids, "tool_filter")).toEqual(ids);
+    expect(validatedToolFilter(ids, "tool_filter")).toEqual(ids);
   });
 
   it("rejects the natural wrong guesses instead of matching nothing", () => {
     for (const guess of ["claude", "gemini", "vscode"]) {
-      expect(() => validatedFilter([guess], "tool_filter")).toThrow(/unknown tool id/);
+      expect(() => validatedToolFilter([guess], "tool_filter")).toThrow(/unknown tool id/);
     }
   });
 
   it("names the valid ids in the error, so the caller can fix its own call", () => {
     let message = "";
     try {
-      validatedFilter(["claude"], "tool_filter");
+      validatedToolFilter(["claude"], "tool_filter");
     } catch (error) {
       message = error instanceof Error ? error.message : String(error);
     }
@@ -40,7 +40,7 @@ describe("validatedFilter", () => {
   });
 
   it("still allows no filter at all", () => {
-    expect(validatedFilter(undefined, "tool_filter")).toBeUndefined();
-    expect(validatedFilter(null, "tool_filter")).toBeUndefined();
+    expect(validatedToolFilter(undefined, "tool_filter")).toBeUndefined();
+    expect(validatedToolFilter(null, "tool_filter")).toBeUndefined();
   });
 });

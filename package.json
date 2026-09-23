@@ -30,9 +30,8 @@
     "landing:build": "npm --prefix landing run build",
     "landing:preview": "npm --prefix landing run preview",
     "prepare": "npm run build",
-    "prepack": "npm run build",
     "smoke:cli": "node dist/src/cli/index.js --help",
-    "verify:release": "npm run lint && npm run typecheck && npm test && npm run test:security && npm run security:checklist && npm run check:review-coverage && npm run audit:production && npm --prefix landing audit && npm run test:drift && npm run test:integration && npm run test:smoke && npm run test:eval && npm run build && npm pack --dry-run && npm run demo:public && npm run landing:build && npm run smoke:cli",
+    "verify:release": "npm run lint && npm run typecheck && npm test && npm run test:security && npm run security:checklist && npm run check:review-coverage && npm run check:workflows && npm run audit:production && npm --prefix landing audit && npm run test:drift && npm run test:integration && npm run test:smoke && npm run test:eval && npm pack --dry-run && npm run demo:public && npm run landing:build && npm run smoke:cli",
     "sync:version": "node scripts/sync-version.mjs",
     "version": "node scripts/sync-version.mjs",
     "test:eval": "vitest run tests/eval",
@@ -40,7 +39,8 @@
     "capture:formats": "node scripts/capture-format-fingerprint.mjs",
     "check:upstream": "node scripts/check-upstream-versions.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
-    "check:review-coverage": "node ./scripts/check-review-coverage.mjs"
+    "check:review-coverage": "node ./scripts/check-review-coverage.mjs",
+    "check:workflows": "node ./scripts/check-workflows.mjs"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",

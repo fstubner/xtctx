@@ -204,8 +204,11 @@ jobs:
           git tag "$TAG"
           # The token reaches git here and nowhere else; see
           # `persist-credentials: false` on the checkout. Through the
-          # environment rather than `${{ }}`, so it is never substituted into
-          # the script text.
+          # environment rather than an Actions expression, so it is never
+          # substituted into the script text. (Do not write the expression
+          # syntax in this comment: Actions evaluates it inside `run:` blocks
+          # even in shell comments, and an empty one made this whole file
+          # invalid — see scripts/check-workflows.mjs.)
           git push "https://x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:${GITHUB_REF_NAME}"
           git push "https://x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$TAG"
 

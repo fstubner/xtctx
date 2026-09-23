@@ -1,5 +1,5 @@
 import type { SessionService, SessionSummary } from "../../handoff/types.js";
-import { indexingPayload, ToolInputError, validatedFilter } from "./sessions.js";
+import { indexingPayload, ToolInputError, validatedFilter, validatedToolFilter } from "./sessions.js";
 import { inlineSafe } from "../../utils/untrusted-text.js";
 
 interface HandoffManifestParams {
@@ -38,7 +38,7 @@ export function createHandoffManifestHandler(service: SessionService) {
       const limit = normalizeLimit(params.limit, DEFAULT_LIMIT);
       selected = await service.listRecentSessions(
         limit,
-        validatedFilter(params.tool_filter, "tool_filter"),
+        validatedToolFilter(params.tool_filter, "tool_filter"),
         validatedFilter(params.branch_filter, "branch_filter"),
       );
       missingRefs = [];
