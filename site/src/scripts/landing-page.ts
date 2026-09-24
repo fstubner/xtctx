@@ -1,0 +1,218 @@
+import { initCopyButtons } from "./landing/copy-buttons";
+import { initScreenshotLightbox } from "./landing/lightbox";
+import { initOsTabs } from "./landing/os-tabs";
+
+interface GitHubAsset {
+  download_count?: number;
+}
+
+interface GitHubRelease {
+  assets?: GitHubAsset[];
+  draft?: boolean;
+  prerelease?: boolean;
+  tag_name?: string;
+  html_url?: string;
+}
+
+export function initLandingPage(repo: string, cratesIoCrate?: string): void {
+    const year = document.getElementById("y");
+    if (year) year.textContent = String(new Date().getFullYear());
+
+    // Live social proof: GitHub stars + cumulative release asset downloads.
+    // Unauthenticated GitHub API is rate-limited to 60/hour per IP; on failure
+    // hide optional metrics so visitors don't see stale placeholders.
+    (function () {
+      const fmt = (n: number) => n.toLocaleString();
+      const fmtDownloads = (n: number) => {
+        if (n < 1000) return fmt(n);
+        // One decimal, floored. Whole thousands hid most of the movement --
+        // everything from 1,000 to 1,999 read as "1K+". Floored rather than
+        // rounded because the "+" claims "at least this many", so 1,999 must
+        // not round up to 2.0K+.
+        if (n < 1000000) return `${(Math.floor(n / 100) / 10).toFixed(1)}K+`;
+        return `${(Math.floor(n / 100000) / 10).toFixed(1)}M+`;
+      };
+      // Every separator is derived from what is actually on screen, so a
+      // partial failure cannot leave a dangling interpunct.
+      const refreshMetricSeparators = () => {
+        const shown = (id: string) => {
+          const el = document.getElementById(id);
+          return Boolean(el && !el.hidden);
+        };
+        const setSep = (id: string, visible: boolean) => {
+          const el = document.getElementById(id);
+          if (el) el.hidden = !visible;
+        };
+        const hasStars = shown("stars");
+        const hasDownloads = shown("downloads");
+        setSep("metrics-sep", hasStars && hasDownloads);
+        setSep("source-sep", hasStars || hasDownloads);
+      };
+      fetch(`https://api.github.com/repos/${repo}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          if (!d || typeof d.stargazers_count !== "number") return;
+          const stars = document.getElementById("stars");
+          const count = document.getElementById("stars-count");
+          if (count) count.textContent = fmt(d.stargazers_count);
+          if (stars) stars.hidden = false;
+          refreshMetricSeparators();
+        })
+        .catch(() => {});
+      /* Downloads come from two places, and the count said "total" while
+         reporting one of them.
+       *
+         GitHub release assets are the installers and the standalone
+         binaries. crates.io is `cargo install netscli`, which the install
+         section offers and which never touched a release asset. Only the
+         `netscli` crate is counted: netscli-core and netscli-mcp are
+         libraries, so their downloads are dependency resolution and docs.rs
+         builds rather than anyone installing anything, and adding them would
+         count a single `cargo install` three times.
+
+         Either source may fail or be rate-limited, so each records its own
+         number and the label re-renders from whichever have arrived. A
+         partial count is better than none, and better than a spinner that
+         never resolves. */
+      let githubDownloads: number | null = null;
+      let cratesDownloads: number | null = null;
+      // Whether each source has finished, which is not the same as whether it
+      // produced a number. A rate-limited source never sets its count, so
+      // gating on the counts alone would leave the label waiting forever.
+      let githubSettled = false;
+      // A product with no `cratesIoCrate` has one source, not two: nothing will
+      // ever fetch crates.io, so leaving this false would hold the label at
+      // "one source has not reported" for the life of the page.
+      let cratesSettled = !cratesIoCrate;
+      const renderDownloads = () => {
+        if (githubDownloads === null && cratesDownloads === null) return;
+        const total = (githubDownloads ?? 0) + (cratesDownloads ?? 0);
+        // "total" is a claim about both sources, so only make it once both
+        // have reported. Measured on this page: "Downloads: 178 total" with
+        // only GitHub in, then "Downloads: 2,635 total" once crates.io
+        // landed -- same label, same page, a fifteenfold difference. Until
+        // both are in, the number is a lower bound and now says so.
+        const complete = githubSettled && cratesSettled
+          && githubDownloads !== null
+          && (!cratesIoCrate || cratesDownloads !== null);
+        const el = document.getElementById("downloads");
+        if (el) {
+          // fmtDownloads already appends "+" above 1000; don't double it.
+          const shown = fmtDownloads(total);
+          const text = complete || shown.endsWith("+") ? shown : `${shown}+`;
+          el.textContent = `${text} ${total === 1 ? "download" : "downloads"}`;
+          el.dataset.totalDownloads = complete
+            ? `Downloads: ${fmt(total)} total`
+            : `Downloads: ${fmt(total)} so far; one source has not reported`;
+          el.setAttribute("aria-label", el.dataset.totalDownloads);
+          el.hidden = false;
+        }
+        refreshMetricSeparators();
+      };
+
+      // crates.io sets `access-control-allow-origin: *`, so this needs no
+      // proxy or build step. `downloads` is all-time; `recent_downloads` is
+      // the trailing 90 days and is not what the label claims.
+      //
+      // Skipped entirely for a product that is not on crates.io, rather than
+      // fetched and allowed to 404: an unconditional fetch of
+      // /crates/undefined is a request every visitor's browser makes, and a
+      // failure in the console for a site that has nothing wrong with it.
+      if (cratesIoCrate) {
+        fetch(`https://crates.io/api/v1/crates/${cratesIoCrate}`)
+          .then((r) => (r.ok ? r.json() : null))
+          .then((d) => {
+            const n = d?.crate?.downloads;
+            if (typeof n !== "number") return;
+            cratesDownloads = n;
+          })
+          .catch(() => {})
+          // `finally`, not the success path: a failed or rate-limited fetch
+          // settles this source too, and the label has to know that to stop
+          // withholding the word "total".
+          .finally(() => {
+            cratesSettled = true;
+            renderDownloads();
+          });
+      }
+
+      fetch(`https://api.github.com/repos/${repo}/releases?per_page=100`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((rs: unknown) => {
+          if (!Array.isArray(rs)) return;
+          const releases = rs as GitHubRelease[];
+          githubDownloads = releases.reduce(
+            (sum, release) => sum + (release.assets ?? []).reduce(
+              (assetSum, asset) => assetSum + (asset.download_count ?? 0),
+              0,
+            ),
+            0,
+          );
+          const latest = releases.find((release) => !release.draft && !release.prerelease)
+            ?? releases.find((release) => !release.draft);
+          // The badge above the headline, upgraded from the static platform
+          // list to the released version. Only a version a release actually
+          // carries: the badge already renders readable text, so a failed or
+          // rate-limited lookup leaves it exactly as served rather than
+          // blanking it or naming a version nothing confirmed.
+          const badge = document.getElementById("hero-release-badge");
+          if (latest?.tag_name && badge) {
+            badge.textContent = `${latest.tag_name} · What changed →`;
+          }
+        })
+        .catch(() => {})
+        .finally(() => {
+          githubSettled = true;
+          renderDownloads();
+        });
+    })();
+
+    initCopyButtons();
+    initScreenshotLightbox();
+    initOsTabs();
+
+
+    // Desktop installer dropdown in the hero.
+    {
+      const button = document.querySelector<HTMLButtonElement>("#hero-desktop-menu-button");
+      const menu = document.querySelector<HTMLElement>("#hero-desktop-menu");
+      if (button && menu) {
+        const closeMenu = () => {
+          menu.hidden = true;
+          button.setAttribute("aria-expanded", "false");
+        };
+        button.addEventListener("click", (event) => {
+          event.stopPropagation();
+          const willOpen = menu.hidden;
+          menu.hidden = !willOpen;
+          button.setAttribute("aria-expanded", String(willOpen));
+        });
+        // Capture phase, deliberately.
+        //
+        // In the bubble phase this never fired for a click on a copy button,
+        // because copy-buttons.ts calls `stopPropagation()` on its own click
+        // — so opening the installer menu and then copying the command beside
+        // it left the menu hanging open over the page. "Click anywhere else
+        // and I close" should not be defeatable by whatever you clicked on;
+        // capture runs before any of it.
+        document.addEventListener(
+          "click",
+          (event) => {
+            if (
+              !menu.hidden
+              && event.target instanceof Node
+              && !menu.contains(event.target)
+              && event.target !== button
+            ) closeMenu();
+          },
+          true,
+        );
+        menu.querySelectorAll("a").forEach((link) => {
+          link.addEventListener("click", closeMenu);
+        });
+        document.addEventListener("keydown", (event) => {
+          if (event.key === "Escape") closeMenu();
+        });
+      }
+    }
+}

@@ -1,0 +1,213 @@
+/* The theme control, for both top bars.
+ *
+ * ONE control now, rendered by components/ThemeControl.astro in the landing
+ * nav and by components/starlight/ThemeSelect.astro in the docs bar. Before
+ * this it was two: Starlight's <starlight-theme-select> on one side and our
+ * own markup on the other, styled from one rule set that named both so they
+ * could not drift. That worked for everything except the part no CSS can
+ * reach.
+ *
+ * WHY IT IS NOT A <select>. The list a select drops down is drawn by the
+ * operating system. On Windows it is white rows with black text, positioned
+ * by the platform rather than under the trigger, and `option { background }`
+ * -- which this file used to set -- is honoured on some platforms and
+ * ignored there. So the control looked considered on the machine it was
+ * written on and unstyled on the next one. A button and a menu are ordinary
+ * elements and answer to ordinary rules.
+ *
+ * The menu matches the hero's installer menu: a panel under its trigger,
+ * hidden until asked for. Two dropdowns on the site, one behaviour.
+ *
+ * Registered last in astro.config.mjs's customCss and imported by Page.astro.
+ * Last on purpose: this file is the control's definition, not an override of
+ * one. The docs half still has Starlight's own scoped layer underneath, which
+ * is why a few rules restate what looks like it should already be true --
+ * they are cancelling upstream, not decorating.
+ */
+
+/* The control's own colours.
+ *
+ * Here rather than in tokens.css because they describe one component and
+ * nothing else reads them -- and because tokens.css is at the 300-line guard,
+ * where the answer is to split by ownership rather than to raise the limit.
+ * The cross-stack values the control also uses (the accent, the text ramp,
+ * --ui-hover-border, --ui-lift-rgb) stay there: those are shared. */
+:root {
+  --ui-control-border: rgba(var(--ui-lift-rgb), 0.1);
+  --ui-control-bg: rgba(var(--ui-lift-rgb), 0.03);
+  /* Declared once. --ui-surface-raised is already per-theme in tokens.css, so
+     restating this under html[data-theme='light'] would be a second copy that
+     can only drift from the first. */
+  --ui-control-menu-bg: var(--ui-surface-raised);
+}
+
+html[data-theme='light'] {
+  --ui-control-border: rgba(var(--ui-lift-rgb), 0.12);
+  --ui-control-bg: rgba(var(--ui-lift-rgb), 0.04);
+}
+
+.ui-theme-select {
+  position: relative;
+  color: var(--ui-text);
+}
+
+/* The trigger.
+ *
+ * Sized to the search button beside it in the docs bar: 2.35rem tall and
+ * 0.875rem text, which is the other bordered control on that row. The nav
+ * links are 13px; this is deliberately the button's size, not the links'. */
+.ui-theme-trigger {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 2.35rem;
+  min-width: 5.35rem;
+  padding-inline: 0.65rem;
+  border: 1px solid var(--ui-control-border);
+  border-radius: 6px;
+  background: var(--ui-control-bg);
+  color: inherit;
+  font: inherit;
+  font-size: 0.875rem;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.ui-theme-trigger .icon {
+  width: 1em;
+  height: 1em;
+  flex: 0 0 auto;
+}
+
+.ui-theme-trigger .label-icon {
+  font-size: 0.875rem;
+}
+
+.ui-theme-trigger .caret {
+  font-size: 1.25rem;
+  margin-inline-start: auto;
+}
+
+.ui-theme-label {
+  white-space: nowrap;
+}
+
+.ui-theme-trigger:hover {
+  color: var(--ui-text-strong);
+  border-color: var(--ui-hover-border);
+}
+
+/* Keyboard focus needs a ring, not a border tint.
+ *
+ * An earlier version gave focus the hover treatment -- a slightly different
+ * border colour -- which is barely a change, disappears against the header,
+ * and is the one state a keyboard user has nothing else to go on. One ring,
+ * at the alpha the search button beside it uses. */
+.ui-theme-trigger:focus-visible {
+  color: var(--ui-text-strong);
+  border-color: rgba(var(--ui-accent-rgb), 0.45);
+  box-shadow: 0 0 0 2px rgba(var(--ui-accent-rgb), 0.22);
+  outline: 0;
+}
+
+html[data-theme='light'] .ui-theme-trigger:hover,
+html[data-theme='light'] .ui-theme-trigger:focus-visible {
+  border-color: rgba(var(--ui-accent-rgb), 0.34);
+}
+
+/* The menu.
+ *
+ * Right-aligned to the trigger because the control sits at the end of both
+ * bars, where a left-aligned panel would hang off the edge on a narrow
+ * window. Opaque, not translucent: it overlaps page content, and the bar
+ * behind it is already semi-transparent. */
+.ui-theme-menu {
+  position: absolute;
+  inset-inline-end: 0;
+  top: calc(100% + 6px);
+  z-index: 60;
+  min-width: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  border: 1px solid var(--ui-control-border);
+  border-radius: 8px;
+  background: var(--ui-control-menu-bg);
+  box-shadow: var(--ui-lift-md);
+}
+
+/* `hidden` has to be restated, or the menu is permanently open.
+ *
+ * The attribute's `display: none` lives in the browser's own stylesheet, and
+ * ANY author rule beats that -- so the `display: flex` above silently
+ * cancelled it and the panel rendered on every page load. The script was
+ * setting `menu.hidden` correctly the whole time; nothing was listening. */
+.ui-theme-menu[hidden] {
+  display: none;
+}
+
+.ui-theme-option {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.55rem;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ui-text);
+  font: inherit;
+  font-size: 0.875rem;
+  line-height: 1.4;
+  text-align: start;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ui-theme-option:hover {
+  background: rgba(var(--ui-lift-rgb), 0.06);
+  color: var(--ui-text-strong);
+}
+
+.ui-theme-option:focus-visible {
+  outline: 0;
+  background: rgba(var(--ui-lift-rgb), 0.08);
+  color: var(--ui-text-strong);
+  box-shadow: inset 0 0 0 1px rgba(var(--ui-accent-rgb), 0.45);
+}
+
+/* The chosen row keeps the tick and the accent; the others reserve the tick's
+   width so the labels line up in a column rather than shifting as the choice
+   moves. */
+.ui-theme-tick {
+  display: inline-flex;
+  width: 14px;
+  flex: 0 0 14px;
+  opacity: 0;
+}
+
+.ui-theme-option[aria-checked='true'] {
+  color: var(--ui-accent);
+}
+
+.ui-theme-option[aria-checked='true'] .ui-theme-tick {
+  opacity: 1;
+}
+
+/* The trigger's icon, one of three.
+ *
+ * Driven by data-theme-choice on <html>, which the pre-paint script in
+ * Page.astro sets before anything renders -- so the correct icon is right on
+ * first paint rather than swapped in afterwards. The :not() fallback covers
+ * the case where that script did not run at all (storage blocked and it threw
+ * before the assignment): auto is the honest default there, because auto is
+ * what an unset preference means. */
+.ui-theme-trigger .label-icon {
+  display: none;
+}
+
+html:not([data-theme-choice]) .ui-theme-trigger .label-icon[data-icon='auto'],
+html[data-theme-choice='auto'] .ui-theme-trigger .label-icon[data-icon='auto'],
+html[data-theme-choice='light'] .ui-theme-trigger .label-icon[data-icon='light'],
+html[data-theme-choice='dark'] .ui-theme-trigger .label-icon[data-icon='dark'] {
+  display: block;
+}
