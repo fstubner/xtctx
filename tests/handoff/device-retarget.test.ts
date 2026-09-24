@@ -1,15 +1,18 @@
 /**
- * The model loads on the device calibration chose, even when something asks
- * for the model before calibration finishes.
+ * The model loads on the device calibration chose — unless someone is
+ * waiting for a vector, in which case it loads now on the device it has.
  *
  * The first version of same-session calibration retargeted the provider only
  * if nothing had started loading yet. The MCP server's own warm scan always
  * started loading first — every scan ends by calling `warm()` — so the
- * retarget was refused on every run, the verdict applied only to the next
- * session, and the comments and README said otherwise. The unit test for it
- * called the provider in isolation and never exercised that ordering.
+ * retarget was refused on every run, and the verdict applied only to the next
+ * session while the comments and README said otherwise. The test for it called
+ * the provider in isolation and never exercised that ordering.
  *
- * These tests put the load FIRST, which is the order that actually happens.
+ * The fix that followed, deferring every load to calibration, overcorrected:
+ * an explicit `vector` search then waited for a measurement it did not need,
+ * and on a fresh GitHub ubuntu runner it "did not answer within 60s". So the
+ * background warm-up waits and a caller holding a tool call open does not.
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -30,24 +33,39 @@ function recordingPipeline(): { factory: PipelineFactory; devices: Array<string 
   return { factory, devices };
 }
 
+const tick = () => new Promise((resolve) => setTimeout(resolve, 10));
+
 describe("deferring the model load until the device is known", () => {
-  it("loads on the calibrated device even when the load was requested first", async () => {
+  it("makes the background warm-up wait, then load on the calibrated device", async () => {
+    // The order that actually happens: the warm scan asks for the model while
+    // calibration is still running.
     const { factory, devices } = recordingPipeline();
     const provider = new TransformersEmbeddingProvider(undefined, undefined, undefined, factory);
 
     let resolveDevice: (device: string) => void = () => {};
     provider.deferDeviceUntil(new Promise((resolve) => (resolveDevice = resolve)));
 
-    // The warm scan asks for the model before calibration is done.
-    const embedding = provider.embed("some text");
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    provider.warm();
+    await tick();
     expect(devices).toEqual([]);
 
     resolveDevice("dml");
-    await embedding;
+    await tick();
 
     expect(devices).toEqual(["dml"]);
     expect(provider.device).toBe("dml");
+  });
+
+  it("does not make a caller that needs a vector now wait for calibration", async () => {
+    // A calibration that never finishes, standing in for one that takes a
+    // minute on a fresh machine behind a 60-second tool-call limit.
+    const { factory, devices } = recordingPipeline();
+    const provider = new TransformersEmbeddingProvider(undefined, undefined, "cpu", factory);
+    provider.deferDeviceUntil(new Promise<string>(() => {}));
+
+    await provider.embed("an explicit vector search");
+
+    expect(devices).toEqual(["cpu"]);
   });
 
   it("keeps the configured device when calibration fails", async () => {
@@ -57,26 +75,22 @@ describe("deferring the model load until the device is known", () => {
     const provider = new TransformersEmbeddingProvider(undefined, undefined, "cpu", factory);
 
     provider.deferDeviceUntil(Promise.reject(new Error("could not measure")));
-    await provider.embed("some text");
+    provider.warm();
+    await tick();
 
     expect(devices).toEqual(["cpu"]);
   });
 
-  it("keeps the configured device when calibration yields nothing", async () => {
+  it("loads once, however many callers there are", async () => {
     const { factory, devices } = recordingPipeline();
     const provider = new TransformersEmbeddingProvider(undefined, undefined, undefined, factory);
+    let resolveDevice: (device: string) => void = () => {};
+    provider.deferDeviceUntil(new Promise((resolve) => (resolveDevice = resolve)));
 
-    provider.deferDeviceUntil(Promise.resolve(undefined));
-    await provider.embed("some text");
-
-    expect(devices).toEqual([undefined]);
-  });
-
-  it("loads once, however many callers were waiting", async () => {
-    const { factory, devices } = recordingPipeline();
-    const provider = new TransformersEmbeddingProvider(undefined, undefined, undefined, factory);
-    provider.deferDeviceUntil(Promise.resolve("webgpu"));
-
+    provider.warm();
+    provider.warm();
+    resolveDevice("webgpu");
+    await tick();
     await Promise.all([provider.embed("a"), provider.embed("b"), provider.embedBatch(["c", "d"])]);
 
     expect(devices).toEqual(["webgpu"]);

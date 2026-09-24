@@ -179,9 +179,9 @@ describe("the machine-wide calibration lock", () => {
     await writeFile(join(home, ".xtctx", "device.json.lock"), "12345", "utf-8");
 
     await expect(
-      // A 1ms worker timeout, so that if the lock were ignored the run ends
-      // quickly instead of loading a model.
-      calibrateEmbeddingDevice({ home, segmentCount: 1, timeoutMs: 1 }),
+      // No devices, so that if the lock were ignored nothing is spawned: real
+      // workers orphaned on Windows starved the CI runner.
+      calibrateEmbeddingDevice({ home, devices: [] }),
     ).rejects.toBeInstanceOf(CalibrationBusyError);
   });
 
@@ -194,10 +194,10 @@ describe("the machine-wide calibration lock", () => {
     const longAgo = new Date(Date.now() - 60 * 60 * 1000);
     await utimes(lock, longAgo, longAgo);
 
-    const verdict = await calibrateEmbeddingDevice({ home, segmentCount: 1, timeoutMs: 1 });
+    const verdict = await calibrateEmbeddingDevice({ home, devices: [] });
 
-    // Every worker timed out at 1ms, so nothing was measured — and the choice
-    // falls back to the CPU, as it must when there is no comparison.
+    // Nothing was measured, so the choice falls back to the CPU, as it must
+    // when there is no comparison.
     expect(verdict.device).toBe("cpu");
     expect(existsSync(lock)).toBe(false);
   });

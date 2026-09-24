@@ -280,6 +280,13 @@ export async function calibrateEmbeddingDevice(options: {
   segmentCount?: number;
   timeoutMs?: number;
   onProgress?: (device: EmbeddingDevice) => void;
+  /**
+   * Devices to time; this platform's candidates by default. Tests of the lock
+   * pass none: timing real devices spawned ONNX workers through tsx, and on
+   * Windows killing tsx orphans its child, which starved a 2-core CI runner
+   * until unrelated time-budgeted scans came back empty.
+   */
+  devices?: EmbeddingDevice[];
 } = {}): Promise<DeviceVerdict> {
   const segmentCount = options.segmentCount ?? 16;
   const timeoutMs = options.timeoutMs ?? 5 * 60 * 1000;
@@ -287,7 +294,7 @@ export async function calibrateEmbeddingDevice(options: {
 
   const release = await acquireCalibrationLock(options.home);
   try {
-    for (const device of deviceCandidates()) {
+    for (const device of options.devices ?? deviceCandidates()) {
       options.onProgress?.(device);
       const result = await timeDevice(device, segmentCount, timeoutMs);
       measured.push({ device, ...result });

@@ -289,13 +289,33 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
    * one that has always worked.
    */
   deferDeviceUntil(device: Promise<string | undefined>): void {
-    // Handled here rather than at the load, which may never happen: a process
-    // that exits before embedding anything would otherwise report a failed
-    // calibration as an unhandled rejection.
-    this.devicePending = device.catch(() => undefined);
+    let abandon: () => void = () => {};
+    const abandoned = new Promise<undefined>((resolve) => {
+      abandon = () => resolve(undefined);
+    });
+    this.abandonDeferral = abandon;
+    // Rejections handled here rather than at the load, which may never happen:
+    // a process that exits before embedding anything would otherwise report a
+    // failed calibration as an unhandled rejection.
+    this.devicePending = Promise.race([device.catch(() => undefined), abandoned]);
   }
 
   private devicePending: Promise<string | undefined> | null = null;
+
+  /**
+   * Stop waiting for calibration and load on the device already configured.
+   *
+   * Called by anything that needs a vector NOW. The deferral exists so the
+   * background warm-up loads the model on the measured device, and nobody is
+   * waiting on that. An explicit `vector` search is different: an agent is
+   * holding a tool call open, calibration takes about a minute on a fresh
+   * machine, and many MCP hosts give up on a call at sixty seconds. Measured on
+   * a GitHub ubuntu runner, the first vector search did exactly that — "did not
+   * answer within 60s" — because it was waiting for a measurement it did not
+   * need. A caller that is waiting wins; the verdict is still written and
+   * applies from the next session.
+   */
+  private abandonDeferral: (() => void) | null = null;
 
   async embed(text: string): Promise<Float32Array> {
     const [vector] = await this.embedBatch([text]);
@@ -307,6 +327,9 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
       return [];
     }
 
+    // Someone needs vectors now; see `abandonDeferral`. A no-op once the
+    // device is known, which is every call after the first load.
+    this.abandonDeferral?.();
     const extractor = await this.getExtractor();
     const vectors: Float32Array[] = [];
     for (let start = 0; start < texts.length; start += MAX_BATCH_SIZE) {
