@@ -40,6 +40,16 @@ try {
     command: process.execPath,
     args: [cliPath],
     cwd: projectRoot,
+    // The server's home is the temp one too, so that it indexes and calibrates
+    // there rather than in the home of whoever runs this — which also makes the
+    // run below exercise a first start on a fresh machine every time.
+    env: {
+      ...process.env,
+      HOME: homeDir,
+      USERPROFILE: homeDir,
+      APPDATA: join(homeDir, "AppData", "Roaming"),
+      LOCALAPPDATA: join(homeDir, "AppData", "Local"),
+    },
   });
   const client = new Client(
     { name: "xtctx-public-demo", version: "0.0.0" },
@@ -122,7 +132,11 @@ try {
   if (keepTemp) {
     console.log(`kept temp project: ${projectRoot}`);
   } else {
-    await rm(tempRoot, { recursive: true, force: true });
+    // Retried because on Windows the killed server's handles on the index
+    // outlive its exit by a moment, and the first rmdir fails with EBUSY. It
+    // did on GitHub's windows runner and here; the directory was removable
+    // again by the time a separate process tried.
+    await rm(tempRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   }
 }
 
