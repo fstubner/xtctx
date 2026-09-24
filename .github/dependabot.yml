@@ -22,7 +22,7 @@ updates:
         dependency-type: development
 
   - package-ecosystem: npm
-    directory: /landing
+    directory: /site
     schedule:
       interval: weekly
     commit-message:

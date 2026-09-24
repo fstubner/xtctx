@@ -12,7 +12,11 @@ const CURRENT_SURFACE_FILES = [
   join("docs", "demo.md"),
   join("docs", "drift-canary.md"),
   join("docs", "security", "owasp-asvs-lite.md"),
-  join("landing", "src", "data", "site.ts"),
+  join("site", "src", "data", "site-content", "hero.ts"),
+  join("site", "src", "data", "site-content", "surfaces.ts"),
+  join("site", "src", "data", "site-content", "faq.ts"),
+  join("site", "src", "data", "site-content", "install.ts"),
+  join("site", "src", "content", "docs", "docs", "commands.md"),
 ];
 
 const REMOVED_SURFACES = [

@@ -1,6 +1,9 @@
 node_modules/
 dist/
-landing/dist/
+# A build-time copy of the root CHANGELOG.md, which the site's changelog page
+# imports from its own directory. Written by `npm run site:changelog` before
+# every site build, so it cannot drift from the real one.
+site/CHANGELOG.md
 .xtctx/.store/
 .xtctx/config.yaml
 .xtctx/skills/

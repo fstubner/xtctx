@@ -33,7 +33,7 @@ const VERSIONED: Array<[string, (raw: string) => string | undefined]> = [
     ".claude-plugin/marketplace.json",
     (raw) => JSON.parse(raw).plugins.find((p: { name: string }) => p.name === "xtctx")?.version,
   ],
-  ["landing/src/data/site.ts", (raw) => /version:\s*'([^']+)'/.exec(raw)?.[1]],
+  ["site/src/data/site-content/version.ts", (raw) => /productVersion\s*=\s*'([^']+)'/.exec(raw)?.[1]],
 ];
 
 describe("version bump keeps every manifest in step", () => {
@@ -52,7 +52,7 @@ describe("version bump keeps every manifest in step", () => {
       "package-lock.json",
       "plugin",
       ".claude-plugin",
-      "landing/src/data/site.ts",
+      "site/src/data/site-content/version.ts",
       "scripts/sync-version.mjs",
     ]) {
       cpSync(join(REPO, relative), join(dir, relative), { recursive: true });

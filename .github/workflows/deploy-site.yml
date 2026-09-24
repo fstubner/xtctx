@@ -1,11 +1,14 @@
-name: deploy-landing
+name: deploy-site
 
 on:
   push:
     branches: [main]
     paths:
-      - landing/**
-      - .github/workflows/deploy-landing.yml
+      - site/**
+      # The changelog page is built from the root CHANGELOG.md, so a release
+      # has to redeploy the site for its entry to appear.
+      - CHANGELOG.md
+      - .github/workflows/deploy-site.yml
   workflow_dispatch:
 
 permissions:
@@ -32,21 +35,24 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: landing/package-lock.json
+          cache-dependency-path: site/package-lock.json
 
-      - name: Install landing dependencies
-        run: npm --prefix landing ci
+      - name: Install site dependencies
+        run: npm --prefix site ci
 
-      - name: Build landing site
-        run: npm --prefix landing run build
+      # Through the root script, which copies CHANGELOG.md into site/ first:
+      # the changelog page imports it from there, and the copy is not
+      # committed, so it cannot be stale.
+      - name: Build site
+        run: npm run site:build
 
       - name: Configure Pages
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
 
-      - name: Upload landing artifact
+      - name: Upload site artifact
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
-          path: landing/dist
+          path: site/dist
 
       - name: Deploy to GitHub Pages
         id: deployment

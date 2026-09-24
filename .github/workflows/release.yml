@@ -96,7 +96,7 @@ jobs:
           # in every run of every workflow in the repository.
           token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
           # Not left in `.git/config`. With the default, the admin PAT sits on
-          # disk while `npm ci`, `npm --prefix landing ci` and the whole
+          # disk while `npm ci`, `npm --prefix site ci` and the whole
           # `verify:release` suite run — third-party install scripts and every
           # test in the repository, any one of which could read it. Only the
           # push at the end needs it, and it is supplied there.
@@ -109,13 +109,13 @@ jobs:
           cache: npm
           cache-dependency-path: |
             package-lock.json
-            landing/package-lock.json
+            site/package-lock.json
 
       - name: Install root dependencies
         run: npm ci
 
-      - name: Install landing dependencies
-        run: npm --prefix landing ci
+      - name: Install site dependencies
+        run: npm --prefix site ci
 
       # Before anything is written. A release that fails its own gates should
       # leave no tag, no commit and no version bump behind to unpick.
@@ -199,7 +199,7 @@ jobs:
           # Every file the bump touched. `npm version` writes the first two;
           # the `version` lifecycle script writes the rest, and omitting them
           # here is what tagged a commit that failed its own test suite.
-          git add package.json package-lock.json CHANGELOG.md             plugin .claude-plugin landing/src/data/site.ts
+          git add package.json package-lock.json CHANGELOG.md             plugin .claude-plugin site/src/data/site-content/version.ts
           git commit -m "chore(release): ${VERSION}"
           git tag "$TAG"
           # The token reaches git here and nowhere else; see

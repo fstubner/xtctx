@@ -37,7 +37,8 @@ boundaries between them, and what each part is allowed to trust.
 - **Config writers** (`src/config/`) — setup/disconnect logic that edits
   other tools' config files (MCP config, managed instruction blocks,
   synced skills, the Claude Code hook in `.claude/settings.json`).
-- **Landing site** (`landing/`) — static Astro site on GitHub Pages;
+- **Site** (`site/`) — static Astro site on GitHub Pages, a subtree of
+  product-site-template;
   no runtime relationship to the package.
 
 ## Lifecycle

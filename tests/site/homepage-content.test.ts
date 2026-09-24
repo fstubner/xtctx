@@ -9,29 +9,43 @@
  * em dashes in live hero and install copy that the draft-only check had never
  * looked at.
  *
+ * Moved from `landing/` to `site/` when the site was rebuilt on
+ * product-site-template; the claims it pins did not change.
+ *
  * Source text, not rendered output, and the limit of that is worth stating: a
  * claim wrapped in `{false && (…)}` would still satisfy every assertion below.
  * Rendering means an astro build, which costs more in the unit suite than it
- * buys here — `npm run landing:build` already runs in `verify:release` and in
+ * buys here — `npm run site:check` already runs in `verify:release` and in
  * CI, so a page that cannot build is caught there.
  */
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-const LANDING = join(process.cwd(), "landing", "src");
+const SITE = join(process.cwd(), "site", "src");
+const CONTENT = join(SITE, "data", "site-content");
 
-/** Every source file that composes the homepage, concatenated. */
+/**
+ * Every file that holds the homepage's copy, concatenated, with comments
+ * removed.
+ *
+ * The site is built from product-site-template, whose rule is that all copy
+ * lives in `data/site-content/` and the components hold none, so these are
+ * the files a claim can be in. The `*types.ts` files are the template's
+ * shape, not xtctx's content. Comments are stripped because they are not
+ * copy: the template's own explain themselves with dashes, and a visitor
+ * never reads them.
+ */
 async function homepageSources(): Promise<string> {
-  const files = [
-    join(LANDING, "pages", "index.astro"),
-    join(LANDING, "data", "site.ts"),
-    ...["Nav", "Hero", "Workflow", "Surfaces", "Install", "Faq", "Footer", "IdeMock", "TerminalMock"].map(
-      (name) => join(LANDING, "components", `${name}.astro`),
-    ),
-  ];
+  const contentFiles = (await readdir(CONTENT))
+    .filter((name) => name.endsWith(".ts") && !name.endsWith("types.ts"))
+    .map((name) => join(CONTENT, name));
+  const files = [join(SITE, "pages", "index.astro"), ...contentFiles];
   const parts = await Promise.all(files.map((file) => readFile(file, "utf-8")));
-  return parts.join("\n");
+  return parts
+    .join("\n")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
 }
 
 describe("the homepage visitors are sent to", () => {
@@ -63,7 +77,11 @@ describe("the homepage visitors are sent to", () => {
     // substring check flagged that correct copy as a false promise. Asserting
     // the commitment is present is the check that survives rewording of the
     // sentence around it.
-    expect(page.toLowerCase()).toContain("local-only");
+    //
+    // "local by default" rather than the earlier "local-only": a project can
+    // opt into a remote embedding endpoint, so "only" stopped being true, and
+    // README.md's Limits section says "local-only by default".
+    expect(page.toLowerCase()).toContain("local by default");
   });
 
   it("does not promise retrieval without setup", async () => {

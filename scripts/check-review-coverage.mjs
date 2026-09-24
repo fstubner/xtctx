@@ -105,7 +105,7 @@ const LAYERS = [
     why:
       "The landing page's central pitch was false in four places, and its JSON-LD published one " +
       "of them to search engines as structured data.",
-    match: [/^landing\//, /^styles\//, /^design-tokens\.json$/, /^design-direction\.md$/, /^ux-walkthrough\.md$/],
+    match: [/^site\//, /^styles\//, /^design-tokens\.json$/, /^design-direction\.md$/, /^ux-walkthrough\.md$/],
   },
   {
     name: "build-config",

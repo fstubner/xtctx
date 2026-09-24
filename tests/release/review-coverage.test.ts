@@ -45,7 +45,7 @@ describe("review coverage", () => {
       "package.json",
       "README.md",
       "docs/testing-strategy.md",
-      "landing/src/data/site.ts",
+      "site/src/data/site-content/hero.ts",
       "design-direction.md",
       "ux-walkthrough.md",
       "tsconfig.json",
