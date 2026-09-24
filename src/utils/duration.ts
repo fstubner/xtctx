@@ -18,8 +18,12 @@ export function formatDuration(ms: number | null | undefined): string | null {
   if (ms < 60_000) {
     return `${(ms / 1_000).toFixed(1)}s`;
   }
-  const minutes = Math.floor(ms / 60_000);
-  const seconds = Math.round((ms % 60_000) / 1_000);
+  // Round once, then split. Rounding minutes and seconds separately printed
+  // "1m 60s" for 119.6 seconds — found by a mutation sweep, when swapping this
+  // file's rounding for flooring changed nothing any test could see.
+  const totalSeconds = Math.round(ms / 1_000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
   return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
 }
 
@@ -39,26 +43,43 @@ export function formatDuration(ms: number | null | undefined): string | null {
  * `remaining` stays a window count. That is the number a person can see in
  * `Data`, and the estimate reading as a duration is the point of it.
  */
+/**
+ * Longest background embed the MCP server starts without being asked.
+ *
+ * Lives here, beside the estimate it is compared against, because two callers
+ * need it: the server deciding whether to drain, and `xtctx status` telling
+ * the user when it will not. A status line that stays silent about a backlog
+ * nothing is working on is how someone ends up with keyword-only search and no
+ * idea why.
+ *
+ * The constraint is not time but how much of the machine this takes while an
+ * agent is working — about 0.9 cores on a calibrated GPU, nine to eleven of
+ * twenty-four on the CPU path.
+ */
+export const BACKGROUND_EMBED_BUDGET_MS = 15 * 60 * 1000;
+
 export function estimateVectorBacklog(
   retrievalUnits: number,
   vectorizedUnits: number,
   msPerUnit: number | null | undefined,
   segments?: { backlog: number; msPerSegment: number | null | undefined },
-): { remaining: number; eta: string | null } {
+): { remaining: number; eta: string | null; etaMs: number | null } {
   const remaining = Math.max(0, retrievalUnits - vectorizedUnits);
   if (remaining === 0) {
-    return { remaining, eta: null };
+    return { remaining, eta: null, etaMs: null };
   }
 
   const msPerSegment = segments?.msPerSegment;
   if (segments && msPerSegment !== null && msPerSegment !== undefined && msPerSegment > 0) {
-    return { remaining, eta: formatDuration(segments.backlog * msPerSegment) };
+    const etaMs = segments.backlog * msPerSegment;
+    return { remaining, eta: formatDuration(etaMs), etaMs };
   }
 
   // No segment rate yet — nothing has embedded since this was added, or the
   // index predates it. The window rate is a worse estimate, not no estimate.
   if (msPerUnit === null || msPerUnit === undefined || !(msPerUnit > 0)) {
-    return { remaining, eta: null };
+    return { remaining, eta: null, etaMs: null };
   }
-  return { remaining, eta: formatDuration(remaining * msPerUnit) };
+  const etaMs = remaining * msPerUnit;
+  return { remaining, eta: formatDuration(etaMs), etaMs };
 }

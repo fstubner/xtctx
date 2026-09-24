@@ -4,7 +4,11 @@ import { inspectManagedFile, pathExists } from "../config/setup.js";
 import { inspectMcpWiring, type McpWiringState } from "../config/mcp-config.js";
 import { inspectSkillStatus } from "../config/skills.js";
 import { createProjectServices, type ProjectServices } from "../runtime/services.js";
-import { estimateVectorBacklog, formatDuration } from "../utils/duration.js";
+import {
+  BACKGROUND_EMBED_BUDGET_MS,
+  estimateVectorBacklog,
+  formatDuration,
+} from "../utils/duration.js";
 import { readDriftLog, type DriftLogFile } from "../scrapers/drift-log.js";
 import { SUPPORTED_TOOLS } from "../tools/sources.js";
 import { readXtctxPackage } from "../utils/package-info.js";
@@ -112,6 +116,36 @@ export async function renderStatusBlock(
       `Embed    ${backlog.remaining} windows outstanding, ${rate}` +
         `${backlog.eta ? `, about ${backlog.eta} of embedding left` : ""}`,
     );
+    // Say whether anything is actually working on it.
+    //
+    // The MCP server drains the backlog in the background only while the
+    // estimate fits its budget, so on a slow machine with a large history
+    // nothing is. Until this line existed that state was invisible and
+    // indistinguishable from the one above it: semantic search quietly
+    // answering from keyword, forever, with a status report that looked like
+    // progress was being made. Naming the command is the point — the backlog
+    // does not drain by waiting.
+    if (backlog.etaMs !== null && backlog.etaMs > BACKGROUND_EMBED_BUDGET_MS) {
+      lines.push(
+        "         too large to finish in the background — run `xtctx scan --embed`",
+      );
+    }
+  }
+  // Only when it is not the default. A machine that has never been calibrated
+  // is on the CPU, which is what every machine did before calibration existed,
+  // and does not need a line saying so on every status call.
+  if (status.vector_device && status.vector_device !== "cpu") {
+    lines.push(`Device   ${status.vector_device} (from \`xtctx calibrate\`)`);
+  }
+  // An endpoint is the one thing that sends transcript text off this machine,
+  // so it is stated in full and unconditionally whenever one is configured.
+  // "Am I uploading my transcripts, and where to" must never require opening a
+  // config file to answer. The identity already carries the endpoint because
+  // `retrieval_unit_vectors` is keyed on it; the URL is what matters here, and
+  // the API key is never part of it.
+  if (status.vector_model.startsWith("openai:")) {
+    const endpoint = status.vector_model.slice("openai:".length);
+    lines.push(`Embedding  external endpoint — window text is sent to ${endpoint}`);
   }
   lines.push("");
   lines.push("Tools:");
@@ -168,13 +202,31 @@ export async function renderStatusBlock(
     }
   }
 
+  // Everything below reports on wiring that setup creates, so in a project
+  // that has not been set up every line of it reads `missing` — about thirty
+  // of them, each carrying an absolute path, between the reader and the one
+  // sentence that matters. A first-time user running `status` to see what
+  // this thing does met a wall of faults describing the absence of a thing
+  // they had not asked for yet.
+  if (!configPresent) {
+    lines.push("");
+    lines.push("Next     This project is not set up yet. Run: xtctx setup");
+    return lines.join("\n");
+  }
+
   lines.push("");
   lines.push("Skills:");
   lines.push(`  Source ${skills.sourceDir}`);
   for (const skill of skills.selected) {
-    const marker = skill.exists ? "ok" : "missing";
+    const marker = skill.exists ? (skill.staleBuiltIn ? "stale" : "ok") : "missing";
     const hash = skill.hash ? ` ${skill.hash.slice(0, 18)}` : "";
     lines.push(`  ${marker.padEnd(8)} ${skill.id}${hash}`);
+    if (skill.staleBuiltIn) {
+      lines.push(
+        "           this project's copy predates the built-in skill shipped with " +
+          "this version; run `xtctx setup --yes` to refresh it",
+      );
+    }
   }
   for (const target of skills.targets) {
     const skillPart = target.skillId ? ` ${target.skillId}` : "";
@@ -243,12 +295,28 @@ export async function renderStatusBlock(
     skills.targets.some((target) => target.state === "missing" || target.state === "drift"));
 
   lines.push("");
-  if (!configPresent) {
-    lines.push("Next     This project is not set up yet. Run: xtctx setup");
+  if (services.config.error) {
+    // Checked before everything below it, because nothing below it can be
+    // true while this holds. Nothing is scanned at all with an unreadable
+    // config, so "ask an agent to call xtctx_recent_sessions" is advice that
+    // cannot work, and with an index left over from before the file broke the
+    // old branch cheerfully reported "Handoff is wired" six lines under
+    // "UNREADABLE ... No transcripts are being read until this is fixed."
+    // The last line is the one people act on.
+    lines.push(`Next     Fix ${services.configPath} — nothing is being read until it parses.`);
   } else if (needsRepair) {
     lines.push("Next     Wiring has drifted. Run: xtctx setup --repair");
   } else if (status.sessions === 0) {
-    lines.push("Next     No sessions are indexed yet. Ask a configured agent to call xtctx_recent_sessions.");
+    // Worded as expected rather than as a fault. Running `status` straight
+    // after `setup` is the obvious way to check setup worked, and it lands
+    // here: nothing is indexed until an agent calls a tool, so `Scan never`
+    // and `0 sessions` are what a correct install looks like at this point.
+    lines.push(
+      "Next     Nothing is indexed yet, which is expected until an agent calls a tool.",
+    );
+    lines.push(
+      "         Restart any agent that was open when setup ran, then ask it for recent context.",
+    );
   } else {
     lines.push("Next     Handoff is wired. Ask a configured agent to call xtctx_recent_sessions.");
   }

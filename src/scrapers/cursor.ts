@@ -451,12 +451,23 @@ export class CursorScraper extends AbstractScraper<CursorChunk> {
           `bubbleId:${ref.composerId}:${header.bubbleId}`,
         ) as { value: string } | undefined;
 
-        if (!bubbleRow) continue;
+        // Both skips advance `messageIndex`, like the two below them.
+        // `scan.ts` hashes the index into the row id, so an index that counts
+        // only the bubbles that happened to be present shifts every later turn
+        // down by one the moment Cursor prunes an earlier bubble — and
+        // `ACCEPTED_DEGRADATIONS.prunedBubble` records that pruning as normal.
+        // Those turns then re-insert under new ids beside the old rows, which
+        // `pruneRereadSessions` does not clear on an incremental pass.
+        if (!bubbleRow) {
+          messageIndex++;
+          continue;
+        }
 
         let bubble: CursorBubbleData;
         try {
           bubble = JSON.parse(bubbleRow.value) as CursorBubbleData;
         } catch {
+          messageIndex++;
           continue;
         }
 

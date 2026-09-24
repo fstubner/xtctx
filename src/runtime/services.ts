@@ -1,12 +1,20 @@
 import { readFile, realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
+import {
+  createEmbeddingProvider,
+  defaultEmbeddingConfig,
+  parseEmbeddingConfig,
+} from "../handoff/embedding-config.js";
+import { readDeviceVerdict } from "../handoff/device.js";
 import { SqliteHandoffIndex } from "../handoff/sqlite-index.js";
 import type { SessionService } from "../handoff/types.js";
 import { SUPPORTED_TOOLS, createDefaultScrapers } from "../tools/sources.js";
+import type { EmbeddingConfig } from "../types/config.js";
 
 interface ProjectConfig {
   tools: Record<string, { enabled?: boolean; storePath?: string }>;
+  embedding: EmbeddingConfig;
   /**
    * Whether `.xtctx/config.yaml` exists — whether anyone opted this directory
    * in.
@@ -80,7 +88,7 @@ export async function createProjectServices(
   const stateDir = join(xtctxDir, "state");
   const dbPath = join(stateDir, "xtctx.db");
   const configPath = join(xtctxDir, "config.yaml");
-  const config = await loadProjectConfig(configPath);
+  const config = await loadProjectConfig(configPath, projectRoot);
   const overrides = Object.fromEntries(
     Object.entries(config.tools)
       .filter(([, value]) => value.enabled !== false)
@@ -113,6 +121,14 @@ export async function createProjectServices(
       // against an in-memory database and report zeros, which is the truth.
       createIfMissing: options.createIfMissing ?? config.present,
       redirectedTools: redirectedTools(config),
+      // Provider comes from config, not from whatever happens to be in the
+      // environment — an OPENAI_API_KEY sitting around must not opt a project
+      // into uploading transcript text.
+      embeddingProvider: config.error
+        ? undefined
+        : createEmbeddingProvider(config.embedding, (await readDeviceVerdict())?.device),
+      minSemanticCosine: config.embedding.minSemanticCosine,
+      minConfidentCosine: config.embedding.minConfidentCosine,
     },
   );
 
@@ -127,24 +143,47 @@ export async function createProjectServices(
   };
 }
 
-async function loadProjectConfig(configPath: string): Promise<ProjectConfig> {
+async function loadProjectConfig(configPath: string, projectRoot: string): Promise<ProjectConfig> {
   let raw: string;
   try {
     raw = await readFile(configPath, "utf-8");
-  } catch {
+  } catch (err) {
     // Missing config is valid — `status` still diagnoses, and the MCP server
     // still starts. What it must not do is behave as though the project were
     // configured; see `present`.
-    return { tools: {}, present: false };
+    //
+    // Only ENOENT, though. A config that exists but cannot be READ is the
+    // same situation as one that cannot be PARSED, which the branch below
+    // takes care to distinguish: answering `present: false` there makes every
+    // tool tell the agent to run `xtctx setup`, and setup rewrites
+    // config.yaml with every tool `enabled: true` — so a locked or busy file
+    // would end with the user's `enabled: false` silently undone. The
+    // degraded read becoming the base for a write, again.
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") {
+      return { tools: {}, embedding: defaultEmbeddingConfig(), present: false };
+    }
+    return {
+      tools: {},
+      embedding: defaultEmbeddingConfig(),
+      present: true,
+      error: `could not be read (${code ?? "unknown error"}): ${err instanceof Error ? err.message : String(err)}`,
+    };
   }
 
   try {
     const parsed = parseYaml(raw);
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       const root = parsed as Record<string, unknown>;
-      return { tools: normalizeTools(root.tools), present: true };
+      const embedding = parseEmbeddingConfig(root.embedding);
+      return { tools: normalizeTools(root.tools, projectRoot), embedding, present: true };
     }
-    return { tools: {}, present: true, error: "expected a mapping at the top level" };
+    return {
+      tools: {},
+      embedding: defaultEmbeddingConfig(),
+      present: true,
+      error: "expected a mapping at the top level",
+    };
   } catch (err) {
     // A config that exists but will not parse is not the same as no config.
     // `enabled: false` is the only control a user has over which transcript
@@ -154,11 +193,16 @@ async function loadProjectConfig(configPath: string): Promise<ProjectConfig> {
     // Reported rather than thrown: `status` has to keep working, since
     // explaining a broken config is exactly what a diagnostic is for. What
     // does change is that nothing is scanned until it is fixed.
-    return { tools: {}, present: true, error: err instanceof Error ? err.message : String(err) };
+    return {
+      tools: {},
+      embedding: defaultEmbeddingConfig(),
+      present: true,
+      error: err instanceof Error ? err.message : String(err),
+    };
   }
 }
 
-function normalizeTools(input: unknown): ProjectConfig["tools"] {
+function normalizeTools(input: unknown, projectRoot: string): ProjectConfig["tools"] {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     return {};
   }
@@ -175,7 +219,13 @@ function normalizeTools(input: unknown): ProjectConfig["tools"] {
       config.enabled = value.enabled;
     }
     if (typeof value.storePath === "string" && value.storePath.trim().length > 0) {
-      config.storePath = resolve(value.storePath);
+      // Against the project root, not the process's working directory.
+      // `.xtctx/config.yaml` belongs to the project and is committable, so a
+      // relative `storePath` in it means "relative to this project" — while
+      // `resolve(value.storePath)` made `xtctx status -p X` run from anywhere
+      // else read a different store than the MCP server, which runs with cwd
+      // at the project root.
+      config.storePath = resolve(projectRoot, value.storePath);
     }
     tools[tool] = config;
   }

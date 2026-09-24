@@ -43,7 +43,27 @@ interface SkillSyncResult {
 
 interface SkillStatus {
   sourceDir: string;
-  selected: Array<{ id: string; exists: boolean; hash?: string }>;
+  selected: Array<{
+    id: string;
+    exists: boolean;
+    hash?: string;
+    /**
+     * The built-in skill's canonical copy no longer matches the one this
+     * version ships.
+     *
+     * Only ever set for `xtctx-handoff`. Setup copies the built-in text into
+     * `.xtctx/skills/` once, and everything afterwards compares the synced
+     * targets against THAT copy — so a project set up before the text changed
+     * keeps the old wording, every target agrees with it, and status reports
+     * `ok`. That is how a skill telling agents "no xtctx setup is required"
+     * survived in projects after the claim was corrected, while the server
+     * refuses every tool in an unconfigured project.
+     *
+     * The skill is instructions to an agent, so a stale copy is not cosmetic:
+     * it is an instruction to keep calling tools that will not answer.
+     */
+    staleBuiltIn?: boolean;
+  }>;
   targets: Array<{
     tool: ToolId;
     mode: SkillSyncMode;
@@ -190,10 +210,15 @@ export async function inspectSkillStatus(projectRoot: string, configPath: string
     selectedIds.map(async (id) => {
       const path = join(sourceDir, id, "SKILL.md");
       const content = await readUtf8IfExists(path);
+      const staleBuiltIn =
+        id === BUILT_IN_SKILL_ID &&
+        content !== null &&
+        hashContent(content) !== hashContent(builtInHandoffSkill());
       return {
         id,
         exists: content !== null,
         hash: content ? hashContent(content) : undefined,
+        ...(staleBuiltIn ? { staleBuiltIn: true } : {}),
       };
     }),
   );
@@ -535,17 +560,16 @@ export function builtInHandoffSkill(): string {
   return [
     "---",
     "name: xtctx-handoff",
-    "description: Retrieve cross-tool handoff context with the xtctx MCP tools. Use when switching AI coding tools, resuming work another agent started, or picking up a project without knowing what was last done in it. Works in any project the tools are available in; no xtctx setup is required.",
+    "description: Retrieve cross-tool handoff context with the xtctx MCP tools. Use when switching AI coding tools, resuming work another agent started, or picking up a project without knowing what was last done in it. Available in any project; retrieval needs `xtctx setup` to have been run there, and the tools say so when it has not.",
     "---",
     "",
     "# xtctx Handoff",
     "",
     "Use the xtctx MCP tools to retrieve recent local transcript context for this project.",
     "",
-    "The project is resolved from the working directory, so these tools work whether",
-    "or not `xtctx setup` has been run here. If `xtctx_continuity_status` reports the",
-    "config as missing, that refers to managed instruction blocks and hooks — the",
-    "retrieval tools are unaffected and worth calling anyway.",
+    "The project is resolved from the working directory. A project that has not",
+    "been set up has no index to read, so every tool answers with that and names",
+    "`xtctx setup` — offer it rather than reporting that there is no history.",
     "",
     "## Workflow",
     "",

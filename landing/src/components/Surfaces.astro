@@ -53,8 +53,12 @@ const subFeatures = surfaces.slice(1);
                 <h3>{f.title}</h3>
               </div>
               <p set:html={f.body} />
+              {/* No `has-copy`: these blocks are sample OUTPUT, not commands.
+                  The copy handler only strips a leading `$ `, so copying one
+                  handed the user lines like `updated .xtctx/config.yaml` and
+                  `├── sessions` to paste into a shell. */}
               {f.codeHtml && (
-                <div class="codeblock-wrapper has-copy">
+                <div class="codeblock-wrapper">
                   <pre class="codeblock-mini"><code set:html={f.codeHtml} /></pre>
                 </div>
               )}

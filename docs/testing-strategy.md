@@ -8,7 +8,7 @@ measured rather than assumed.
 | Suite | Command | Runs in CI | Defends |
 |---|---|---|---|
 | unit | `npm test` | every job | Parsing, scoping, ranking mechanics, config writing. The bulk of the suite. |
-| integration | `npm run test:integration` | yes | The MCP tool handlers against a real index. |
+| integration | `npm run test:integration` | yes | The five MCP tool handlers end to end against a fixture service — the wiring and the payload shapes, not the index. `tests/handoff/` covers the real index. |
 | drift | `npm run test:drift` | yes | Each scraper against a recorded sample of the tool's real on-disk format. |
 | smoke | `npm run test:smoke` | yes | The built CLI, spawned as a host tool spawns it, against seeded stores. |
 | eval | `npm run test:eval` | `checks` job | Retrieval *quality* — MRR, top-1, recall@5 against a committed baseline. |
@@ -148,7 +148,10 @@ reaches a user silently: project attribution, resume cursors, role mapping,
 message-index stability, timestamp handling, and the drift warnings that fire
 on an unrecognised shape. The existing suite killed 25 and 20 survived. Thirteen
 of those behaviours are now closed, each by a test verified to fail against the
-exact mutation that survived it; the remaining five were left, with reasons.
+exact mutation that survived it; five were left with reasons, recorded below.
+Two are unaccounted for: 13 + 5 does not reach 20, and nothing in the
+repository says which two they were. Treat the count as approximate rather
+than as a ledger — the individual rows below are the part that was checked.
 
 The survivors clustered in three places, and all three are the same shape: a
 guard that only runs when a transcript says *nothing*.
@@ -185,9 +188,13 @@ Left, with reasons rather than tests:
 | copilot-cli `session.start` mismatch returns early | The `projectMatch !== true` guard below refuses every record anyway. The only observable difference is a misleading drift message. |
 | opencode missing-`role` guard loses its `continue` | The type check immediately below skips the same record. Removing the guard outright, or both guards, is killed. |
 
-The sweep also turned up one open defect, which is a bug rather than a coverage
-gap and is deliberately not fixed here. **An oversized `codex` line is dropped
-with no drift warning at all, and the code that was meant to warn cannot run.**
+The sweep also turned up one defect, which was a bug rather than a coverage
+gap. **Fixed since, in c9beb48** — `readJsonlLines` now hands back a head
+sample of a discarded line so the record can still be classified, and
+`tests/scrapers/codex-oversized-records.test.ts` pins the warning. The
+description below is kept because the shape of the defect is the lesson:
+an oversized `codex` line was dropped with no drift warning at all, and the
+code that was meant to warn could not run.
 `readJsonlLines` already caps lines at `MAX_LINE_BYTES` and delivers anything
 over it as `line: null`, discarding the bytes; `codex.ts` then `continue`s on
 that branch in silence. The `isWithinLineLimit(line)` check below it — the one

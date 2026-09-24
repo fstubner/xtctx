@@ -288,6 +288,14 @@ function readStdinWithin(timeoutMs: number): Promise<string> {
       clearTimeout(timer);
       process.stdin.removeAllListeners("data");
       process.stdin.removeAllListeners("end");
+      // Removing the listeners stops us READING stdin; it does not stop stdin
+      // holding the event loop open. A host that opens the pipe without
+      // writing — the case this timeout exists for — still kept the process
+      // alive until it closed the pipe or its own hook timeout fired:
+      // measured at 6012ms against a pipe held for six seconds, with this
+      // function resolving at 250ms. Pausing and destroying releases it.
+      process.stdin.pause();
+      process.stdin.destroy?.();
       resolve(data);
     };
     const timer = setTimeout(done, timeoutMs);

@@ -254,7 +254,14 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
     const resumed = startAt > 0 ? cursor?.context : undefined;
 
     let messageIndex = resumed?.messageIndex ?? 0;
-    let lineNo = 0;
+    // A byte offset, not a line number.
+    //
+    // A resumed read starts at `startAt` bytes, so a counter starting at zero
+    // counts lines since the RESUME POINT: a record appended as line 101
+    // reported as `path:1`, and a drift location is the only pointer anyone
+    // has when chasing a format break. The offset is what the reader already
+    // tracks and means the same thing on every pass.
+    let byteAt = startAt;
     /**
      * null until a record in this file names a project.
      *
@@ -268,13 +275,13 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
     let readTo = startAt;
 
     for await (const entry of readJsonlLines(filePath, { start: startAt })) {
+      byteAt = entry.endOffset;
       readTo = entry.endOffset;
-      lineNo++;
       const line = entry.line;
       if (line === null) {
         recordDrift(
           SCRAPER_NAME,
-          `${filePath}:${lineNo}`,
+          `${filePath}@${byteAt}`,
           `line exceeds ${MAX_LINE_BYTES} characters; skipped`,
         );
         continue;
@@ -291,7 +298,7 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
         // mutation test can see drift instead of data silently vanishing.
         recordDrift(
           SCRAPER_NAME,
-          `${filePath}:${lineNo}`,
+          `${filePath}@${byteAt}`,
           `line is not valid JSON: ${(err as Error).message}`,
         );
         continue;
@@ -339,7 +346,7 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
       if (!("type" in obj)) {
         recordDrift(
           SCRAPER_NAME,
-          `${filePath}:${lineNo}`,
+          `${filePath}@${byteAt}`,
           "record is missing required 'type' field — likely renamed",
         );
       } else if (
@@ -351,7 +358,7 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
       ) {
         recordDrift(
           SCRAPER_NAME,
-          `${filePath}:${lineNo}`,
+          `${filePath}@${byteAt}`,
           `unknown 'type' value ${JSON.stringify(obj.type)}`,
         );
       }
@@ -363,7 +370,7 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
       ) {
         recordDrift(
           SCRAPER_NAME,
-          `${filePath}:${lineNo}`,
+          `${filePath}@${byteAt}`,
           `expected 'content' to be a string, got ${describeType(obj.content)}`,
         );
       }
@@ -371,13 +378,13 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
       if (!("timestamp" in obj)) {
         recordDrift(
           SCRAPER_NAME,
-          `${filePath}:${lineNo}`,
+          `${filePath}@${byteAt}`,
           "record is missing 'timestamp' field",
         );
       } else if (typeof obj.timestamp !== "string") {
         recordDrift(
           SCRAPER_NAME,
-          `${filePath}:${lineNo}`,
+          `${filePath}@${byteAt}`,
           `expected 'timestamp' string, got ${describeType(obj.timestamp)}`,
         );
       }

@@ -75,8 +75,11 @@ turns. Each embedded window includes the session reference, message range, turn
 order, message index, role, timestamp, and raw message content. Retrieval ranks
 semantic similarity together with keyword, recency, and continuity signals, then
 returns the matched message range so the agent can drill into the raw session.
-Vector creation is lazy; if the embedding provider is unavailable during hybrid
-search, xtctx falls back to keyword retrieval.
+Vector creation is incremental: searches vectorize a slice per call, and the
+MCP server drains the rest in the background at startup when the estimate fits
+its budget. If the embedding provider is unavailable during hybrid search,
+xtctx falls back to keyword retrieval and records the reason, which
+`xtctx status` and `xtctx_continuity_status` both report.
 
 ## Storage
 

@@ -102,6 +102,10 @@ interface SqliteHandoffIndexOptions {
    * embeds is a search that degrades to keyword forever.
    */
   freezeVectors?: boolean;
+  /** Per-window cosine floor; see ranking.ts. */
+  minSemanticCosine?: number;
+  /** Best-window confidence floor; see ranking.ts. */
+  minConfidentCosine?: number;
 }
 
 /**
@@ -275,6 +279,26 @@ export class SqliteHandoffIndex implements SessionService {
    * store is not fixed by retrying at all.
    */
   private lastLiteralUnreadable: string[] = [];
+
+  /**
+   * Forget the last literal pass's advice, at the start of every retrieval.
+   *
+   * Both fields above were written by a literal search and never cleared,
+   * while `getIndexProgress` — which every tool calls — reports them. So one
+   * truncated literal search attached "The literal pass stopped at its limit
+   * or time budget. Narrow the query or raise `limit`." to every later
+   * `xtctx_recent_sessions` and `xtctx_session_detail` answer, calls that
+   * carry no query to narrow.
+   *
+   * The advice belongs to the call that produced it, not to the index. Cleared
+   * on entry rather than consumed on read, because a literal search sets them
+   * after this runs and before its own progress note is built, and nothing
+   * then depends on how many times that note is asked for.
+   */
+  private clearLiteralAdvice(): void {
+    this.lastLiteralWasExhaustive = undefined;
+    this.lastLiteralUnreadable = [];
+  }
   private readonly embeddingWarmBudgetMs: number;
   private readonly vectorBudgetMs: number;
   private scanStartedMs = 0;
@@ -303,6 +327,8 @@ export class SqliteHandoffIndex implements SessionService {
   private readonly embeddingProvider: EmbeddingProvider;
   private readonly windowSize: number;
   private readonly windowStride: number;
+  private readonly minSemanticCosine: number | undefined;
+  private readonly minConfidentCosine: number | undefined;
 
   constructor(
     private readonly dbPath: string,
@@ -314,6 +340,8 @@ export class SqliteHandoffIndex implements SessionService {
       options.embeddingProvider ?? defaultEmbeddingProvider();
     this.windowSize = Math.max(2, Math.floor(options.windowSize ?? DEFAULT_WINDOW_SIZE));
     this.windowStride = Math.max(1, Math.floor(options.windowStride ?? DEFAULT_WINDOW_STRIDE));
+    this.minSemanticCosine = options.minSemanticCosine;
+    this.minConfidentCosine = options.minConfidentCosine;
     this.refreshBudgetMs = Math.max(0, options.refreshBudgetMs ?? DEFAULT_REFRESH_BUDGET_MS);
     this.literalBudgetMs = Math.max(0, options.literalBudgetMs ?? DEFAULT_LITERAL_BUDGET_MS);
     this.embeddingWarmBudgetMs = Math.max(
@@ -339,6 +367,7 @@ export class SqliteHandoffIndex implements SessionService {
     toolFilter?: string[],
     branchFilter?: string[],
   ): Promise<SessionSummary[]> {
+    this.clearLiteralAdvice();
     await this.refresh({ toolFilter });
     const db = this.getDb();
     const normalizedLimit = normalizeLimit(limit, DEFAULT_LIMIT);
@@ -418,6 +447,7 @@ export class SqliteHandoffIndex implements SessionService {
     offset: number,
     limit: number,
   ): Promise<SessionMessage[]> {
+    this.clearLiteralAdvice();
     await this.refresh({ sessionRef });
     const db = this.getDb();
     const normalizedOffset = Number.isFinite(offset) && offset > 0 ? Math.floor(offset) : 0;
@@ -451,16 +481,21 @@ export class SqliteHandoffIndex implements SessionService {
     mode: SessionSearchMode = "hybrid",
     branchFilter?: string[],
   ): Promise<SessionSummary[]> {
-    await this.refresh({ toolFilter });
+    this.clearLiteralAdvice();
+    const normalizedModeForRefresh = normalizeSearchMode(mode);
+    // A literal pass reads the stores, not the index, so it starts the scan
+    // and moves on rather than waiting out the refresh budget in front of its
+    // own. Every other mode reads the index and waits as before.
+    await this.refresh({ toolFilter, noWait: normalizedModeForRefresh === "literal" });
     const trimmed = query.trim();
     if (!trimmed) {
       return [];
     }
 
-    const normalizedMode = normalizeSearchMode(mode);
+    const normalizedMode = normalizedModeForRefresh;
 
-    // Answered without the index, so it deliberately skips the refresh above
-    // having settled and does not touch the database at all.
+    // Answered without the index: the refresh above was started but not waited
+    // on, and nothing below touches the database.
     if (normalizedMode === "literal") {
       const { sessions, exhausted, unreadable } = await literalSearch(
         this.tools,
@@ -483,6 +518,20 @@ export class SqliteHandoffIndex implements SessionService {
     // and let the next search use the model. An explicit `vector` request is a
     // different matter: there is no other route, so that one waits.
     if (normalizedMode === "hybrid" && this.embeddingProvider.isReady?.() === false) {
+      // A load that FAILED is not a load still running, and this branch used
+      // to treat them the same. `warm()` swallows its error and `isReady()`
+      // stays false afterwards, so a model that could not be fetched at all
+      // returned keyword results with "still loading, ask again shortly" on
+      // every call for the life of the project — advice that could never come
+      // true — while `last_error:embeddings` stayed empty because the only
+      // code that writes it is the catch below, which this return skips.
+      const loadError = this.embeddingProvider.loadError?.();
+      if (loadError !== undefined) {
+        setSetting(this.getDb(), "last_error:embeddings", loadError);
+      }
+      // Retried regardless: the reason is usually a cold cache behind a flaky
+      // network, which succeeds on a later attempt, and the setting is cleared
+      // when it does.
       this.embeddingProvider.warm?.();
       return this.keywordSearch(trimmed, limit, toolFilter, branchFilter);
     }
@@ -521,6 +570,7 @@ export class SqliteHandoffIndex implements SessionService {
       tools: this.tools,
       redirectedTools: this.redirectedTools,
       vectorModel: this.embeddingProvider.model,
+      vectorDevice: this.embeddingProvider.device ?? null,
     });
   }
 
@@ -538,6 +588,20 @@ export class SqliteHandoffIndex implements SessionService {
     toolFilter?: string[];
     sessionRef?: string;
     statusOnly?: boolean;
+    /**
+     * Start a scan if one is due, but do not wait for it.
+     *
+     * For a caller that does not read the index. A literal search streams the
+     * transcript stores directly — that is the whole reason it exists, to
+     * answer while the index is still filling — and it was still paying up to
+     * `refreshBudgetMs` first, for a scan whose results it never touches. On
+     * the defaults that is four seconds of waiting in front of its own five,
+     * on the one route chosen for being fast when the index is cold.
+     *
+     * The scan is still started, because the next caller does read the index
+     * and a literal search is often the first call in a session.
+     */
+    noWait?: boolean;
   }): Promise<void> {
     await this.initialized;
     if (reason.statusOnly) {
@@ -562,7 +626,11 @@ export class SqliteHandoffIndex implements SessionService {
       this.scanStartedMs = Date.now();
     }
 
-    await waitWithBudget(this.refreshPromise, this.scanStartedMs, this.refreshBudgetMs);
+    await waitWithBudget(
+      this.refreshPromise,
+      this.scanStartedMs,
+      reason.noWait ? 0 : this.refreshBudgetMs,
+    );
   }
 
   /** True when a scan started by an earlier call is still running. */
@@ -872,6 +940,8 @@ export class SqliteHandoffIndex implements SessionService {
         limit: normalizedLimit,
         cosineSimilarity,
         deserializeVector,
+        minSemanticCosine: this.minSemanticCosine,
+        minConfidentCosine: this.minConfidentCosine,
       }),
     );
   }
@@ -975,23 +1045,50 @@ export class SqliteHandoffIndex implements SessionService {
    * and every search pays the six seconds anyway.
    *
    * There is no daemon, so nothing works the backlog down between commands.
-   * This is the piece that does, and it is deliberately not what a scan does
-   * by default: the session-start hook launches `scan` detached, and draining
-   * there would start hours of embedding every time an agent opens a large
-   * project.
+   * Two things call this: `xtctx scan --embed`, which runs it to completion
+   * however long that takes, and the MCP server at session start, which runs
+   * it only when this machine's measured rate says the remainder fits in a
+   * budget. The bound is the whole point of the second caller — unconditional
+   * background embedding is what would make a large project on a CPU
+   * unusable.
    */
+  /** See `SessionService.deferEmbeddingDeviceUntil`. */
+  deferEmbeddingDeviceUntil(device: Promise<string | undefined>): void {
+    const provider = this.embeddingProvider as {
+      deferDeviceUntil?: (d: Promise<string | undefined>) => void;
+    };
+    provider.deferDeviceUntil?.(device);
+  }
+
   async embedBacklog(onProgress?: (embedded: number, total: number) => void): Promise<number> {
     await this.whenScanSettled();
     // No `isReady` check and no degrading to keyword: `embedBatch` loads the
     // model itself and this command has nothing else it could be asking for,
     // so it waits however long that takes.
-    return ensureVectors({
-      db: this.getDb(),
-      embeddingProvider: this.embeddingProvider,
-      filters: [],
-      vectorBudgetMs: 0,
-      onProgress,
-    });
+    //
+    // A failure is recorded where `xtctx status` and `xtctx_continuity_status`
+    // already look. The MCP server runs this in the background at startup with
+    // nobody waiting on it, and its only caller used to swallow the error — so
+    // an endpoint rejecting every call, or a model that could not load, left
+    // the backlog frozen with no reason given anywhere.
+    try {
+      const remaining = await ensureVectors({
+        db: this.getDb(),
+        embeddingProvider: this.embeddingProvider,
+        filters: [],
+        vectorBudgetMs: 0,
+        onProgress,
+      });
+      clearSetting(this.getDb(), "last_error:embeddings");
+      return remaining;
+    } catch (error) {
+      setSetting(
+        this.getDb(),
+        "last_error:embeddings",
+        error instanceof Error ? error.message : String(error),
+      );
+      throw error;
+    }
   }
 
   private async ensureVectors(toolFilter?: string[]): Promise<void> {

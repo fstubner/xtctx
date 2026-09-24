@@ -30,7 +30,7 @@ const MAX_MATCHES_PER_SESSION = 3;
  * Unrelated sentence-transformer pairs sit near 0; related ones are
  * comfortably above this.
  */
-const MIN_SEMANTIC_COSINE = 0.15;
+export const MIN_SEMANTIC_COSINE = 0.62;
 
 /**
  * How similar the *best* window has to be before a query counts as having
@@ -56,8 +56,16 @@ const MIN_SEMANTIC_COSINE = 0.15;
  *
  *   0.28   mrr 0.571  recall@5 0.783  top1 0.433   (false positives 0.05)
  *   0.32   mrr 0.581  recall@5 0.800  top1 0.433
- *   0.36   mrr 0.598  recall@5 0.850  top1 0.450   <- here
+ *   0.36   mrr 0.598  recall@5 0.850  top1 0.450   <- was, for MiniLM
  *   0.40   mrr 0.592  recall@5 0.850  top1 0.433
+ *
+ * That table is MiniLM's, and HISTORICAL: the default model is bge-small now,
+ * and its floor is 0.64, swept on 2026-09-21 with `scripts/embedding-bakeoff.ts`
+ * against the current corpus (see `DEFAULT_EMBEDDING_MODEL` for the figures).
+ * It is kept because it is the clearest record of why the number belongs to
+ * the model. It also predates #318, which rebuilt the eval corpus to use
+ * realistic session lengths — so even for MiniLM its absolute figures are not
+ * comparable with today's baseline.
  *
  * The trap worth naming: held at 0.36 while the default was mpnet, that model
  * looked like it regressed false positives to 0.10. It had not — the
@@ -88,7 +96,7 @@ const MIN_SEMANTIC_COSINE = 0.15;
  *
  * If it needs to move, move it against the eval rather than against one query.
  */
-const MIN_CONFIDENT_COSINE = 0.36;
+export const MIN_CONFIDENT_COSINE = 0.64;
 /**
  * Weight of the recency/continuity tie-break in the relevance modes. Small
  * enough that it only ever separates candidates that are otherwise equal.
@@ -388,8 +396,16 @@ export function rankSearchCandidates(options: {
   limit: number;
   cosineSimilarity: (left: Float32Array, right: Float32Array) => number;
   deserializeVector: (buffer: Buffer, dimensions: number) => Float32Array;
+  /**
+   * Floors swept per embedding model. Defaults stay MiniLM's; a remote model
+   * with a higher cosine distribution needs its own or every query matches.
+   */
+  minSemanticCosine?: number;
+  minConfidentCosine?: number;
 }): SessionSummary[] {
   const { rows, keywordRows, queryVector, mode, limit } = options;
+  const minSemanticCosine = options.minSemanticCosine ?? MIN_SEMANTIC_COSINE;
+  const minConfidentCosine = options.minConfidentCosine ?? MIN_CONFIDENT_COSINE;
 
   /**
    * Windows that matched on words but have no vector yet.
@@ -441,13 +457,13 @@ export function rankSearchCandidates(options: {
     // matching nothing, formatted exactly like a real hit. A unit qualifies
     // on semantic similarity or a keyword match; "no matching sessions" is
     // a more useful answer than a nearest vector.
-    .filter((item) => item.rawCosine >= MIN_SEMANTIC_COSINE || item.keywordScore > 0);
+    .filter((item) => item.rawCosine >= minSemanticCosine || item.keywordScore > 0);
 
   // Nothing here is actually similar to the query — keep only what matched
   // on words. For a query that means nothing to this corpus that leaves
   // nothing at all, which is the answer.
   const bestCosine = candidates.reduce((best, item) => Math.max(best, item.rawCosine), 0);
-  const semanticallyConfident = bestCosine >= MIN_CONFIDENT_COSINE;
+  const semanticallyConfident = bestCosine >= minConfidentCosine;
   const surviving = semanticallyConfident
     ? candidates
     : candidates.filter((item) => item.keywordScore > 0);

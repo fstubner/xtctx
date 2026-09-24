@@ -139,6 +139,15 @@ jobs:
           npm run security:checklist
           npm run audit:production
 
+      # Both used to run only inside `verify:release`, which only the release
+      # workflow invokes — so a broken workflow file or an unmapped file was
+      # found at release time, if at all. An invalid release.yml sat on a
+      # branch for two days with this job green.
+      - name: Workflow files and review coverage
+        run: |
+          npm run check:workflows
+          npm run check:review-coverage
+
       - name: Landing dependency audit
         # The landing site has only devDependencies (Astro is a build-time
         # dependency of a static site), so --omit=dev would audit nothing.

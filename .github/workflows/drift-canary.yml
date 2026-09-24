@@ -99,14 +99,21 @@ jobs:
       # the run, and `upstream-watch` is what files issues now.
 
       # 78 means the canary could not run at all — no API key — which is a
-      # configuration gap, not upstream drift. Surfaced as a warning so it is
-      # visible in the run summary without turning the nightly job red and
-      # without filing an issue that says the scraper is broken.
-      - name: Note that the canary was skipped
+      # configuration gap, not upstream drift. It FAILS the job, with a message
+      # saying which of the two it is.
+      #
+      # It used to pass with a warning, on the reasoning that a missing key
+      # should not turn the nightly job red. There is no nightly job any more:
+      # this runs when a person dispatches it, to find out whether a tool's
+      # format drifted, and a green result that checked nothing answers that
+      # question wrongly. A check that could not run must not look like one
+      # that passed.
+      - name: Fail because the canary could not run
         if: steps.canary.outputs.exit_code == '78'
         run: |
-          echo "::warning title=drift canary skipped::${{ matrix.tool }} did not run — its API key is not configured, so this run produced no drift signal for it."
+          echo "::error title=drift canary did not run::${{ matrix.tool }} was not checked — its API key is not configured, so this run says nothing about whether its format drifted."
           cat canary-stderr.log || true
+          exit 1
 
       - name: Fail job on canary failure
         # exit_code is empty when the canary step was skipped by a scoped dispatch.

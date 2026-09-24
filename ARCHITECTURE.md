@@ -7,8 +7,8 @@ boundaries between them, and what each part is allowed to trust.
 
 ## Parts
 
-- **CLI** (`src/cli/`) — `setup`, `status`, `disconnect`, and the internal
-  `--hook session-start` entry point. Bare `xtctx` on a non-TTY stdio pair
+- **CLI** (`src/cli/`) — `setup`, `status`, `scan`, `calibrate`,
+  `disconnect`, and the internal `--hook session-start` entry point. Bare `xtctx` on a non-TTY stdio pair
   starts the MCP server.
 - **MCP server** (`src/mcp/`) — stdio JSON-RPC server exposing exactly five
   read-only tools. Spawned by coding agents via `npx -y xtctx`.
@@ -19,7 +19,7 @@ boundaries between them, and what each part is allowed to trust.
 - **Handoff index** (`src/handoff/`) — per-project SQLite database
   (`.xtctx/state/xtctx.db`, WAL, schema-versioned) holding sessions,
   messages, retrieval windows, FTS index, and embedding vectors. Refreshed
-  on demand from the scrapers; fully derived, rebuilt from scratch on
+  on demand from the scrapers and at MCP server start; fully derived, rebuilt from scratch on
   corruption or schema mismatch.
 - **Drift log** (`src/scrapers/drift-log.ts`) — per-tool record of the
   places another tool's transcripts did not match what the scraper expected,
@@ -57,9 +57,10 @@ there is no daemon to leave behind.
 
 **Serving a call.** A coding agent spawns `npx -y xtctx` over stdio, gets the
 five read-only tools, and the process exits when the agent is done with it.
-On the first call that needs data, the index refreshes: every scraper reads
-its own tool's store, yields only chunks attributable to this project, and the
-results land in `.xtctx/state/xtctx.db`.
+The server starts a scan as it starts, and refreshes again on a call whose
+indexed view has gone stale: every scraper reads its own tool's store, yields
+only chunks attributable to this project, and the results land in
+`.xtctx/state/xtctx.db`.
 
 **How a conversation becomes searchable.** Messages are grouped into
 overlapping retrieval windows — eight messages, stride four — so a hit carries
@@ -71,7 +72,9 @@ twice: into FTS5 for keyword search, and as one embedding vector.
 comes from bm25 ordering but is rescored as a linear decay, because bm25
 favours short documents and a one-line mention was outranking the paragraph
 that decided something. Semantic matches are gated twice: a per-window floor
-(0.15) and a per-query confidence floor (0.4). When nothing clears the second
+(0.62) and a per-query confidence floor (0.64). Those numbers belong to the
+model — they are swept per model, not carried between them, and MiniLM's were
+0.15 and 0.36. When nothing clears the second
 one, semantic results are dropped wholesale and only keyword hits remain —
 whether a query found anything is a property of the query, not of each window,
 and no answer beats a confident wrong one.
@@ -90,10 +93,11 @@ queue.
 
 **Bounded, so a tool call always returns.** Scanning gets four seconds,
 vectorizing six, and an indexed view is treated as current for thirty. Work
-left over resumes on the next call. The embedding model loads lazily and only
-for semantic search; `hybrid` deliberately answers from keyword while it is
-still loading, so the first call after a cold start is fast rather than
-blocked.
+left over resumes on the next call. A scan also warms the embedding model and
+builds vectors under the same cap, because a process spawned per agent session
+would otherwise never vectorize anything; `hybrid` deliberately answers from
+keyword while the model is still loading, so the first call after a cold start
+is fast rather than blocked.
 
 **What comes back is raw.** Sessions, message text, and pointers — never a
 generated summary. A recap is the lossy artefact this exists to replace, and

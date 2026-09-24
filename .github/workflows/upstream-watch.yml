@@ -60,25 +60,47 @@ jobs:
             echo "**Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           } > issue-body.md
 
-      # Dedupe on the exact version pair in the title, and across *all* states:
-      # a closed issue means the human already looked at that release, so
-      # reopening it nightly would recreate the noise this replaces.
+      # The version pair has to be IN the title for the dedupe below to mean
+      # anything. It was a fixed string with no versions in it, searched across
+      # all states — so one issue, ever, silenced this watcher permanently:
+      # every later upstream release matched that title and filed nothing.
+      - name: Build the title for this release set
+        id: title
+        if: steps.check.outputs.exit_code == '10'
+        run: |
+          set -euo pipefail
+          # Each MOVED line reads "MOVED <pkg>: <from> -> <to>"; the joined
+          # "to" versions identify this particular set of releases.
+          versions=$(grep '^MOVED' upstream-report.txt | sed 's/.*-> //' | paste -sd, -)
+          echo "value=upstream: tracked coding tools released (${versions})" >> "$GITHUB_OUTPUT"
+
+      # Across *all* states: a closed issue means the human already looked at
+      # THAT release set, so reopening it nightly would recreate the noise this
+      # replaces.
       - name: Check whether this release was already reported
         id: existing
         if: steps.check.outputs.exit_code == '10'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TITLE: ${{ steps.title.outputs.value }}
         run: |
-          title="upstream: tracked coding tool released — check transcript formats"
-          found=$(gh issue list --state all --search "\"$title\" in:title" --json number,title,state \
-            | jq -r --arg t "$title" '[.[] | select(.title == $t)] | length')
+          # `pipefail`, because a failing `gh` left `count` empty — which is
+          # not '0', which reads as "already reported". An API error silenced
+          # the watcher instead of failing the run.
+          set -euo pipefail
+          found=$(gh issue list --state all --search "\"$TITLE\" in:title" --json number,title,state \
+            | jq -r --arg t "$TITLE" '[.[] | select(.title == $t)] | length')
+          if [ -z "$found" ]; then
+            echo "could not determine whether this release set was already reported" >&2
+            exit 1
+          fi
           echo "count=${found}" >> "$GITHUB_OUTPUT"
 
       - name: Open an issue
         if: steps.check.outputs.exit_code == '10' && steps.existing.outputs.count == '0'
         uses: peter-evans/create-issue-from-file@fca9117c27cdc29c6c4db3b86c48e4115a786710 # v6.0.0
         with:
-          title: "upstream: tracked coding tool released — check transcript formats"
+          title: ${{ steps.title.outputs.value }}
           content-filepath: issue-body.md
           labels: |
             drift

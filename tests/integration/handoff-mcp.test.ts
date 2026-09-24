@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { createToolHandlers } from "@xtctx/mcp/server";
-import type { HandoffStatus, SessionMessage, SessionService, SessionSummary } from "@xtctx/handoff/types";
+import type {
+  HandoffStatus,
+  SessionMessage,
+  SessionSearchMode,
+  SessionService,
+  SessionSummary,
+} from "@xtctx/handoff/types";
 
 class FixtureSessionService implements SessionService {
   async listRecentSessions(): Promise<SessionSummary[]> {
@@ -31,7 +37,24 @@ class FixtureSessionService implements SessionService {
     ];
   }
 
-  async searchSessions(): Promise<SessionSummary[]> {
+  /**
+   * What the handler actually asked for.
+   *
+   * This took no parameters and returned the recent list, so the query never
+   * had to reach it: the JSON payload echoes the handler's own local variable,
+   * and changing `sessions.ts` to pass `""` instead of the caller's query left
+   * the test green. Recording the arguments is what makes the assertion about
+   * the code rather than about the fixture.
+   */
+  lastSearch?: { query: string; limit: number; mode?: string };
+
+  async searchSessions(
+    query: string,
+    limit: number,
+    _toolFilter?: string[],
+    mode?: SessionSearchMode,
+  ): Promise<SessionSummary[]> {
+    this.lastSearch = { query, limit, mode };
     return this.listRecentSessions();
   }
 
@@ -54,6 +77,7 @@ class FixtureSessionService implements SessionService {
     vector_segment_backlog: 0,
     vector_ms_per_segment: null,
       vector_model: "fixture-embedding",
+      vector_device: null,
       tools: [
         {
           tool: "codex",
@@ -100,12 +124,18 @@ describe("handoff MCP integration", () => {
     });
   });
 
-  it("searches indexed content", async () => {
+  it("passes the caller's query through to the index", async () => {
+    const service = new FixtureSessionService();
+    const map = createToolHandlers({ sessions: service });
+
     await expect(
-      handlers().get("xtctx_search_sessions")?.({ query: "setup", format: "json" }),
+      map.get("xtctx_search_sessions")?.({ query: "setup", limit: 3, format: "json" }),
     ).resolves.toMatchObject({
       sessions: [{ session_ref: "codex:session-a" }],
     });
+
+    expect(service.lastSearch?.query).toBe("setup");
+    expect(service.lastSearch?.limit).toBe(3);
   });
 
   it("reports continuity status", async () => {

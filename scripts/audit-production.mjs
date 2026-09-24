@@ -76,13 +76,49 @@ function runAudit() {
     throw new Error(`could not run npm audit: ${result.error.message}`);
   }
 
+  let report;
   try {
-    return JSON.parse(result.stdout);
+    report = JSON.parse(result.stdout);
   } catch {
     throw new Error(
       `npm audit did not return JSON.\nstdout: ${result.stdout.slice(0, 2000)}\nstderr: ${result.stderr.slice(0, 2000)}`,
     );
   }
+
+  // Parsing is not the same as auditing. With `--json`, an npm that cannot
+  // reach the registry prints an error OBJECT and exits 0 — so the body parses,
+  // carries no `vulnerabilities`, and every check below finds nothing wrong.
+  // This gate then reported "audit clean" for a tree it had not looked at, and
+  // `verify:release` passed on it. Reproduced with
+  // `npm_config_registry=http://127.0.0.1:9`: clean, exit 0. Bare `npm audit`
+  // exits 1 on the same failure; adding `--json` is what inverted it.
+  //
+  // A security gate has to fail closed: not knowing is not the same as knowing
+  // there is nothing.
+  if (report === null || typeof report !== "object" || Array.isArray(report)) {
+    throw new Error(`npm audit returned ${typeof report}, not a report object.`);
+  }
+  if (report.error) {
+    const fields =
+      typeof report.error === "object" && report.error !== null
+        ? [report.error.summary, report.error.detail, JSON.stringify(report.error)]
+        : [String(report.error)];
+    // npm fills some of these with an empty string rather than omitting them,
+    // so pick the first that carries text instead of the first that is defined.
+    const detail = fields.find((value) => typeof value === "string" && value.trim() !== "");
+    throw new Error(
+      `npm audit could not complete: ${String(detail ?? "npm reported an error with no detail").slice(0, 2000)}\n` +
+        `stderr: ${result.stderr.slice(0, 1000)}`,
+    );
+  }
+  if (typeof report.vulnerabilities !== "object" || report.vulnerabilities === null) {
+    throw new Error(
+      "npm audit returned no `vulnerabilities` section, so nothing was audited.\n" +
+        `stdout: ${result.stdout.slice(0, 2000)}`,
+    );
+  }
+
+  return report;
 }
 
 function main() {

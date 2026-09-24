@@ -62,6 +62,15 @@ export interface HandoffStatus {
   vector_segment_backlog: number;
   vector_ms_per_segment: number | null;
   vector_model: string;
+  /**
+   * ONNX execution provider embedding actually runs on, or null when this
+   * machine has not been calibrated and is therefore on the CPU default.
+   *
+   * Reported because it is otherwise invisible: `xtctx calibrate` writing a
+   * verdict and the indexer using it are two different things, and a verdict
+   * that is recorded but never read looks exactly like one that works.
+   */
+  vector_device: string | null;
   /** Last semantic-search failure, or null. Non-null means hybrid search is
    *  silently answering from keyword only. */
   embedding_error: string | null;
@@ -147,6 +156,14 @@ export interface SessionService {
    * between commands to work the backlog down.
    */
   embedBacklog?(onProgress?: (embedded: number, total: number) => void): Promise<number>;
+  /**
+   * Make the embedding model's first load wait for this device.
+   *
+   * For calibration running alongside the index: whichever caller asks for the
+   * model first gets a load that waits for the verdict, so the session that
+   * measured the device is the one that uses it.
+   */
+  deferEmbeddingDeviceUntil?(device: Promise<string | undefined>): void;
 }
 
 export interface IndexProgress {

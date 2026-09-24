@@ -273,5 +273,11 @@ describe("opencode skips a message whose role field has gone", () => {
     // `normalizeRole` returns for anything it cannot read.
     expect(out.map((c) => c.content)).toEqual(["still readable"]);
     expect(warnings.some((w) => w.includes("missing 'role' field"))).toBe(true);
+
+    // The skipped record must not consume an index. `scan.ts` hashes the
+    // index into the row id, so a skip that advances it renumbers every later
+    // turn — the defect already fixed in the cursor reader, and the only skip
+    // in this loop whose index nothing pinned.
+    expect(out[0]?.metadata.messageIndex).toBe(0);
   });
 });

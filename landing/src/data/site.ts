@@ -134,8 +134,8 @@ export const site: SiteData = {
     badge: 'Local transcript retrieval for AI coding tools',
     heading: 'Keep project context portable across coding tools.',
     subhead:
-      'Move between supported coding agents without starting over. xtctx indexes the transcript files your tools already write and serves them over MCP, so the next agent can pick up recent context. Install the plugin and retrieval works — no project setup required.',
-    proof: ['No project setup required', 'Raw transcripts stay local', 'Five MCP tools'],
+      'Move between supported coding agents without starting over. xtctx indexes the transcript files your tools already write and serves them over MCP, so the next agent can pick up recent context. Install the plugin once to reach the tools everywhere, then opt each project in with a single setup command.',
+    proof: ['One command per project', 'Local by default', 'Five MCP tools'],
     quickInstall: 'claude plugin marketplace add fstubner/xtctx && claude plugin install xtctx@xtctx',
     installLinkLabel: 'Get started',
     sourceUrl: REPO_URL,
@@ -218,11 +218,11 @@ export const site: SiteData = {
       body:
         'Status reports configured tools, transcript freshness, selected skills, managed blocks, and unsupported targets.',
       codeHtml: `<span class="dim">$</span> <span class="cmd-text">npx -y xtctx status</span>
-<span class="success-text">configured</span>
-<span class="info-text">mcp command</span> npx -y xtctx
-<span class="info-text">cache</span> 12 sessions
-<span class="info-text">codex</span> instruction only
-<span class="info-text">claude-code</span> executable hook`,
+<span class="info-text">MCP</span>      npx -y xtctx
+<span class="info-text">Data</span>     12 sessions, 1840 messages, 460 retrieval windows, 460 vectorized
+<span class="info-text">Tools:</span>
+  <span class="success-text">+</span> codex         detected; 7 sessions; hook: instruction-only
+  <span class="success-text">+</span> claude-code   detected; 5 sessions; hook: executable`,
     },
     {
       title: 'Search stays local',
@@ -232,9 +232,9 @@ export const site: SiteData = {
       codeHtml: `<span class="info-text">cache</span> <span class="var-text">.xtctx/state/xtctx.db</span>
 ├── <span class="var-text">sessions</span>
 ├── <span class="var-text">messages</span>
-├── <span class="var-text">retrieval_windows</span>
-├── <span class="var-text">vectors</span>
-└── <span class="var-text">fts_index</span>`,
+├── <span class="var-text">retrieval_units</span>
+├── <span class="var-text">retrieval_units_fts</span>
+└── <span class="var-text">retrieval_unit_vectors</span>`,
     },
   ],
 
@@ -244,7 +244,7 @@ export const site: SiteData = {
         label: 'Install the plugin',
         command: 'claude plugin marketplace add fstubner/xtctx && claude plugin install xtctx@xtctx',
         hint:
-          'Registers the MCP server and the handoff skill, and writes nothing into your project. Retrieval works straight away — the tools resolve the project from the working directory. Codex, Copilot, Cursor and Antigravity install from the same marketplace; see the README for their commands.',
+          'Registers the MCP server and the handoff skill machine-wide, and writes nothing into your project. The tools then reach every project; each one answers once it has been set up, and names the command until then. Codex, Copilot, Cursor and Antigravity install from the same marketplace; see the README for their commands.',
       },
       {
         label: 'Add project wiring',
@@ -281,11 +281,11 @@ export const site: SiteData = {
     },
     {
       q: 'Do I need to run setup in every project?',
-      a: 'No. With the plugin installed, the MCP tools resolve the project from the working directory, so retrieval works in any project with no setup at all. What setup adds is delivery: managed instruction blocks put the handoff in front of the next agent whether it calls a tool or not. Plugin first, setup where you want it automatic.',
+      a: 'Yes, once per project you want handoff in. The plugin makes the tools reachable everywhere, but a project that has not opted in has no index to read, so every tool answers with that and names `npx -y xtctx setup`. Setup also adds delivery: managed instruction blocks put the handoff in front of the next agent whether it calls a tool or not.',
     },
     {
       q: 'Does xtctx run a background service?',
-      a: 'No. xtctx has no daemon, API server, dashboard, watcher, or web service. MCP retrieval calls update the local cache on demand.',
+      a: 'No. xtctx has no daemon, API server, dashboard, watcher, or web service. Each agent starts its own xtctx MCP server, which indexes when it starts and when it is called, and stops when the agent does.',
     },
     {
       q: 'Does xtctx sync skills?',
@@ -297,7 +297,7 @@ export const site: SiteData = {
     },
     {
       q: 'What are the limits?',
-      a: 'xtctx is local-only. Transcript formats can change upstream, semantic vectors are created lazily, and keyword fallback is expected when local vector generation is unavailable.',
+      a: 'xtctx is local-only by default; sending window text to an external embedding endpoint is something a project has to opt into by hand. Transcript formats can change upstream, semantic vectors are built incrementally in the background, and search falls back to keyword while vectors are missing or the local model is unavailable.',
     },
     {
       q: 'Can I test it without private transcripts?',

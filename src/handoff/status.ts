@@ -32,6 +32,8 @@ interface StatusInputs {
   tools: StatusToolRuntime[];
   redirectedTools: string[];
   vectorModel: string;
+  /** Execution provider the indexer will load on; see HandoffStatus. */
+  vectorDevice: string | null;
 }
 
 /**
@@ -66,7 +68,7 @@ function indexedByTool(db: DatabaseHandle, scopedRoot: string): Map<string, Tool
 
 /** Everything `getStatus` reports, given an already-refreshed database. */
 export async function buildStatus(inputs: StatusInputs): Promise<HandoffStatus> {
-  const { db, scopedRoot, projectRoot, dbPath, tools, redirectedTools, vectorModel } = inputs;
+  const { db, scopedRoot, projectRoot, dbPath, tools, redirectedTools, vectorModel, vectorDevice } = inputs;
   // Scoped like the read paths. Unscoped counts disagreed with what the
   // retrieval tools return, and a status saying "3 sessions" for a project
   // whose searches return one is the report that makes a scoping bug look
@@ -112,9 +114,10 @@ export async function buildStatus(inputs: StatusInputs): Promise<HandoffStatus> 
     retrieval_units: retrievalUnitCount,
     vectorized_units: vectorizedUnitCount,
     vector_ms_per_unit: numericSetting(db, "vector_ms_per_unit"),
-    vector_segment_backlog: countUnvectorizedSegments(db, vectorModel),
+    vector_segment_backlog: countUnvectorizedSegments(db, vectorModel, scopedRoot),
     vector_ms_per_segment: numericSetting(db, "vector_ms_per_segment"),
     vector_model: vectorModel,
+    vector_device: vectorDevice,
     embedding_error: getSetting(db, "last_error:embeddings"),
     redirected_tools: redirectedTools,
     tools: toolStatuses,
@@ -129,6 +132,19 @@ interface ProgressInputs {
   vectorBacklog: number;
   embeddingWarming: boolean;
   literalSearchStoppedEarly?: boolean;
+  /**
+   * Declared, and copied below, because the caller passes it by spread.
+   *
+   * Excess-property checking does not apply to a spread, so an undeclared
+   * field is dropped here in silence: `literalUnreadableTools` reached this
+   * function and never left it, which left the unreadable-store branch in
+   * `mcp/tools/sessions.ts` permanently unreachable. A store that cannot be
+   * read was therefore always reported as a search that stopped at its limit,
+   * advising the caller to narrow a query — the exact wrong advice that
+   * branch was written to replace, since narrowing a query against an
+   * unreadable store returns the same nothing forever.
+   */
+  literalUnreadableTools?: string[];
 }
 
 export function buildIndexProgress(inputs: ProgressInputs): IndexProgress {
@@ -142,5 +158,8 @@ export function buildIndexProgress(inputs: ProgressInputs): IndexProgress {
     ...(inputs.literalSearchStoppedEarly === undefined
       ? {}
       : { literalSearchStoppedEarly: inputs.literalSearchStoppedEarly }),
+    ...(inputs.literalUnreadableTools === undefined
+      ? {}
+      : { literalUnreadableTools: inputs.literalUnreadableTools }),
   };
 }

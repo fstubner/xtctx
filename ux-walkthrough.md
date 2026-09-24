@@ -24,18 +24,21 @@ content through xtctx without any manual export.
 2. **Check the wiring.** `xtctx status` shows config path, index counts,
    per-tool detection, any last scrape error, skill-sync drift, and a final
    `Next` line. On a plugin-only project `Config` reads
-   `missing (run xtctx setup)` while the tools still work — that line
-   describes the managed blocks, not the MCP surface.
-3. **Work normally.** Nothing appears in the process list and `.xtctx/state/`
-   timestamps do not move: no daemon runs, and nothing happens until an agent
-   asks.
+   `missing (run xtctx setup)`, and that is the whole story there: the MCP
+   tools answer every call by naming `xtctx setup` until it has been run,
+   because a project nobody opted in has no index to read.
+3. **Work normally.** No daemon runs. Each agent starts its own xtctx MCP
+   server, which scans when it starts — and, the first time on a machine,
+   measures which device embeds fastest — then works through any vector
+   backlog that fits a fifteen-minute budget, and stops with the agent.
 4. **Hand off.** Ask the next tool what you were working on and it returns the
-   other tool's work rather than asking you. With setup run the agent answers
-   straight from the managed block; otherwise it calls
+   other tool's work rather than asking you. The managed block tells the agent
+   the tools exist, and Claude Code's session-start hook also names the most
+   recent session; the agent then calls
    `xtctx_recent_sessions`, which returns the *other* tool's sessions with
    timestamps and branches. `xtctx_session_detail` on one of those
    `session_ref`s returns the raw messages; `xtctx_search_sessions` returns
-   keyword or semantic matches. Indexing happens lazily inside these calls, so
+   keyword or semantic matches. Indexing also happens inside these calls, so
    the first on a large history returns partial results and later ones return
    more — a thin first answer means the index is still filling, not that the
    history is empty. Orchestrators use `xtctx_handoff_manifest` for stable

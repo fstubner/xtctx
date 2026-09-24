@@ -28,6 +28,67 @@ describe("status", () => {
     await rm(homeDir, { recursive: true, force: true });
   });
 
+  it("points at the broken config instead of at an agent that cannot help", async () => {
+    // With an unreadable config nothing is scanned at all, so "ask a
+    // configured agent to call xtctx_recent_sessions" is advice that cannot
+    // work — and with an index left from before the file broke, the old
+    // branch reported "Handoff is wired" six lines under "UNREADABLE ... No
+    // transcripts are being read until this is fixed." The last line is the
+    // one people act on, so it has to be the true one.
+    await setupProject({ projectPath: projectRoot, homeDir, yes: true });
+    await writeFile(join(projectRoot, ".xtctx", "config.yaml"), "tools: [oops\n", "utf-8");
+
+    const services = await createProjectServices(projectRoot);
+    try {
+      const status = await renderStatusBlock(services, { homeDir });
+
+      expect(status).toContain("UNREADABLE");
+      expect(status).toMatch(/Next\s+Fix .*config\.yaml/);
+      expect(status).not.toContain("Ask a configured agent");
+    } finally {
+      await services.sessions.close();
+    }
+  });
+
+  it("says when a backlog is too large for anything to drain it on its own", async () => {
+    // The MCP server drains the vector backlog at session start only while the
+    // estimate fits its budget. Above that nothing is working on it, and
+    // without this line that state is indistinguishable from the one below it:
+    // both read as windows outstanding with a time estimate, while one
+    // finishes within minutes and the other never finishes at all.
+    //
+    // A large history on a CPU-only machine lands there the moment a model
+    // change invalidates every vector it had, which is what makes it worth a
+    // line rather than a footnote.
+    await setupProject({ projectPath: projectRoot, homeDir, yes: true });
+
+    const services = await createProjectServices(projectRoot);
+    try {
+      const real = await services.sessions.getStatus();
+      const withBacklog = (msPerUnit: number) => ({
+        ...real,
+        retrieval_units: 9232,
+        vectorized_units: 0,
+        vector_ms_per_unit: msPerUnit,
+        vector_segment_backlog: 0,
+        vector_ms_per_segment: null,
+      });
+
+      // 551.9ms/window, the CPU rate measured on this project.
+      services.sessions.getStatus = async () => withBacklog(551.9);
+      const slow = await renderStatusBlock(services, { homeDir });
+      expect(slow).toContain("xtctx scan --embed");
+
+      // 50.7ms/window, the same history on DirectML.
+      services.sessions.getStatus = async () => withBacklog(50.7);
+      const fast = await renderStatusBlock(services, { homeDir });
+      expect(fast).toContain("9232 windows outstanding");
+      expect(fast).not.toContain("xtctx scan --embed");
+    } finally {
+      await services.sessions.close();
+    }
+  });
+
   it("does not report drift on a freshly wired project", async () => {
     // `managed-block` and `unsupported` are healthy skill-target states for
     // codex/antigravity/opencode/copilot-cli, not drift. Treating any
@@ -40,7 +101,12 @@ describe("status", () => {
       const status = await renderStatusBlock(services, { homeDir });
 
       expect(status).not.toContain("Wiring has drifted");
-      expect(status).toContain("Ask a configured agent to call xtctx_recent_sessions");
+      // A freshly wired project has nothing indexed, and the "Next" line says
+      // so as an expectation rather than a fault: running `status` straight
+      // after `setup` is the obvious way to check setup worked, and reading
+      // `Scan never` / `0 sessions` as a failure is what it used to invite.
+      expect(status).toContain("expected until an agent calls a tool");
+      expect(status).toContain("Restart any agent that was open when setup ran");
     } finally {
       await services.sessions.close();
     }

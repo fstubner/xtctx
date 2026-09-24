@@ -301,7 +301,9 @@ describe("OpenCodeScraper", () => {
     for await (const chunk of scraper.fullSync()) chunks.push(chunk);
 
     expect(chunks).toHaveLength(2);
-    expect(chunks.map((c) => c.sessionId).sort()).toEqual(["sess-A", "sess-B"]);
+    // No `.sort()`: sorting erases the very property this test is named for,
+    // so a reader returning sessions in any order passed it.
+    expect(chunks.map((c) => c.sessionId)).toEqual(["sess-A", "sess-B"]);
   });
 
   it("respects since cursor and emits only newer chunks", async () => {

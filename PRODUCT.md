@@ -9,9 +9,11 @@ transcript store into a per-project SQLite index and serves it back — to any
 of those tools — through a small read-only MCP server, so the next agent can
 pick up where the last one left off.
 
-Raw local transcripts are authoritative. xtctx never summarizes, never
-persists derived "memory", and never sends transcript content anywhere; the
-index is derived data that can always be deleted and rebuilt.
+Raw local transcripts are authoritative. xtctx never summarizes and never
+persists derived "memory"; the index is derived data that can always be
+deleted and rebuilt. It sends transcript content nowhere unless a project
+opts in to an external embedding endpoint, which is written into
+`.xtctx/config.yaml` by hand and reported by `xtctx status`.
 
 ## Users
 
@@ -36,7 +38,12 @@ Single-user, single-machine. There is no team, sync, or server component.
   config file that setup created may be left behind holding an empty server
   map.
 - Only the current project's sessions are ever indexed or served — content
-  from other projects on the machine never crosses the project boundary.
+  from other projects on the machine never crosses the project boundary — with
+  one exception the product states rather than hides: a committable
+  `.xtctx/config.yaml` can point a tool's `storePath` somewhere else, and that
+  redirect is reported by `xtctx status` and `xtctx_continuity_status` rather
+  than blocked. A cloned repository can carry one, which is why it is
+  surfaced.
 - The demo smoke (`npm run demo:public`) proves the loop end-to-end against
   synthetic data on every release.
 
@@ -45,11 +52,14 @@ Single-user, single-machine. There is no team, sync, or server component.
 - Scrapers for the seven supported tools, project-scoped, incremental, and
   tolerant of upstream schema drift (warn, never silently drop).
 - One per-project SQLite index (`.xtctx/state/xtctx.db`) with keyword (FTS5)
-  and semantic (local MiniLM embeddings) search over chronological windows.
+  and semantic (local bge-small embeddings) search over chronological windows.
 - Five read-only MCP tools: recent sessions, session detail, search,
   continuity status, handoff manifest.
 - CLI: `setup` (wire MCP config, managed instruction blocks, skills, and the
-  Claude Code SessionStart hook), `status`, `disconnect`.
+  Claude Code SessionStart hook), `status`, `scan` (read the stores into the
+  index now, `--embed` to finish vectorizing too), `calibrate` (time the
+  embedding model on this machine's devices and use the fastest),
+  `disconnect`.
 
 Out of scope (deliberately, and documented everywhere the product speaks):
 no daemon, no API server, no dashboard, no generated summaries or briefs,
@@ -68,8 +78,12 @@ no durable memory, no write-back tools, no cloud anything.
   atomic, merge-preserving, and never clobber unparsable user content.
 - Transcript content handed to a model is untrusted data; the MCP layer
   fences it and never grows write capabilities.
-- Everything runs local, and nothing is ever sent off the machine. Two
-  network dependencies exist, both narrow: the one-time embedding-model
-  download from Hugging Face, and loopback-only HTTPS calls to Antigravity's
-  local language server (127.0.0.1, exact-PID + CSRF matched; certificate
-  verification is off because the server is self-signed).
+- Everything runs local by default. Three network dependencies exist. Two are
+  unavoidable and narrow: the one-time embedding-model download from Hugging
+  Face, and loopback-only HTTPS calls to Antigravity's local language server
+  (127.0.0.1, exact-PID + CSRF matched; certificate verification is off
+  because the server is self-signed). The third is opt-in and is the only one
+  that carries transcript text: an OpenAI-compatible embedding endpoint named
+  in `.xtctx/config.yaml`. It is never inferred from the environment, the API
+  key is never stored in that file, and `xtctx status` prints the endpoint
+  whenever one is set.

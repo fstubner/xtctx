@@ -295,4 +295,72 @@ function printSetupResult(result: SetupResult): void {
   for (const failure of result.failures) {
     process.stdout.write(`  error   ${failure}\n`);
   }
+
+  if (result.failures.length === 0) {
+    printCoverageNote();
+    printNextSteps();
+  }
+}
+
+/**
+ * Why a project that uses one agent just gained config for seven.
+ *
+ * Setup wires every supported tool regardless of what is installed — measured
+ * in a clean environment with zero tools detected, that is eighteen files and
+ * eleven new top-level entries in the repository, including `GEMINI.md` and
+ * `opencode.json` for tools the user may never have heard of. The plan is
+ * shown and confirmed before any of it is written, so nothing is sneaked in,
+ * but the *reason* was nowhere and a first-time user reads it as the tool
+ * making a mess.
+ *
+ * The behaviour is deliberate and stays. Detection reads a tool's transcript
+ * store, which does not exist until that tool has been used, so wiring only
+ * what is detected would silently skip a tool the user installs tomorrow — and
+ * a silently unwired tool is a worse failure than a file they did not want,
+ * because nothing reports it. The instruction files are also read by whoever
+ * opens the repository next, which includes a teammate on a different agent.
+ *
+ * So it is said out loud instead, with the command that undoes any of it.
+ */
+function printCoverageNote(): void {
+  process.stdout.write(
+    `\n  All ${SUPPORTED_TOOLS.length} supported tools were wired, including any not installed here:\n` +
+      "  a tool's config only exists once it has been used, so wiring what is\n" +
+      "  detected today would skip whatever you install tomorrow. The instruction\n" +
+      "  files are also read by whichever agent opens this repo next.\n" +
+      "  Remove any you do not want with `xtctx disconnect <tool>`.\n",
+  );
+}
+
+/**
+ * What to do now that setup has written eighteen files.
+ *
+ * Setup used to end on the last path it wrote, and the two things a user
+ * needs next are both invisible from that.
+ *
+ * The first is the restart. MCP clients read their config when they launch, so
+ * an agent that was already open when setup ran has no xtctx tools — and the
+ * natural next move after running setup is to go back to the agent already
+ * open and ask it something. It answers that it cannot see any xtctx tools,
+ * which reads as a broken install rather than a stale process.
+ *
+ * The second is that there is nothing to see yet. Nothing is indexed until an
+ * agent calls a tool, so `xtctx status` immediately after setup reports
+ * `Scan never` and `0 sessions` — the shape of a failure, and the natural
+ * thing to run next to check whether setup worked.
+ */
+function printNextSteps(): void {
+  process.stdout.write(
+    [
+      "",
+      "Next:",
+      "  1. Restart any agent that was already open — MCP clients read their",
+      "     config at launch, so a running one cannot see xtctx yet.",
+      "  2. Ask it for recent context, or have it call `xtctx_recent_sessions`.",
+      "",
+      "  Nothing is indexed until then, so `xtctx status` will report",
+      "  `Scan never` and `0 sessions` until an agent has called a tool once.",
+      "",
+    ].join("\n"),
+  );
 }

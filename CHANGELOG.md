@@ -7,6 +7,11 @@ Entries are written by the `release` workflow when a release is cut by hand.
 
 ## [0.21.8](https://github.com/fstubner/xtctx/compare/xtctx-v0.21.7...xtctx-v0.21.8) (2026-08-31)
 
+> **Not on npm.** 0.20.0 through 0.21.8 were tagged and given GitHub
+> Releases, but none of them was ever published to npm — the last version
+> published before them is 0.19.0. Everything listed from here down to 0.20.0
+> reaches `npx -y xtctx` users only in the next version that is published.
+
 
 ### Bug Fixes
 
@@ -133,13 +138,13 @@ Entries are written by the `release` workflow when a release is cut by hand.
 
 ### Miscellaneous
 
-* An automated release pipeline cut 112 versions between 0.19.1 and 0.74.0 in
+* An automated release pipeline cut 76 release commits between 0.18.7 and 0.74.0 in
   a few hours on 2026-08-29, none of which anyone asked for and none of which
   were published to npm. The version was reset to 0.20.0 the same day and the
   pipeline was replaced by a manually-triggered release; see the comments in
   `.github/workflows/release.yml`. The individual "release xtctx X.Y.Z"
   entries those runs generated are summarised here rather than listed, because
-  a reader scanning this file for what shipped was being shown 112 versions
+  a reader scanning this file for what shipped was being shown versions
   that never existed.
 
 

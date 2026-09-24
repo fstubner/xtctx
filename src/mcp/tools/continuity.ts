@@ -68,14 +68,14 @@ export function createContinuityStatusHandler(service: SessionService) {
       })(),
       `- Vector model: ${inlineSafe(status.vector_model)}`,
       ...(status.embedding_error
-        ? [`- Semantic search unavailable (keyword only): ${inlineSafe(status.embedding_error)}`]
+        ? [`- Semantic search unavailable (keyword only): ${inlineSafe(sanitizeErrorMessage(status.embedding_error))}`]
         : []),
       // Named, not pathed: `store_paths` is redacted from this surface two
       // branches up because it carries the machine's home-directory layout,
       // and a warning does not get an exception from that.
       ...(status.redirected_tools.length > 0
         ? [
-            `- WARNING: ${status.redirected_tools.join(", ")} read transcripts from a store ` +
+            `- WARNING: ${status.redirected_tools.map(inlineSafe).join(", ")} read transcripts from a store ` +
               "outside the home directory, set by .xtctx/config.yaml. That file is " +
               "committable, so a cloned repo can carry one — the sessions returned for " +
               "these tools may not be this project's.",

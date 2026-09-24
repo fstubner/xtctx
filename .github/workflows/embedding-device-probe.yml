@@ -1,0 +1,73 @@
+# Which ONNX execution providers work, on operating systems nobody here owns.
+#
+# `docs/embedding-performance.md` has DirectML at ~6x the CPU path with
+# numerically identical vectors, and stops there, because DirectML is
+# Windows-only and WebGPU — the portable candidate — had only ever been run on
+# the one Windows desktop this project is developed on. WSL on that host has
+# `/dev/dxg` but no `/dev/dri`, so it exercises the fallback rather than a
+# Linux GPU.
+#
+# This workflow is the second and third machine. `macos-latest` is real Apple
+# Silicon with a Metal-backed WebGPU, and `ubuntu-latest` has no GPU at all,
+# which makes it the more important of the two: it is the machine that has to
+# fall back cleanly, and the one this project currently has no evidence about.
+#
+# Not on every push — it downloads a model and runs four processes per OS for
+# a report a person reads, and nothing merges on its result. It runs when the
+# probe itself changes, which is when its answer can have moved, and otherwise
+# on request.
+#
+# The path filter is also what makes the report reachable before this file is
+# on `main`: a `workflow_dispatch` workflow is only dispatchable from the
+# default branch, so a probe that was manual-only could not be run on the pull
+# request that introduces it.
+name: embedding-device-probe
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - scripts/probe-embedding-device.mjs
+      - .github/workflows/embedding-device-probe.yml
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: probe (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    # A runner where every device fails is a finding, not a broken workflow —
+    # the other two still have to report.
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Same cache and the same reason as ci.yml: four processes per OS each
+      # want the 86MB MiniLM, and HuggingFace answers 429 to a burst of them.
+      - name: Cache the embedding model
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: node_modules/@huggingface/transformers/.cache
+          key: hf-model-${{ runner.os }}-${{ hashFiles('src/handoff/embeddings.ts') }}
+
+      # One run, both formats. Probing twice would re-embed 48 segments per
+      # device for a second copy of the same numbers.
+      - name: Probe
+        run: node scripts/probe-embedding-device.mjs --json-also

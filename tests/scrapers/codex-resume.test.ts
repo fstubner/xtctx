@@ -9,7 +9,7 @@
  * re-read whole, `fullSync` ignores cursors entirely, and the derived state a
  * resumed read cannot see is carried across.
  */
-import { appendFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -62,7 +62,33 @@ describe("codex incremental resume", () => {
 
     const c = await cursor();
     expect(c?.offset).toBeGreaterThan(0);
-    expect(c?.offset).toBe(c?.size);
+    // Against the FILE, not against the other half of the same written record.
+    // `offset === size` compares two fields the writer set together, so
+    // recording the file's size instead of the boundary actually read passed
+    // it — which is the permanent silent loss the other two readers pin with
+    // `offset < size` on a partial trailing line.
+    const { size } = await stat(file);
+    expect(c?.offset).toBe(size);
+    expect(c?.size).toBe(size);
+  });
+
+  it("stops short of a trailing line that has no newline yet", async () => {
+    // These files are appended to while they are read, so the last line often
+    // has no newline. `readJsonlLines` deliberately stops before it; recording
+    // the file's SIZE instead moves the next scan into the middle of that
+    // record and it is never yielded — a permanent loss, one per interrupted
+    // append. The sibling readers pin this; codex only compared the cursor to
+    // itself, so `offset: size` passed.
+    const complete = [META("abc"), MSG("first", "2026-02-24T10:00:00Z")].join("\n") + "\n";
+    const partial = MSG("half-written", "2026-02-24T10:00:01Z").slice(0, 20);
+    await writeFile(file, complete + partial);
+
+    expect(await scrape(make())).toContain("first");
+
+    const c = await cursor();
+    const { size } = await stat(file);
+    expect(c?.offset).toBeGreaterThan(0);
+    expect(c?.offset).toBeLessThan(size);
   });
 
   it("reads only what was appended on the next scrape", async () => {

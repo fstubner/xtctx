@@ -72,6 +72,32 @@ function rank(rows: VectorUnitRow[], limit = 5) {
   }).map((session) => session.session_ref);
 }
 
+describe("hybrid mode actually blends", () => {
+  it("lets a keyword match lift a session above an equally similar one", () => {
+    // Zeroing the keyword half of the hybrid blend survived the whole suite in
+    // a real mutation sweep on 2026-09-23 — hybrid silently became vector mode
+    // with a recency tie-break. So the keyword-matched session here is the
+    // OLDER one: without its keyword score, recency would put it second.
+    const older = unit("codex:keyword-match", "k-1", 0.8, { endedAt: "2026-05-01T10:00:00.000Z" });
+    const newer = unit("codex:no-keyword", "n-1", 0.8, { endedAt: "2026-05-20T10:00:00.000Z" });
+
+    const ranked = rankSearchCandidates({
+      rows: [older, newer],
+      keywordRows: [older],
+      queryVector: Float32Array.from([1]),
+      mode: "hybrid",
+      limit: 5,
+      deserializeVector: (buffer) =>
+        Float32Array.from(
+          new Float64Array(buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)),
+        ),
+      cosineSimilarity: (_query, vector) => vector[0],
+    }).map((session) => session.session_ref);
+
+    expect(ranked[0]).toBe("codex:keyword-match");
+  });
+});
+
 describe("ranking contracts the eval alone used to hold", () => {
   it("prefers a session corroborated by several windows to one lone window", () => {
     // Several windows saying the same thing is evidence the session is about

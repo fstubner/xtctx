@@ -117,12 +117,26 @@ describe("a match's detail offset", () => {
       // message. Read through the public detail path, exactly as an agent
       // would follow it.
       const [landed] = await index.getSessionDetail(ref, match.detail_offset as number, 1);
-      const [expected] = await index.getSessionDetail(ref, 0, 100).then((all) =>
-        all.slice(match.detail_offset as number, (match.detail_offset as number) + 1),
-      );
-
       expect(landed).toBeDefined();
-      expect(landed.content).toBe(expected.content);
+
+      // Named from the fixture, NOT from `detail_offset`.
+      //
+      // This compared `getSessionDetail(ref, offset, 1)` against
+      // `getSessionDetail(ref, 0, 100).slice(offset, offset + 1)` — both sides
+      // derived from the same pointer, so it proved paging was self-consistent
+      // and nothing about whether the pointer was right. Proven by replacing
+      // the offset with a hardcoded `0`: both sides became element 0 and the
+      // whole file stayed green while every match pointed at the wrong place.
+      //
+      // The fixture numbers each message into its own content, so the window's
+      // `message_start_index` names exactly one message independently of any
+      // offset arithmetic.
+      const startIndex = match.message_start_index;
+      const expectedContent =
+        startIndex >= 500
+          ? `late message ${startIndex - 500} about the parser fallback`
+          : `early message ${startIndex} about the parser fallback`;
+      expect(landed.content).toBe(expectedContent);
     }
   }, 60_000);
 

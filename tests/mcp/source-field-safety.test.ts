@@ -73,6 +73,7 @@ class FixtureService implements SessionService {
     vector_segment_backlog: 0,
     vector_ms_per_segment: null,
       vector_model: "fixture",
+      vector_device: null,
       tools: [],
     };
   }
@@ -192,6 +193,33 @@ describe("session detail: the ref is a heading too", () => {
 });
 
 describe("handoff manifest: the same values, rendered again", () => {
+  /**
+   * Every assertion below is a `not.toMatch`, and an empty string satisfies
+   * all of them. Proven: returning `""` from the markdown branch left all 697
+   * tests green, because nothing in the repository asserted what this branch
+   * PRINTS -- only what it must not print. A scrub that works by rendering
+   * nothing is not a scrub.
+   *
+   * So each case now pins the value it scrubbed as well as the structure it
+   * refused to forge, and this one pins the surrounding shape once.
+   */
+  it("renders the manifest it is asked for", async () => {
+    const handler = createHandoffManifestHandler(
+      new FixtureService([session({ session_ref: "codex:present" })], []),
+    );
+
+    const out = (await handler({
+      limit: 5,
+      format: "markdown",
+      correlation_id: "abc",
+    })) as string;
+
+    expect(out).toContain("## xtctx Handoff Manifest");
+    expect(out).toContain("- Correlation ID: abc");
+    expect(out).toContain("codex:present");
+    expect(out).toContain("xtctx_session_detail");
+  });
+
   it("neutralises session_ref in both places it appears", async () => {
     // The manifest prints it as a heading and inside the retrieve hint, so a
     // fix applied to the sessions tool alone leaves this surface forgeable.
@@ -202,6 +230,9 @@ describe("handoff manifest: the same values, rendered again", () => {
     const out = (await handler({ limit: 5, format: "markdown" })) as string;
 
     expect(out).not.toMatch(/^### FORGED HEADING/m);
+    // Scrubbed, not dropped: the ref still has to be reported.
+    expect(out).toContain("codex:x");
+    expect(out).toContain("FORGED HEADING");
   });
 
   it("neutralises the refs it reports as missing", async () => {
@@ -216,6 +247,7 @@ describe("handoff manifest: the same values, rendered again", () => {
     })) as string;
 
     expect(out).not.toMatch(/^## FORGED MISSING/m);
+    expect(out).toMatch(/^Missing sessions: .*codex:missing/m);
   });
 
   it("neutralises a caller-supplied correlation id", async () => {
@@ -231,5 +263,6 @@ describe("handoff manifest: the same values, rendered again", () => {
     })) as string;
 
     expect(out).not.toMatch(/^## FORGED CORRELATION/m);
+    expect(out).toContain("- Correlation ID: abc");
   });
 });

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { Command } from "commander";
+import { Command, Option } from "commander";
+import { runCalibrate } from "./calibrate.js";
 import { runDisconnect } from "./disconnect.js";
 import { runHook } from "./hook.js";
 import { runScan } from "./scan.js";
@@ -7,8 +8,8 @@ import { runSetup } from "./setup.js";
 import { runStatus } from "./status.js";
 import { createProjectServices } from "../runtime/services.js";
 import { startMcpServer } from "../mcp/server.js";
-import type { SessionService } from "../handoff/types.js";
 import { readXtctxPackage } from "../utils/package-info.js";
+import { runBackgroundWork } from "../runtime/background.js";
 
 const { version: CLI_VERSION } = readXtctxPackage(import.meta.url);
 
@@ -63,8 +64,19 @@ export async function main(argv = process.argv): Promise<void> {
     // A tool call still in flight when stdin closes may go unanswered — the
     // grace window above is enough for ordinary calls, not for one waiting on
     // a scan. The client has closed its side by then, so nothing is listening.
+    // A config that exists but will not parse is not an empty project, and
+    // used to reach an agent as one: zero scrapers, "No matching sessions
+    // found.", and the agent telling the user there is no cross-tool history
+    // here. The CLI has said `UNREADABLE` for a while; agents never read it.
+    const configError = services.config.error
+      ? {
+          projectRoot: services.projectRoot,
+          configPath: services.configPath,
+          message: services.config.error,
+        }
+      : undefined;
     await startMcpServer(
-      { sessions: services.sessions, unconfiguredProjectRoot },
+      { sessions: services.sessions, unconfiguredProjectRoot, configError },
       () => shutdown(true),
     );
 
@@ -85,7 +97,7 @@ export async function main(argv = process.argv): Promise<void> {
     // incremental scan this costs measured 9.7s in the background against a
     // 19GB Codex store, and the cursor design keeps it from re-reading.
     if (!unconfiguredProjectRoot && !services.config.error) {
-      void warmIndex(services.sessions);
+      void runBackgroundWork({ sessions: services.sessions });
     }
     return;
   }
@@ -96,7 +108,13 @@ export async function main(argv = process.argv): Promise<void> {
     .name("xtctx")
     .description(
       [
-        "Local cross-tool handoff for AI coding agents",
+        "Local cross-tool handoff for AI coding agents.",
+        "",
+        "Your coding agents already write transcripts. xtctx indexes them and",
+        "serves them over MCP, so the next agent you open can read what the",
+        "last one did in this repo.",
+        "",
+        "Start with:  xtctx setup",
         "",
         "Run with no command and non-interactive stdio and xtctx starts its MCP",
         "server over stdio. Set XTCTX_NO_AUTO_MCP=1 to print this help instead,",
@@ -113,7 +131,7 @@ export async function main(argv = process.argv): Promise<void> {
     .option("-y, --yes", "Apply setup without prompting", false)
     .option("--repair", "Remove legacy generated xtctx config before writing current setup", false)
     .option("--global-mcp", "Also configure Copilot CLI global MCP (Antigravity MCP is always configured)", false)
-    .description("Configure MCP, hooks, managed handoff instructions, and synced skills")
+    .description("Set this project up so agents can read each other's history here")
     .action(
       async (
         projectPath: string | undefined,
@@ -132,7 +150,7 @@ export async function main(argv = process.argv): Promise<void> {
   program
     .command("status")
     .option("-p, --project <path>", "Project root (defaults to cwd)")
-    .description("Diagnose xtctx handoff wiring and local transcript index")
+    .description("Check whether handoff is working here, and what to do if not")
     .action(async (options: { project?: string }) => {
       const globalOptions = program.opts<{ project?: string }>();
       await runStatus({ projectPath: options.project ?? globalOptions.project });
@@ -146,13 +164,26 @@ export async function main(argv = process.argv): Promise<void> {
       "Also embed every window, so semantic search covers the whole history (slow: hours on a large one)",
       false,
     )
-    .description("Scan the enabled transcript stores into this project's index, then exit")
-    .action(async (options: { project?: string; embed?: boolean }) => {
+    .option(
+      "--no-calibrate",
+      "With --embed, skip measuring which device embeds fastest on this machine",
+    )
+    .description("Index this project's transcripts now instead of waiting for an agent to ask")
+    .action(async (options: { project?: string; embed?: boolean; calibrate?: boolean }) => {
       const globalOptions = program.opts<{ project?: string }>();
       await runScan({
         projectPath: options.project ?? globalOptions.project,
         embed: options.embed,
+        calibrate: options.calibrate,
       });
+    });
+
+  program
+    .command("calibrate")
+    .option("--force", "Measure again even if this machine already has a verdict", false)
+    .description("Find the fastest device on this machine for indexing, and use it")
+    .action(async (options: { force: boolean }) => {
+      await runCalibrate({ force: options.force });
     });
 
   program
@@ -166,7 +197,7 @@ export async function main(argv = process.argv): Promise<void> {
     )
     .option("-p, --project <path>", "Project root")
     .option("-y, --yes", "Apply disconnect without prompting", false)
-    .description("Remove xtctx management from a tool without deleting transcript data")
+    .description("Stop xtctx managing a tool here, leaving your transcripts untouched")
     .action(
       async (
         tool: string | undefined,
@@ -184,8 +215,13 @@ export async function main(argv = process.argv): Promise<void> {
     );
 
   program
-    .option("--hook <event>", "Internal hook event name")
-    .option("--tool <tool>", "Tool invoking an internal hook")
+    // Hidden, not removed: these are how a tool's hook re-enters this CLI,
+    // never something a person types. Listed among `--project` and
+    // `--version`, they read as options a newcomer is expected to understand,
+    // and the first thing `xtctx --help` showed was two knobs for a mechanism
+    // that is entirely internal.
+    .addOption(new Option("--hook <event>", "Internal hook event name").hideHelp())
+    .addOption(new Option("--tool <tool>", "Tool invoking an internal hook").hideHelp())
     .option("-p, --project <path>", "Project root");
 
   program.action(async () => {
@@ -203,22 +239,6 @@ export async function main(argv = process.argv): Promise<void> {
   });
 
   await program.parseAsync(argv);
-}
-
-/**
- * Start a scan and let it run.
- *
- * `listRecentSessions` is the read that starts a scan; its result is not
- * wanted here, and the budget it waits on is short. A failure is not the
- * server's problem to report at startup: the same scan runs again on the
- * first call, where its error is recorded against the tool.
- */
-async function warmIndex(sessions: SessionService): Promise<void> {
-  try {
-    await sessions.listRecentSessions(1);
-  } catch {
-    // Deliberately silent; see above.
-  }
 }
 
 function shouldStartMcp(argv: string[]): boolean {

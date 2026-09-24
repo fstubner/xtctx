@@ -294,9 +294,21 @@ export function prepareStatements(db: DatabaseHandle): PreparedStatements {
      * three changes, all three must.
      */
     messageOffsetInSession: db.prepare(
+      // `LIMIT 1`, because `message_index` is not unique — the 828 duplicates
+      // named above are in one real session. Without it the CTE returns a row
+      // per duplicate and `FROM messages m, target t` cross-joins every one,
+      // multiplying the count by however many duplicates there are. Measured
+      // on six messages with `message_index = 3` on three of them: offset 12
+      // for a session holding 6 rows, so `getSessionDetail` paged past the end
+      // and returned nothing — which is the "match points somewhere
+      // unrelated" failure this statement exists to prevent, in its worst
+      // form. The ordering picks the same first row the two statements above
+      // would.
       `WITH target AS (
          SELECT timestamp, message_index, id FROM messages
           WHERE session_ref = ? AND message_index = ?
+          ORDER BY timestamp ASC, message_index ASC, id ASC
+          LIMIT 1
        )
        SELECT COUNT(*) AS count
          FROM messages m, target t

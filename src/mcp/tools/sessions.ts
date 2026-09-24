@@ -1,5 +1,6 @@
 import type { SessionSearchMode, SessionService } from "../../handoff/types.js";
 import { inlineSafe } from "../../utils/untrusted-text.js";
+import { SUPPORTED_TOOLS } from "../../tools/sources.js";
 
 interface RecentSessionsParams {
   limit?: number;
@@ -30,7 +31,8 @@ export type { SessionService };
 export class ToolInputError extends Error {}
 
 /** Hard cap on a single message body returned to the model. */
-const MAX_MESSAGE_CHARS = 16_000;
+/** @internal Exported so the budget test can pin the real boundary. */
+export const MAX_MESSAGE_CHARS = 16_000;
 
 /**
  * A filter the caller got wrong is refused, not ignored.
@@ -62,6 +64,46 @@ export function validatedFilter(value: unknown, field: string): string[] | undef
   return value as string[];
 }
 
+/**
+ * `validatedFilter`, plus: every entry must name a tool this build knows.
+ *
+ * A separate function, not a check inside the shared one. It was first written
+ * into `validatedFilter`, which `branch_filter` also goes through — so every
+ * real branch name was rejected as "unknown tool id \"main\"" and branch
+ * filtering became unreachable over MCP, with the whole suite green because no
+ * test passed a well-formed branch array. The two filters share a shape and
+ * nothing else.
+ */
+export function validatedToolFilter(value: unknown, field: string): string[] | undefined {
+  const filter = validatedFilter(value, field);
+  if (filter === undefined) {
+    return undefined;
+  }
+
+  // An id that names no tool is rejected, not filtered on.
+  //
+  // The filter reaches SQLite as `WHERE tool IN (...)`, so an unrecognised id
+  // matches nothing and the answer is "No matching sessions found." — which an
+  // agent reports to the user as "you have no Claude Code history here". The
+  // ids are not guessable from the schema either: they are `claude-code` and
+  // `antigravity`, while the obvious guesses are `claude` and `gemini`.
+  //
+  // Naming the valid ids in the error is the point. An agent that gets this
+  // back can fix its own call; one that gets an empty result cannot tell a
+  // wrong id from an empty index.
+  const known = new Set<string>(SUPPORTED_TOOLS.map((tool) => tool.id));
+  const unknown = filter.filter((item) => !known.has(item.trim()));
+  if (unknown.length > 0) {
+    throw new ToolInputError(
+      `${field} contains unknown tool id${unknown.length === 1 ? "" : "s"} ` +
+        `${unknown.map((item) => JSON.stringify(item)).join(", ")}. ` +
+        `Valid ids: ${SUPPORTED_TOOLS.map((tool) => tool.id).join(", ")}`,
+    );
+  }
+
+  return filter;
+}
+
 export function createRecentSessionsHandler(service: SessionService) {
   return async (raw: Record<string, unknown> = {}) => {
     const params = raw as unknown as RecentSessionsParams;
@@ -69,7 +111,7 @@ export function createRecentSessionsHandler(service: SessionService) {
     const format = params.format ?? "markdown";
     const sessions = await service.listRecentSessions(
       limit,
-      validatedFilter(params.tool_filter, "tool_filter"),
+      validatedToolFilter(params.tool_filter, "tool_filter"),
       validatedFilter(params.branch_filter, "branch_filter"),
     );
 
@@ -112,7 +154,7 @@ export function createSearchSessionsHandler(service: SessionService) {
     const sessions = await service.searchSessions(
       query,
       limit,
-      validatedFilter(params.tool_filter, "tool_filter"),
+      validatedToolFilter(params.tool_filter, "tool_filter"),
       mode,
       validatedFilter(params.branch_filter, "branch_filter"),
     );

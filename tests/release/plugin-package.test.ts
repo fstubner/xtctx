@@ -81,3 +81,26 @@ describe("plugin package", () => {
     }
   });
 });
+
+/**
+ * The skill is instructions to an agent, so a claim in it that the server
+ * refuses is worse than a wrong sentence in a README — it tells the agent to
+ * keep calling tools that will not answer.
+ *
+ * It told them retrieval needed no setup and that a missing config affected
+ * only instruction blocks, while `createToolHandlers` points every tool at
+ * `notConfigured()` when no `.xtctx/config.yaml` exists. The landing page
+ * carried the same wrong belief in four places.
+ */
+describe("the published skill's claims", () => {
+  it("does not tell an agent retrieval works without setup", () => {
+    const skill = builtInHandoffSkill().toLowerCase();
+
+    expect(skill).not.toContain("no xtctx setup is required");
+    expect(skill).not.toContain("retrieval tools are unaffected");
+  });
+
+  it("names the command the tools name", () => {
+    expect(builtInHandoffSkill()).toContain("xtctx setup");
+  });
+});

@@ -93,7 +93,15 @@ Plugins standard the package above is built against, so `setup` is the only
 route there.
 
 Either route registers the same MCP server (`npx -y xtctx`) and the same
-handoff skill. Because the plugin writes no project config, `xtctx status`
+handoff skill.
+
+One thing to know about the plugin specifically: it is installed from this
+repository, so its skill text comes from `main`, while the server it launches
+is whatever `npx -y xtctx` resolves to on npm. Those are not the same commit
+whenever work has landed but not been released — which is the normal state
+here — so a plugin install can describe behaviour the server it runs does not
+have yet. `xtctx status` reports a skill copy that predates the built-in one;
+it cannot see the server's version from the other side. Because the plugin writes no project config, `xtctx status`
 reports a plugin-only project as `Config missing (run xtctx setup)`, and the
 tools answer the same way until `setup` has been run there.
 
@@ -132,9 +140,25 @@ blocks where that tool owns them, removes supported startup hooks, and marks the
 tool disabled in `.xtctx/config.yaml`. It removes generated skill adapters for
 that tool. It does not delete transcript sources, canonical project skills, or
 the local SQLite cache. Use `xtctx disconnect --all` to remove xtctx from every
-supported tool. Antigravity and Copilot CLI keep one MCP config for every
+supported tool — that one also deletes `.xtctx/skills`, since with nothing left
+managing skills the synced source is xtctx's own scaffolding. A skill you
+wrote yourself and selected at setup is kept where you wrote it. Antigravity and Copilot CLI keep one MCP config for every
 project on the machine, so a project disconnect leaves those two files alone;
-pass `--global-mcp` (as with `setup`) to remove xtctx from them as well.
+pass `--global-mcp` to remove xtctx from them as well.
+
+That flag is **not** symmetric with `setup`, and the difference is worth
+knowing before you assume `disconnect --all` has removed everything. `setup`
+writes Antigravity's config without the flag, because Antigravity has no
+project-scoped MCP file and there is nowhere else to put it; `setup
+--global-mcp` additionally writes Copilot CLI's. Neither file holds a
+per-project entry, so a project disconnect cannot remove "this project's"
+wiring from them — it can only remove xtctx from that client for every project
+at once. Doing that silently is exactly what it used to do, and it took xtctx
+away from every other project on the machine, so it is an explicit step now.
+
+To remove xtctx from a machine entirely: `xtctx disconnect --all --global-mcp`
+in each project you set up, then delete each project's `.xtctx` directory,
+which holds the config and the indexed transcripts and is deliberately kept.
 
 `xtctx scan` reads every enabled transcript store into the project's index and
 exits. The MCP server does the same thing on its own every time it starts, so
@@ -143,6 +167,24 @@ The scan is incremental and runs in the background: it resumes from a
 per-file offset, so after the first pass it reads only what each tool has
 appended. The first pass over a large history is the expensive one — see the
 note above.
+
+`xtctx scan --embed` additionally vectorizes every window the scan leaves
+without one, running to completion however long that takes rather than to a
+budget. You need it when `xtctx status` says the backlog is too large to
+finish in the background — otherwise the server gets there on its own.
+
+Indexing picks a device by measuring it, and **you do not have to do anything
+to get that**. The first time the MCP server starts on a machine, or the
+first `xtctx scan --embed`, it times the embedding model on each execution provider available and remembers
+the fastest in `~/.xtctx/device.json`, once per machine. On a machine with a
+usable GPU that has measured roughly six times faster than the CPU; on one
+without, it picks the CPU and nothing changes. Vectors are identical whichever
+device wins, so this changes speed and nothing else.
+
+`xtctx calibrate` runs that measurement on demand and prints it. You need it
+only to re-measure after the hardware changes (`--force`) or to see the
+numbers — it is not a setup step. `scan --no-calibrate` skips the automatic
+run for anyone who would rather start embedding immediately.
 
 Generated MCP clients should use:
 
@@ -205,13 +247,20 @@ startup hooks; others receive MCP config plus managed instructions only.
 
 ## Limits
 
-- xtctx is local-only. It does not upload transcripts or run telemetry.
+- xtctx is local-only by default: it never uploads transcripts and runs no
+  telemetry. A project can opt into an external embedding endpoint by writing
+  one into `.xtctx/config.yaml`, in which case window text is sent there to be
+  vectorized — never inferred from an environment variable, and `xtctx status`
+  names the endpoint in full whenever one is configured.
 - Transcript formats belong to each upstream tool and can drift. The drift
   tests and format fingerprints exist to catch parser breakage, but `xtctx status`
   is still the source of truth for your machine.
-- Semantic search is lazy. The first semantic or hybrid query may initialize
-  the local embedding provider and create local vectors; hybrid search falls
-  back to keyword search if vector generation is unavailable.
+- Vectors are built incrementally, and the MCP server also works the backlog
+  down in the background when it starts, as long as this machine's measured
+  rate says the remainder fits in fifteen minutes. Above that nothing drains
+  it on its own and `xtctx status` says so, naming `xtctx scan --embed`.
+  Hybrid search falls back to keyword whenever vectors are missing or the
+  embedding model is unavailable, and `xtctx status` reports the reason.
 - Antigravity conversation `.pb` files are not parsed directly; retrieval uses
   the local language-server API when available, otherwise readable `brain`
   artifacts.
@@ -310,4 +359,4 @@ no `release: published` trigger. It had one once, with releases drafted so
 nothing published itself, and that broke outright: GitHub's `releases/latest`
 endpoint hides drafts, the release tooling read that endpoint to find the last
 release, so it saw a pre-draft version forever and proposed a release covering
-the entire history. It cut 54 versions in an hour.
+the entire history. It cut 76 versions over four days, 49 of them in one day.

@@ -51,6 +51,7 @@ class LimitHonoringService implements SessionService {
     vector_segment_backlog: 0,
     vector_ms_per_segment: null,
       vector_model: "fixture",
+      vector_device: null,
       tools: [],
     };
   }
@@ -118,6 +119,7 @@ describe("xtctx_handoff_manifest", () => {
 /** Records what the handler actually asked the index for. */
 class FilterRecordingService extends LimitHonoringService {
   lastToolFilter: string[] | undefined = undefined;
+  lastBranchFilter: string[] | undefined = undefined;
   called = false;
 
   constructor() {
@@ -127,9 +129,11 @@ class FilterRecordingService extends LimitHonoringService {
   override async listRecentSessions(
     _limit: number,
     toolFilter?: string[],
+    branchFilter?: string[],
   ): Promise<SessionSummary[]> {
     this.called = true;
     this.lastToolFilter = toolFilter;
+    this.lastBranchFilter = branchFilter;
     return [];
   }
 }
@@ -180,6 +184,19 @@ describe("manifest filter arguments that are not arrays of strings", () => {
     await createHandoffManifestHandler(service)({ tool_filter: ["codex"] });
 
     expect(service.lastToolFilter).toEqual(["codex"]);
+  });
+
+  it("passes a real branch name through, rather than checking it against tool ids", async () => {
+    // The tool-id check was once written into the validator both filters
+    // share, so `branch_filter: ["main"]` failed with "unknown tool id
+    // \"main\"" and branch filtering was unreachable over MCP. The only
+    // branch test above passed a bare string, which the array check rejects
+    // for its own reason — so nothing noticed.
+    const service = new FilterRecordingService();
+
+    await createHandoffManifestHandler(service)({ branch_filter: ["main", "feat/x"] });
+
+    expect(service.lastBranchFilter).toEqual(["main", "feat/x"]);
   });
 });
 

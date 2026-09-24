@@ -122,6 +122,11 @@ describe("vectorBacklog", () => {
 
     const status = await index.getStatus();
     expect(status.vectorized_units).toBeGreaterThan(0);
+    // Both halves. The subtraction alone held with one window of twenty-four
+    // embedded — it says the two numbers agree, not that the work finished,
+    // which is what the heading claims.
+    expect(status.vectorized_units).toBe(status.retrieval_units);
+    expect(index.getIndexProgress().vectorBacklog).toBe(0);
     expect(index.getIndexProgress().vectorBacklog).toBe(
       status.retrieval_units - status.vectorized_units,
     );
