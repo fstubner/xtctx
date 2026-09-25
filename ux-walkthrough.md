@@ -27,10 +27,10 @@ content through xtctx without any manual export.
    `missing (run xtctx setup)`, and that is the whole story there: the MCP
    tools answer every call by naming `xtctx setup` until it has been run,
    because a project nobody opted in has no index to read.
-3. **Work normally.** No daemon runs. Each agent starts its own xtctx MCP
-   server, which scans when it starts — and, the first time on a machine,
+3. **Work normally.** No daemon runs. Each MCP client (Claude Code, Codex,
+   Cursor, ...) starts its own xtctx MCP server over stdio, which scans when it starts — and, the first time on a machine,
    measures which device embeds fastest — then works through any vector
-   backlog that fits a fifteen-minute budget, and stops with the agent.
+   backlog that fits a fifteen-minute budget, and stops when the client exits.
 4. **Hand off.** Ask the next tool what you were working on and it returns the
    other tool's work rather than asking you. The managed block tells the agent
    the tools exist, and Claude Code's session-start hook also names the most
