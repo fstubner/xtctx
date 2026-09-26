@@ -522,24 +522,79 @@ describe("SqliteHandoffIndex", () => {
     await index.close();
   });
 
-  it("rebuilds when the stored schema version does not match", async () => {
+  it("sets an index from an older schema aside and rebuilds", async () => {
     const dbPath = join(tempDir, "xtctx.db");
     const Database = (await import("better-sqlite3")).default;
     const legacy = new Database(dbPath);
     legacy.exec("CREATE TABLE sessions (session_ref TEXT PRIMARY KEY)");
-    legacy.pragma("user_version = 999");
+    legacy.pragma("user_version = 1");
     legacy.close();
 
     const scraper = new FixtureScraper([chunk("fresh-session", 0, "user", "fresh start")]);
     const index = new SqliteHandoffIndex(dbPath, tempDir, [{ tool: "codex", scraper }]);
 
     const recent = await index.listRecentSessions(5);
+    await index.close();
 
     expect(recent).toHaveLength(1);
     expect(recent[0].session_ref).toBe("codex:fresh-session");
-
-    await index.close();
+    const aside = (await readdir(tempDir)).filter((name) => /^xtctx\.db\.set-aside-[^.]+$/.test(name));
+    expect(aside).toHaveLength(1);
   });
+
+  it("refuses an index from a newer schema and leaves it where it is", async () => {
+    // Setting it aside would hide the newer xtctx's history from it, and two
+    // installed versions sharing one index would each set the other's aside
+    // on every start.
+    const dbPath = join(tempDir, "xtctx.db");
+    const Database = (await import("better-sqlite3")).default;
+    const newer = new Database(dbPath);
+    newer.exec("CREATE TABLE sessions (session_ref TEXT PRIMARY KEY)");
+    newer.pragma("user_version = 999");
+    newer.close();
+
+    const index = new SqliteHandoffIndex(dbPath, tempDir, [
+      { tool: "codex", scraper: new FixtureScraper([chunk("s", 0, "user", "hi")]) },
+    ]);
+    await expect(index.listRecentSessions(5)).rejects.toThrow(/newer than this xtctx supports/);
+    await index.close();
+
+    expect((await readdir(tempDir)).filter((name) => name.includes("set-aside"))).toEqual([]);
+    const check = new Database(dbPath, { readonly: true });
+    expect(check.pragma("user_version", { simple: true })).toBe(999);
+    check.close();
+  });
+
+  it(
+    "does not set the index aside when another server holds the write lock, and retries",
+    async () => {
+      // With one server per MCP client, another server writing is the normal
+      // case. An open that waited out the busy timeout behind it used to set
+      // the live index aside (on macOS and Linux, from under the servers
+      // still writing to it) and then fail every call for the server's life.
+      const dbPath = join(tempDir, "xtctx.db");
+      const Database = (await import("better-sqlite3")).default;
+      const holder = new Database(dbPath);
+      holder.pragma("journal_mode = WAL");
+      // An empty file: opening it has to create the schema, which needs the
+      // write lock the holder has.
+      holder.exec("BEGIN IMMEDIATE");
+
+      const index = new SqliteHandoffIndex(dbPath, tempDir, [
+        { tool: "codex", scraper: new FixtureScraper([chunk("s", 0, "user", "hi")]) },
+      ]);
+      await expect(index.listIndexedSessions(5)).rejects.toThrow(/locked|busy/i);
+      expect((await readdir(tempDir)).filter((name) => name.includes("set-aside"))).toEqual([]);
+
+      holder.exec("COMMIT");
+      holder.close();
+
+      // The next call opens it; the server is not dead for its lifetime.
+      await expect(index.listIndexedSessions(5)).resolves.toEqual([]);
+      await index.close();
+    },
+    30_000,
+  );
 
   it("surfaces scraper failures in status instead of hiding them", async () => {
     const index = new SqliteHandoffIndex(join(tempDir, "xtctx.db"), tempDir, [
