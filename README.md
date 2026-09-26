@@ -213,8 +213,11 @@ When invoked in a normal terminal, it shows the human CLI.
   a correlation ID; xtctx echoes it but does not persist task state.
 
 The server scans transcript stores when it starts and on each call, updating
-`.xtctx/state/xtctx.db` as it goes. The database is a rebuildable cache; the
-source transcripts remain authoritative.
+`.xtctx/state/xtctx.db` as it goes. The source transcripts remain
+authoritative while they exist, but the index is not disposable: it keeps
+sessions whose transcripts have since been deleted (Claude Code deletes them
+after 30 days by default), so for those it is the only copy. Keep it, and do
+not commit it: it holds raw conversation text.
 
 With the plugin installed, a project that has also run `setup` reaches the
 same server under two names in Claude Code (`xtctx` from `.mcp.json` and
@@ -290,7 +293,7 @@ Skill sync uses real target surfaces only:
 - `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.cursor/rules/xtctx.mdc`, `.github/copilot-instructions.md`: managed handoff instructions where applicable
 
 Content outside `<!-- xtctx:begin -->` / `<!-- xtctx:end -->` fences is
-preserved. Run `xtctx setup --repair` to replace stale or duplicated generated
+preserved. Run `xtctx setup --yes` again to replace stale or duplicated generated
 blocks.
 
 ## Development

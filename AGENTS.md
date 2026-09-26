@@ -32,7 +32,7 @@ npx -y xtctx status
 ## Configuration Rules
 
 - `.xtctx/config.yaml` is the only project xtctx config file.
-- `.xtctx/state/xtctx.db` is rebuildable local cache state and must not be committed.
+- `.xtctx/state/xtctx.db` must not be committed, and must not be deleted as disposable: the index keeps sessions whose transcripts have since been deleted (Claude Code deletes them after 30 days by default), so for those it is the only copy.
 - Generated managed blocks must be repaired through setup, not edited inside the fences.
 
 ## Change Rules
