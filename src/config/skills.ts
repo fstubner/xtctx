@@ -92,6 +92,8 @@ interface SkillSyncOptions {
   configPath: string;
   selectedSkillIds?: string[];
   homeDir?: string;
+  /** Tools the project has switched off; nothing is synced to them. */
+  disabledTools?: ReadonlySet<string>;
 }
 
 const HASH_PREFIX = "sha256:";
@@ -126,10 +128,37 @@ export async function syncProjectSkills(options: SkillSyncOptions): Promise<Skil
   }
 
   const selected = await readSelectedSkills(sourceDir, selectedIds);
-  const targetConfig = buildTargetConfig(projectRoot);
+  const disabled = options.disabledTools ?? new Set<string>();
+  const targetConfig = Object.fromEntries(
+    Object.entries(buildTargetConfig(projectRoot)).filter(([tool]) => !disabled.has(tool)),
+  );
+
+  // Where each skill came from, for disconnect's "is this the user's own
+  // file?" guard. It recorded the canonical copy's path, `.xtctx/skills/...`,
+  // which is never a sync target, so the guard never fired and `disconnect
+  // claude-code` deleted a user's own `.claude/skills/<id>/SKILL.md`. The
+  // origin is recorded once, when the skill is first found, and kept: on
+  // every later run discovery finds the canonical copy first.
+  const origins = new Map<string, string>();
+  for (const skill of selected) {
+    const canonical = toProjectRelative(projectRoot, skill.path);
+    const recorded = existing.sources[skill.id];
+    const found = discovered.find((entry) => entry.id === skill.id);
+    origins.set(
+      skill.id,
+      recorded && recorded !== canonical
+        ? recorded
+        : found && found.path !== "<built-in>"
+          ? toProjectRelative(projectRoot, found.path)
+          : canonical,
+    );
+  }
 
   for (const skill of selected) {
     for (const tool of SUPPORTED_TOOLS) {
+      if (disabled.has(tool.id)) {
+        continue;
+      }
       const capability = tool.skillSync;
       if (!capability || capability.mode === "unsupported" || capability.mode === "managed-block") {
         continue;
@@ -160,7 +189,7 @@ export async function syncProjectSkills(options: SkillSyncOptions): Promise<Skil
     config: {
       sourceDir: ".xtctx/skills",
       selected: Object.fromEntries(
-        selected.map((skill) => [skill.id, { hash: skill.hash, source: toProjectRelative(projectRoot, skill.path) }]),
+        selected.map((skill) => [skill.id, { hash: skill.hash, source: origins.get(skill.id) ?? toProjectRelative(projectRoot, skill.path) }]),
       ),
       targets: targetConfig,
     },
@@ -201,7 +230,12 @@ export async function discoverProjectSkills(options: {
   return discovered.sort((left, right) => left.id.localeCompare(right.id));
 }
 
-export async function inspectSkillStatus(projectRoot: string, configPath: string): Promise<SkillStatus> {
+export async function inspectSkillStatus(
+  projectRoot: string,
+  configPath: string,
+  /** Switched off in the project's config: not reported, so not "missing". */
+  disabledTools: ReadonlySet<string> = new Set(),
+): Promise<SkillStatus> {
   const root = resolve(projectRoot);
   const sourceDir = skillSourceDir(root);
   const existing = await readExistingSkillConfig(configPath);
@@ -225,6 +259,9 @@ export async function inspectSkillStatus(projectRoot: string, configPath: string
 
   const targets: SkillStatus["targets"] = [];
   for (const tool of SUPPORTED_TOOLS) {
+    if (disabledTools.has(tool.id)) {
+      continue;
+    }
     const capability = tool.skillSync;
     const mode = capability?.mode ?? "unsupported";
 
