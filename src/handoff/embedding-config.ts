@@ -11,6 +11,12 @@ import type { EmbeddingConfig } from "../types/config.js";
 const DEFAULT_BATCH_SIZE = 32;
 const DEFAULT_TIMEOUT_MS = 30_000;
 
+/**
+ * Where the user, not the project, says which embedding endpoints xtctx may
+ * send transcript text to: a comma-separated list of origins.
+ */
+export const TRUSTED_ENDPOINTS_ENV = "XTCTX_TRUSTED_EMBEDDING_ENDPOINTS";
+
 export function defaultEmbeddingConfig(): EmbeddingConfig {
   return {
     provider: "local",
@@ -25,10 +31,14 @@ export function defaultEmbeddingConfig(): EmbeddingConfig {
  * Parse the optional `embedding:` block from `.xtctx/config.yaml`.
  *
  * Throws on a literal `apiKey` (the file is committable), an unknown
- * provider, or an incomplete openai-compatible block. Missing block → local
+ * provider, an incomplete openai-compatible block, or an endpoint the user
+ * has not trusted (see assertTrustedEndpoint). Missing block → local
  * defaults; never inferred from environment alone.
  */
-export function parseEmbeddingConfig(input: unknown): EmbeddingConfig {
+export function parseEmbeddingConfig(
+  input: unknown,
+  env: NodeJS.ProcessEnv = process.env,
+): EmbeddingConfig {
   if (input === undefined || input === null) {
     return defaultEmbeddingConfig();
   }
@@ -85,9 +95,70 @@ export function parseEmbeddingConfig(input: unknown): EmbeddingConfig {
     }
     config.baseUrl = raw.baseUrl.trim();
     config.model = raw.model.trim();
+    assertTrustedEndpoint(config.baseUrl, config.apiKeyEnv, env);
   }
 
   return config;
+}
+
+/**
+ * Refuse an endpoint the user has not trusted outside the repository.
+ *
+ * `.xtctx/config.yaml` is committed with the project, so whoever wrote the
+ * repository chose `baseUrl` and `apiKeyEnv`. Honoured as written, a cloned
+ * repo could send the user's transcript text to any host, with the value of
+ * any environment variable it named -- a GitHub token, say -- as the Bearer
+ * key, as soon as an agent searched in it. The plugin makes xtctx live in
+ * every repository, so no setup step stands in between.
+ *
+ * A loopback endpoint with no key is allowed as it is: a local model server,
+ * the case the feature was written for. Anything else -- a remote host, or
+ * any config that names a key -- must have its origin listed in
+ * XTCTX_TRUSTED_EMBEDDING_ENDPOINTS, which lives in the user's environment
+ * next to the key itself, where a repository cannot set it.
+ */
+function assertTrustedEndpoint(
+  baseUrl: string,
+  apiKeyEnv: string | undefined,
+  env: NodeJS.ProcessEnv,
+): void {
+  let url: URL;
+  try {
+    url = new URL(baseUrl);
+  } catch {
+    throw new Error(`embedding.baseUrl is not a valid URL: ${JSON.stringify(baseUrl)}`);
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error(`embedding.baseUrl must be http or https, got ${url.protocol}`);
+  }
+  if (isLoopback(url.hostname) && apiKeyEnv === undefined) {
+    return;
+  }
+  const trusted = (env[TRUSTED_ENDPOINTS_ENV] ?? "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .flatMap((entry) => {
+      try {
+        return [new URL(entry).origin];
+      } catch {
+        return [];
+      }
+    });
+  if (trusted.includes(url.origin)) {
+    return;
+  }
+  throw new Error(
+    `embedding endpoint ${url.origin} is not trusted: this project's config asks xtctx to send ` +
+      `transcript text there${apiKeyEnv ? ` with the value of ${apiKeyEnv} as its key` : ""}. ` +
+      `If you set this up, add ${TRUSTED_ENDPOINTS_ENV}=${url.origin} to the environment your ` +
+      "agents start from; a repository cannot set that for you.",
+  );
+}
+
+function isLoopback(hostname: string): boolean {
+  const host = hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  return host === "localhost" || host === "::1" || /^127(?:\.\d{1,3}){3}$/.test(host);
 }
 
 export function createEmbeddingProvider(

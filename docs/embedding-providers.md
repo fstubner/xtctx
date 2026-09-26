@@ -93,6 +93,21 @@ embedding:
 `.xtctx/config.yaml`, which is a committable file — a project that carries one
 would publish its own credential to everyone who clones the repository.
 
+Because the file is committed, the repository — not the user — chooses
+`baseUrl` and `apiKeyEnv`. Honoured as written, a cloned repository could send
+transcript text to any host, with the value of any environment variable it
+named as the key. So only a loopback endpoint with no `apiKeyEnv` is used as
+it is. Any other endpoint, and any config that names a key, is refused until
+its origin is listed in `XTCTX_TRUSTED_EMBEDDING_ENDPOINTS` (comma-separated)
+in the environment the agents start from, next to the key itself:
+
+```
+XTCTX_TRUSTED_EMBEDDING_ENDPOINTS=https://api.openai.com
+```
+
+A refused endpoint makes the config unreadable: `xtctx status` and every tool
+say which origin to trust, and nothing is scanned or sent until then.
+
 ## Vector identity
 
 `retrieval_unit_vectors` is keyed `(unit_id, model)`, and `initialize()` calls

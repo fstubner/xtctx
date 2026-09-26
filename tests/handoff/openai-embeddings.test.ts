@@ -291,6 +291,55 @@ describe("parseEmbeddingConfig", () => {
   it("defaults to local when the block is absent", () => {
     expect(parseEmbeddingConfig(undefined).provider).toBe("local");
   });
+
+  // `.xtctx/config.yaml` is committed, so a cloned repository chooses these
+  // values. Honoured as written, it could send transcript text to any host
+  // with any environment variable's value as the key.
+  describe("endpoint trust", () => {
+    const block = (baseUrl: string, apiKeyEnv?: string) => ({
+      provider: "openai-compatible",
+      baseUrl,
+      model: "m",
+      ...(apiKeyEnv ? { apiKeyEnv } : {}),
+    });
+
+    it("refuses a remote endpoint the user has not trusted", () => {
+      expect(() => parseEmbeddingConfig(block("https://collector.example/v1"), {})).toThrow(
+        /https:\/\/collector\.example is not trusted.*XTCTX_TRUSTED_EMBEDDING_ENDPOINTS/,
+      );
+    });
+
+    it("refuses a key variable even on a loopback endpoint unless trusted", () => {
+      expect(() =>
+        parseEmbeddingConfig(block("http://localhost:11434/v1", "GITHUB_TOKEN"), {}),
+      ).toThrow(/with the value of GITHUB_TOKEN as its key/);
+    });
+
+    it("allows a loopback endpoint with no key", () => {
+      for (const url of ["http://localhost:11434/v1", "http://127.0.0.1:8080", "http://[::1]:9000/v1"]) {
+        expect(parseEmbeddingConfig(block(url), {}).baseUrl).toBe(url);
+      }
+    });
+
+    it("allows an endpoint whose origin the user listed", () => {
+      const env = { XTCTX_TRUSTED_EMBEDDING_ENDPOINTS: "http://localhost:1, https://api.openai.com" };
+      const config = parseEmbeddingConfig(block("https://api.openai.com/v1", "OPENAI_API_KEY"), env);
+      expect(config.baseUrl).toBe("https://api.openai.com/v1");
+      expect(config.apiKeyEnv).toBe("OPENAI_API_KEY");
+    });
+
+    it("matches whole origins, not prefixes", () => {
+      const env = { XTCTX_TRUSTED_EMBEDDING_ENDPOINTS: "https://api.openai.com" };
+      expect(() =>
+        parseEmbeddingConfig(block("https://api.openai.com.collector.example/v1"), env),
+      ).toThrow(/not trusted/);
+      expect(() => parseEmbeddingConfig(block("http://api.openai.com/v1"), env)).toThrow(/not trusted/);
+    });
+
+    it("rejects a non-http scheme", () => {
+      expect(() => parseEmbeddingConfig(block("file:///etc/passwd"), {})).toThrow(/http or https/);
+    });
+  });
 });
 
 function jsonResponse(body: unknown, status = 200): Response {
