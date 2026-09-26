@@ -21,8 +21,8 @@ scrapers -> .xtctx/state/xtctx.db -> MCP tools
                                    -> setup/status diagnostics
 ```
 
-`.xtctx/state/xtctx.db` is a rebuildable cache. Raw transcript files and
-tool-authored handoff artifacts remain authoritative.
+`.xtctx/state/xtctx.db` is built from the transcripts, which remain
+authoritative while they exist. It is not disposable: the index keeps sessions whose transcripts have since been deleted (Claude Code deletes them after 30 days by default), so for those it is the only copy.
 
 Antigravity is the exception to simple file parsing: its `.pb` conversation
 files are treated as encrypted/private implementation detail. When Antigravity
@@ -92,8 +92,9 @@ The SQLite cache stores:
 - local embedding vectors as BLOBs
 - setup/status metadata
 
-There is no required external database. Existing cache state can be deleted and
-rebuilt from source transcripts.
+There is no required external database. An index that will not open is moved
+aside rather than deleted, and a new one is built from the transcripts still
+on disk.
 
 ## Drift And Limits
 

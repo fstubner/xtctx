@@ -129,7 +129,7 @@ export async function main(argv = process.argv): Promise<void> {
     .argument("[projectPath]", "Project root to configure")
     .option("-p, --project <path>", "Project root to configure")
     .option("-y, --yes", "Apply setup without prompting", false)
-    .option("--repair", "Remove legacy generated xtctx config before writing current setup", false)
+    .option("--repair", "Also remove files left by older xtctx versions (.xtctx/.store, .xtctx/tool-config); the index is kept", false)
     .option("--global-mcp", "Also configure Copilot CLI global MCP (Antigravity MCP is always configured)", false)
     .description("Set this project up so agents can read each other's history here")
     .action(
@@ -150,10 +150,11 @@ export async function main(argv = process.argv): Promise<void> {
   program
     .command("status")
     .option("-p, --project <path>", "Project root (defaults to cwd)")
+    .option("-v, --verbose", "Include every format surprise, skill hashes and full paths", false)
     .description("Check whether handoff is working here, and what to do if not")
-    .action(async (options: { project?: string }) => {
+    .action(async (options: { project?: string; verbose?: boolean }) => {
       const globalOptions = program.opts<{ project?: string }>();
-      await runStatus({ projectPath: options.project ?? globalOptions.project });
+      await runStatus({ projectPath: options.project ?? globalOptions.project, verbose: options.verbose });
     });
 
   program

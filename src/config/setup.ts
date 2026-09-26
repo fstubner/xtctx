@@ -1,7 +1,7 @@
 import { mkdir, rm } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { stringify as stringifyYaml } from "yaml";
-import { writeIfChanged } from "./file-io.js";
+import { pathExists, writeIfChanged } from "./file-io.js";
 import { installClaudeHook } from "./claude-settings.js";
 import { memoryTargets, renderManagedBlock, upsertManagedBlock } from "./instruction-blocks.js";
 import { publishedServerDefinition, xtctxServerDefinition } from "./server-definition.js";
@@ -32,7 +32,8 @@ interface SetupOptions {
 interface SetupResult {
   projectRoot: string;
   configPath: string;
-  writes: Array<{ path: string; kind: string; changed: boolean }>;
+  /** `created` is set where the writer knows it; see `runSetup` for the rest. */
+  writes: Array<{ path: string; kind: string; changed: boolean; created?: boolean }>;
   warnings: string[];
   /** Hard failures (unreadable/unwritable configs); setup exits nonzero. */
   failures: string[];
@@ -44,8 +45,19 @@ interface PlannedSetupWrite {
 }
 
 export async function runSetup(options: SetupOptions = {}): Promise<SetupResult> {
+  // Which of the planned files existed before, so the report can say
+  // "created" rather than "updated" for a file that was not there. Setup said
+  // "updated" for all eighteen files in a fresh project, which reads as though
+  // it had edited things the user already had.
+  const plan = describeSetupPlan(options.projectPath, options.selectedSkillIds, options.includeGlobalMcp);
+  const existedBefore = new Set<string>();
+  await Promise.all(
+    plan.writes.map(async (write) => {
+      if (await pathExists(write.path)) existedBefore.add(write.path);
+    }),
+  );
   const result = await setupProject(options);
-  printSetupResult(result);
+  printSetupResult(result, existedBefore);
   return result;
 }
 
@@ -59,9 +71,17 @@ export async function setupProject(options: SetupOptions = {}): Promise<SetupRes
   const warnings: string[] = [];
   const failures: string[] = [];
 
+  // `--repair` removes what older versions left in `.xtctx/` and nothing else.
+  //
+  // It used to delete `state/` too, and `status` told anyone with a drifted
+  // skill copy to run it. `state/` holds the index, and the index keeps
+  // sessions whose transcripts are gone: Claude Code deletes transcripts after
+  // 30 days by default, so for anything older the index is the only copy. A
+  // repair that follows status's own advice must not be the thing that loses
+  // that history. Nothing `--repair` was for needs it either: every managed
+  // block, skill copy and MCP entry is rewritten by a plain `setup`.
   if (options.repair) {
     await rm(join(xtctxDir, ".store"), { recursive: true, force: true });
-    await rm(stateDir, { recursive: true, force: true });
     await rm(join(xtctxDir, "tool-config"), { recursive: true, force: true });
   }
 
@@ -121,6 +141,7 @@ export async function setupProject(options: SetupOptions = {}): Promise<SetupRes
       path: file.path,
       kind: `mcp:${file.tool}`,
       changed: file.updated || file.created,
+      created: file.created,
     });
     if (file.failed && file.warning) {
       failures.push(file.warning);
@@ -281,25 +302,47 @@ function renderProjectConfig(projectRoot: string, skills: ProjectSkillConfig): s
   return stringifyYaml(config);
 }
 
-function printSetupResult(result: SetupResult): void {
-  const changed = result.writes.filter((write) => write.changed).length;
-  process.stdout.write(`xtctx setup complete (${changed} changed, ${result.writes.length - changed} unchanged)\n`);
+function printSetupResult(result: SetupResult, existedBefore: Set<string>): void {
+  // Paths inside the project are relative to the Project line above them;
+  // anything outside it -- a global MCP config -- stays absolute, because that
+  // is the part a reader needs to notice.
+  const show = (path: string): string => {
+    const rel = relative(result.projectRoot, path);
+    return rel && !rel.startsWith("..") && !isAbsolute(rel) ? rel : path;
+  };
+  const outcome = (write: SetupResult["writes"][number]): "created" | "updated" | "ok" =>
+    !write.changed ? "ok" : (write.created ?? !existedBefore.has(write.path)) ? "created" : "updated";
+  const counts = { created: 0, updated: 0, ok: 0 };
+  for (const write of result.writes) counts[outcome(write)] += 1;
+
+  process.stdout.write(
+    `xtctx setup complete: ${counts.created} created, ${counts.updated} updated, ${counts.ok} unchanged\n`,
+  );
   process.stdout.write(`Project: ${result.projectRoot}\n`);
   for (const write of result.writes) {
-    const marker = write.changed ? "updated" : "ok";
-    process.stdout.write(`  ${marker.padEnd(7)} ${write.kind} ${write.path}\n`);
+    process.stdout.write(`  ${outcome(write).padEnd(8)} ${displayKind(write.kind).padEnd(34)} ${show(write.path)}\n`);
   }
   for (const warning of result.warnings) {
-    process.stdout.write(`  warning ${warning}\n`);
+    process.stdout.write(`  warning  ${warning}\n`);
   }
   for (const failure of result.failures) {
-    process.stdout.write(`  error   ${failure}\n`);
+    process.stdout.write(`  error    ${failure}\n`);
   }
 
   if (result.failures.length === 0) {
-    printCoverageNote();
+    printCoverageNote(result);
     printNextSteps();
   }
+}
+
+/**
+ * The write's kind as a reader should see it. Internally the managed
+ * instruction blocks are `memory:` writes, a name left from before the pivot;
+ * printed, it told users xtctx keeps a memory, which is the one thing the
+ * product says it does not do.
+ */
+function displayKind(kind: string): string {
+  return kind.startsWith("memory:") ? `instructions:${kind.slice("memory:".length)}` : kind;
 }
 
 /**
@@ -322,12 +365,31 @@ function printSetupResult(result: SetupResult): void {
  *
  * So it is said out loud instead, with the command that undoes any of it.
  */
-function printCoverageNote(): void {
+function printCoverageNote(result: SetupResult): void {
+  // Counted from what was written rather than assumed. This said "All 7
+  // supported tools were wired" while Copilot CLI, whose only MCP config is
+  // machine-wide, is written only with `--global-mcp`.
+  const mcpWired = new Set(
+    result.writes.filter((write) => write.kind.startsWith("mcp:")).map((write) => write.kind.slice(4)),
+  );
+  const unwired = SUPPORTED_TOOLS.filter((tool) => !mcpWired.has(tool.id)).map((tool) => tool.id);
+  const headline =
+    unwired.length === 0
+      ? `All ${SUPPORTED_TOOLS.length} supported tools were wired`
+      : `${SUPPORTED_TOOLS.length - unwired.length} of ${SUPPORTED_TOOLS.length} supported tools were wired`;
+  const skipped =
+    unwired.length === 0
+      ? ""
+      : unwired.includes("copilot-cli") && unwired.length === 1
+        ? "  Copilot CLI was not: its only MCP config is machine-wide, so it is\n" +
+          "  written only with `xtctx setup --global-mcp`.\n"
+        : `  Not wired: ${unwired.join(", ")}.\n`;
   process.stdout.write(
-    `\n  All ${SUPPORTED_TOOLS.length} supported tools were wired, including any not installed here:\n` +
+    `\n  ${headline}, including any not installed here:\n` +
       "  a tool's config only exists once it has been used, so wiring what is\n" +
       "  detected today would skip whatever you install tomorrow. The instruction\n" +
       "  files are also read by whichever agent opens this repo next.\n" +
+      skipped +
       "  Remove any you do not want with `xtctx disconnect <tool>`.\n",
   );
 }

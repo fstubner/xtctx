@@ -1,5 +1,5 @@
 import { existsSync, realpathSync } from "node:fs";
-import { mkdir, readdir, rm } from "node:fs/promises";
+import { mkdir, readdir, rename, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { Database as DatabaseHandle } from "better-sqlite3";
 import type { ConversationScraper } from "../types/scraper.js";
@@ -1113,10 +1113,16 @@ export class SqliteHandoffIndex implements SessionService {
     await mkdir(dirname(this.dbPath), { recursive: true });
     try {
       this.db = openDatabase(this.dbPath);
-    } catch {
-      // The index is derived data: a corrupt or schema-incompatible database
-      // is discarded and rebuilt from the transcript stores on next refresh.
-      await this.deleteDatabaseFiles();
+    } catch (error) {
+      // A database that will not open -- corrupt, or from another schema
+      // version -- is set aside and a fresh one rebuilt from the transcript
+      // stores. Set aside, not deleted: the index keeps sessions whose
+      // transcripts are gone (Claude Code deletes them after 30 days by
+      // default), so for those it is the only copy, and every schema bump
+      // used to delete it. If it cannot be moved -- another xtctx server has
+      // it open, which is normal with one server per client -- nothing is
+      // touched and the error stands.
+      await this.setDatabaseAside(error);
       this.db = openDatabase(this.dbPath);
     }
 
@@ -1144,10 +1150,27 @@ export class SqliteHandoffIndex implements SessionService {
     dropVectorsFromOtherModels(this.getDb(), this.embeddingProvider.model);
   }
 
-  private async deleteDatabaseFiles(): Promise<void> {
-    for (const suffix of ["", "-wal", "-shm"]) {
-      await rm(`${this.dbPath}${suffix}`, { force: true });
+  /**
+   * Move the database and its WAL files to `xtctx.db.set-aside-<time>*`.
+   * Throws `cause` if the main file cannot be moved, rather than deleting it.
+   */
+  private async setDatabaseAside(cause: unknown): Promise<void> {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const aside = `${this.dbPath}.set-aside-${stamp}`;
+    try {
+      await rename(this.dbPath, aside);
+    } catch {
+      throw cause;
     }
+    for (const suffix of ["-wal", "-shm"]) {
+      await rename(`${this.dbPath}${suffix}`, `${aside}${suffix}`).catch(() => {});
+    }
+    process.stderr.write(
+      `xtctx: the index at ${this.dbPath} could not be opened ` +
+        `(${cause instanceof Error ? cause.message : String(cause)}); ` +
+        `it was moved to ${aside} and a new one is being built.
+`,
+    );
   }
 
   /**

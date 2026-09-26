@@ -188,7 +188,13 @@ describe("status", () => {
 
     const services = await createProjectServices(projectRoot);
     try {
-      const status = await renderStatusBlock(services, { homeDir });
+      // By default, one line naming the tool and how many kinds, and where the
+      // detail is. The full list was a third of an ordinary report.
+      const summary = await renderStatusBlock(services, { homeDir });
+      expect(summary).toContain("Format surprises: codex (1) -- details: xtctx status --verbose");
+      expect(summary).not.toContain("world_state");
+
+      const status = await renderStatusBlock(services, { homeDir, verbose: true });
 
       expect(status).toContain("Format surprises:");
       expect(status).toContain("world_state");
@@ -268,13 +274,17 @@ describe("status", () => {
 
       expect(status).toContain("Skills:");
       // This fixture deliberately drifts a skill target, so the closing hint
-      // must point at repair rather than at indexing.
-      expect(status).toContain("Next     Wiring has drifted. Run: xtctx setup --repair");
+      // names what drifted and points at plain setup rather than at indexing.
+      // Not at `setup --repair`: that deleted the index, which can be the only
+      // copy of sessions whose transcripts an agent has since cleaned up.
+      expect(status).toContain("Next     Out of date: skill copies for cursor.");
+      expect(status).toContain("Run: xtctx setup --yes");
+      expect(status).not.toContain("--repair");
       expect(status).toContain("xtctx-handoff");
-      expect(status).toContain("claude-code native-skill xtctx-handoff");
-      expect(status).toContain("drift         cursor rule-adapter xtctx-handoff");
-      expect(status).toContain("managed-block antigravity");
-      expect(status).not.toContain("unsupported   antigravity unsupported");
+      expect(status).toMatch(/claude-code\s+native-skill\s+xtctx-handoff/);
+      expect(status).toMatch(/drift\s+cursor\s+rule-adapter\s+xtctx-handoff/);
+      expect(status).toMatch(/managed-block\s+antigravity/);
+      expect(status).not.toMatch(/unsupported\s+antigravity\s+unsupported/);
       await expect(readFile(join(projectRoot, ".xtctx", "state", "xtctx.db"), "utf-8")).resolves.toBeDefined();
     } finally {
       await (services.sessions as { close(): Promise<void> }).close();

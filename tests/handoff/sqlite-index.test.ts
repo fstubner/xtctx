@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -472,6 +472,30 @@ describe("SqliteHandoffIndex", () => {
     await expect(readFile(cursorPath, "utf-8")).rejects.toThrow();
 
     await index.close();
+  });
+
+  it("sets an index it cannot open aside instead of deleting it", async () => {
+    // The index keeps sessions whose transcripts are gone -- Claude Code
+    // deletes them after 30 days by default -- so an index that will not open
+    // may hold history that exists nowhere else. It used to be deleted, on
+    // corruption and on every schema version change alike.
+    const dbPath = join(tempDir, "xtctx.db");
+    await writeFile(dbPath, "this is not a sqlite database", "utf-8");
+
+    const index = new SqliteHandoffIndex(dbPath, tempDir, [
+      { tool: "codex", scraper: new FixtureScraper([chunk("s", 0, "user", "hi")]) },
+    ]);
+    const sessions = await index.listRecentSessions(5);
+    await index.close();
+
+    // A fresh index was built and works...
+    expect(sessions.map((session) => session.session_ref)).toEqual(["codex:s"]);
+    // ...and the old file is still there, byte for byte, beside it.
+    const aside = (await readdir(tempDir)).filter((name) => name.startsWith("xtctx.db.set-aside-"));
+    expect(aside).toHaveLength(1);
+    await expect(readFile(join(tempDir, aside[0] as string), "utf-8")).resolves.toBe(
+      "this is not a sqlite database",
+    );
   });
 
   it("clears scraper cursors when it rebuilds, so no history is skipped", async () => {

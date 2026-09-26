@@ -53,7 +53,7 @@ right place for them precisely because no test can hold them.
 - [x] No local HTTP service is shipped in the runtime package.
 - [x] MCP uses stdio transport by default. <!-- verified-by: tests/mcp/server.test.ts -->
 - [x] The generated MCP command is `npx -y xtctx`, except in a checkout of xtctx itself, where setup writes the local `dist` entry point instead. <!-- verified-by: tests/config/self-hosted-setup.test.ts -->
-- [x] Local transcript source files remain authoritative; `.xtctx/state/xtctx.db` is rebuildable cache state.
+- [x] Local transcript source files remain authoritative; `.xtctx/state/xtctx.db` is gitignored by setup, and is set aside rather than deleted when it cannot be opened. <!-- verified-by: tests/handoff/sqlite-index.test.ts -->
 
 ## Input and Output Handling
 

@@ -369,7 +369,13 @@ describe("setupProject", () => {
     expect(agents).not.toContain("xtctx_project_knowledge");
     expect(agents).not.toContain("xtctx_save_decision");
     expect(agents).not.toContain("xtctx serve");
-    await expect(readFile(join(projectRoot, ".xtctx", "state", "xtctx.db"), "utf-8")).rejects.toThrow();
+    // The index survives a repair. This asserted the opposite until the index
+    // turned out to outlive the transcripts it was built from (Claude Code
+    // deletes them after 30 days by default), and `status` sent anyone with a
+    // drifted skill copy here -- so following its advice deleted history that
+    // existed nowhere else.
+    await expect(readFile(join(projectRoot, ".xtctx", "state", "xtctx.db"), "utf-8")).resolves.toBe("legacy");
+    // What repair is for -- the previous architecture's store -- still goes.
     await expect(
       readFile(join(projectRoot, ".xtctx", ".store", "lancedb", "legacy"), "utf-8"),
     ).rejects.toThrow();

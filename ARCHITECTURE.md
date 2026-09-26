@@ -19,8 +19,10 @@ boundaries between them, and what each part is allowed to trust.
 - **Handoff index** (`src/handoff/`) — per-project SQLite database
   (`.xtctx/state/xtctx.db`, WAL, schema-versioned) holding sessions,
   messages, retrieval windows, FTS index, and embedding vectors. Refreshed
-  on demand from the scrapers and at MCP server start; fully derived, rebuilt from scratch on
-  corruption or schema mismatch.
+  on demand from the scrapers and at MCP server start. Derived from the
+  transcripts, but not disposable: the index keeps sessions whose transcripts have since been deleted (Claude Code deletes them after 30 days by default), so for those it is the only copy. A database that will not
+  open (corruption, schema mismatch) is moved aside to
+  `xtctx.db.set-aside-<time>`, never deleted, and a new one is built.
 - **Drift log** (`src/scrapers/drift-log.ts`) — per-tool record of the
   places another tool's transcripts did not match what the scraper expected,
   summarised once per scan and kept in `.xtctx/state/<tool>-drift.json`.
