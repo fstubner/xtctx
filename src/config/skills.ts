@@ -141,16 +141,9 @@ export async function syncProjectSkills(options: SkillSyncOptions): Promise<Skil
   // every later run discovery finds the canonical copy first.
   const origins = new Map<string, string>();
   for (const skill of selected) {
-    const canonical = toProjectRelative(projectRoot, skill.path);
-    const recorded = existing.sources[skill.id];
-    const found = discovered.find((entry) => entry.id === skill.id);
     origins.set(
       skill.id,
-      recorded && recorded !== canonical
-        ? recorded
-        : found && found.path !== "<built-in>"
-          ? toProjectRelative(projectRoot, found.path)
-          : canonical,
+      await skillOrigin(projectRoot, skill, existing.sources[skill.id], discovered),
     );
   }
 
@@ -690,6 +683,47 @@ function normalizeSkillId(value: string): string | null {
 
 function uniqueIds(ids: string[]): string[] {
   return [...new Set(ids.map(normalizeSkillId).filter((id): id is string => Boolean(id)))];
+}
+
+/** Recorded for a skill found outside the project, which no sync target can be. */
+const USER_LEVEL_SOURCE = "<user-level>";
+
+/**
+ * Where a selected skill came from, as `skills.selected.<id>.source`.
+ *
+ * Kept when already recorded. Otherwise -- a first setup, or a project where
+ * an earlier version recorded the canonical path by mistake -- a copy in a
+ * tool's own project skills folder is taken to be the user's. After an
+ * earlier setup that copy may be one xtctx wrote; then disconnect leaves one
+ * file behind, which is the safe way to be wrong, where the other way deletes
+ * the user's only copy. A skill found in the user's home is recorded as
+ * `<user-level>`, not by its path: that would put the username into a
+ * committable file.
+ */
+async function skillOrigin(
+  projectRoot: string,
+  skill: SkillSelection,
+  recorded: string | undefined,
+  discovered: DiscoveredSkill[],
+): Promise<string> {
+  const canonical = toProjectRelative(projectRoot, skill.path);
+  if (skill.id === BUILT_IN_SKILL_ID) {
+    return canonical;
+  }
+  if (recorded && recorded !== canonical) {
+    return recorded;
+  }
+  for (const folder of [[".claude", "skills"], [".codex", "skills"]]) {
+    const candidate = join(projectRoot, ...folder, skill.id, "SKILL.md");
+    if ((await readUtf8IfExists(candidate)) !== null) {
+      return toProjectRelative(projectRoot, candidate);
+    }
+  }
+  const found = discovered.find((entry) => entry.id === skill.id);
+  if (found && found.path !== "<built-in>" && relative(projectRoot, found.path).startsWith("..")) {
+    return USER_LEVEL_SOURCE;
+  }
+  return canonical;
 }
 
 function toProjectRelative(projectRoot: string, path: string): string {

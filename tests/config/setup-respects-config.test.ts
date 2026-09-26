@@ -143,4 +143,33 @@ describe("a skill the user wrote", () => {
 
     await expect(readFile(own, "utf-8")).resolves.toBe(USER_SKILL);
   });
+
+  it("is protected in a project an earlier version set up, which recorded the canonical path", async () => {
+    const own = join(projectRoot, ".claude", "skills", "my-skill", "SKILL.md");
+    await mkdir(join(projectRoot, ".claude", "skills", "my-skill"), { recursive: true });
+    await writeFile(own, USER_SKILL, "utf-8");
+    await setupProject({ projectPath: projectRoot, homeDir, selectedSkillIds: ["xtctx-handoff", "my-skill"] });
+    // What the previous version wrote.
+    const text = await readFile(configPath(), "utf-8");
+    await writeFile(
+      configPath(),
+      text.replace("source: .claude/skills/my-skill/SKILL.md", "source: .xtctx/skills/my-skill/SKILL.md"),
+      "utf-8",
+    );
+
+    await setupProject({ projectPath: projectRoot, homeDir });
+    await disconnectProject({ projectPath: projectRoot, tool: "claude-code", homeDir });
+
+    await expect(readFile(own, "utf-8")).resolves.toBe(USER_SKILL);
+  });
+
+  it("found in the user's home is recorded without the home path", async () => {
+    await mkdir(join(homeDir, ".claude", "skills", "home-skill"), { recursive: true });
+    await writeFile(join(homeDir, ".claude", "skills", "home-skill", "SKILL.md"), USER_SKILL, "utf-8");
+
+    await setupProject({ projectPath: projectRoot, homeDir, selectedSkillIds: ["xtctx-handoff", "home-skill"] });
+
+    expect((await readConfig()).skills.selected["home-skill"].source).toBe("<user-level>");
+    expect(await readFile(configPath(), "utf-8")).not.toContain(homeDir.replace(/\\/g, "/"));
+  });
 });

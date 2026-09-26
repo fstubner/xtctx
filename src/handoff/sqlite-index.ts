@@ -587,8 +587,7 @@ export class SqliteHandoffIndex implements SessionService {
     // Closing the database underneath it would turn an ordinary shutdown into
     // a write to a closed handle.
     await this.whenScanSettled();
-    this.db?.close();
-    this.db = null;
+    this.discardHandle();
   }
 
   private async refresh(reason: {
@@ -1136,8 +1135,7 @@ export class SqliteHandoffIndex implements SessionService {
       const olderSchema = error instanceof SchemaVersionError && !error.newer;
       // Whatever was opened before the failure is closed: a retry opens a new
       // handle, and on Windows a leaked one also keeps the file locked.
-      this.db?.close();
-      this.db = null;
+      this.discardHandle();
       if (!olderSchema && !isCorruptDatabaseError(error)) {
         throw error;
       }
@@ -1145,15 +1143,19 @@ export class SqliteHandoffIndex implements SessionService {
       try {
         await this.openAndPrepare();
       } catch (rebuildError) {
-        this.db?.close();
-        this.db = null;
+        this.discardHandle();
         throw rebuildError;
       }
     }
     if (this.closed) {
-      this.db?.close();
-      this.db = null;
+      this.discardHandle();
     }
+  }
+
+  /** Close and forget the handle, if one is open. */
+  private discardHandle(): void {
+    this.db?.close();
+    this.db = null;
   }
 
   /**
