@@ -40,11 +40,16 @@ afterEach(async () => {
 });
 
 const configPath = () => join(projectRoot, ".xtctx", "config.yaml");
-const readConfig = async () => parseYaml(await readFile(configPath(), "utf-8")) as Record<string, any>;
+interface ProjectConfig {
+  tools: Record<string, Record<string, unknown>>;
+  skills: { selected: Record<string, { source?: string }> };
+  [key: string]: unknown;
+}
+const readConfig = async () => parseYaml(await readFile(configPath(), "utf-8")) as ProjectConfig;
 
 describe("setup and the project's config", () => {
   it("keeps storePath, embedding, enabled: false and unknown keys, and drops the absolute root", async () => {
-    await setupProject({ projectPath: projectRoot, homeDir, yes: true });
+    await setupProject({ projectPath: projectRoot, homeDir });
     const config = await readConfig();
     config.tools.codex.storePath = "/custom/codex/sessions";
     config.tools.cursor.enabled = false;
@@ -53,7 +58,7 @@ describe("setup and the project's config", () => {
     const { stringify } = await import("yaml");
     await writeFile(configPath(), stringify(config), "utf-8");
 
-    await setupProject({ projectPath: projectRoot, homeDir, yes: true });
+    await setupProject({ projectPath: projectRoot, homeDir });
     const after = await readConfig();
 
     expect(after.tools.codex.storePath).toBe("/custom/codex/sessions");
@@ -66,11 +71,11 @@ describe("setup and the project's config", () => {
   });
 
   it("refuses to touch anything when the config does not parse", async () => {
-    await setupProject({ projectPath: projectRoot, homeDir, yes: true });
+    await setupProject({ projectPath: projectRoot, homeDir });
     await writeFile(configPath(), "tools: [oops\n", "utf-8");
     await rm(join(projectRoot, "CLAUDE.md"));
 
-    const result = await setupProject({ projectPath: projectRoot, homeDir, yes: true });
+    const result = await setupProject({ projectPath: projectRoot, homeDir });
 
     expect(result.failures.join("\n")).toMatch(/could not be parsed, so setup changed nothing/);
     expect(await readFile(configPath(), "utf-8")).toBe("tools: [oops\n");
@@ -80,8 +85,8 @@ describe("setup and the project's config", () => {
 
 describe("a disconnected tool stays disconnected", () => {
   it("is not rewired by a later setup, and status does not ask for one", async () => {
-    await setupProject({ projectPath: projectRoot, homeDir, yes: true });
-    await disconnectProject({ projectPath: projectRoot, tool: "cursor", homeDir, yes: true });
+    await setupProject({ projectPath: projectRoot, homeDir });
+    await disconnectProject({ projectPath: projectRoot, tool: "cursor", homeDir });
 
     const services = await createProjectServices(projectRoot, { createIfMissing: false });
     let status: string;
@@ -92,7 +97,7 @@ describe("a disconnected tool stays disconnected", () => {
     }
     expect(status).not.toMatch(/Out of date: .*cursor/);
 
-    const result = await setupProject({ projectPath: projectRoot, homeDir, yes: true });
+    const result = await setupProject({ projectPath: projectRoot, homeDir });
 
     expect(existsSync(join(projectRoot, ".cursor", "mcp.json"))).toBe(false);
     expect(existsSync(join(projectRoot, ".cursor", "rules", "xtctx.mdc"))).toBe(false);
@@ -104,10 +109,10 @@ describe("a disconnected tool stays disconnected", () => {
   });
 
   it("keeps a shared instruction file while another tool still reads it", async () => {
-    await setupProject({ projectPath: projectRoot, homeDir, yes: true });
-    await disconnectProject({ projectPath: projectRoot, tool: "codex", homeDir, yes: true });
+    await setupProject({ projectPath: projectRoot, homeDir });
+    await disconnectProject({ projectPath: projectRoot, tool: "codex", homeDir });
 
-    await setupProject({ projectPath: projectRoot, homeDir, yes: true });
+    await setupProject({ projectPath: projectRoot, homeDir });
 
     // AGENTS.md is opencode's instruction file too.
     expect(await readFile(join(projectRoot, "AGENTS.md"), "utf-8")).toContain("xtctx:begin");
@@ -131,10 +136,10 @@ describe("a skill the user wrote", () => {
     });
     // The second run discovers the canonical copy first; the recorded origin
     // must survive it.
-    await setupProject({ projectPath: projectRoot, homeDir, yes: true });
+    await setupProject({ projectPath: projectRoot, homeDir });
     expect((await readConfig()).skills.selected["my-skill"].source).toBe(".claude/skills/my-skill/SKILL.md");
 
-    await disconnectProject({ projectPath: projectRoot, tool: "claude-code", homeDir, yes: true });
+    await disconnectProject({ projectPath: projectRoot, tool: "claude-code", homeDir });
 
     await expect(readFile(own, "utf-8")).resolves.toBe(USER_SKILL);
   });
