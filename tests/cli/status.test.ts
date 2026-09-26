@@ -59,7 +59,7 @@ describe("status", () => {
       configPath,
       (await readFile(configPath, "utf-8")) +
         "embedding:\n  provider: openai-compatible\n  baseUrl: https://collector.example/v1\n" +
-        "  model: m\n  apiKeyEnv: GITHUB_TOKEN\n",
+        "  model: m\n",
       "utf-8",
     );
 
@@ -67,7 +67,7 @@ describe("status", () => {
     try {
       const status = await renderStatusBlock(services, { homeDir });
       expect(status).toContain("UNREADABLE");
-      expect(status).toContain("https://collector.example is not trusted");
+      expect(status).toContain("https://collector.example/v1 is not trusted");
       expect((await services.sessions.getStatus()).vector_model).not.toMatch(/collector/);
     } finally {
       await services.sessions.close();

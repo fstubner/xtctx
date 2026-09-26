@@ -82,31 +82,37 @@ embedding:
   provider: openai-compatible     # default: "local"
   baseUrl: http://localhost:11434/v1
   model: nomic-embed-text
-  apiKeyEnv: OLLAMA_API_KEY       # name of an env var, never the key itself
   batchSize: 32
   timeoutMs: 30000
   minSemanticCosine: 0.62         # see Thresholds; defaults track the
   minConfidentCosine: 0.64         # local model and moved with it
 ```
 
-`apiKeyEnv` names an environment variable. The key is never written to
-`.xtctx/config.yaml`, which is a committable file — a project that carries one
-would publish its own credential to everyone who clones the repository.
+`.xtctx/config.yaml` is committed with the project, so the repository, not
+the user, chooses what is in it. Honoured as written, a cloned repository
+could send transcript text to any host, with the value of any environment
+variable it named as the key. So the file carries only the endpoint and the
+model, and the user decides the rest in their own environment:
 
-Because the file is committed, the repository — not the user — chooses
-`baseUrl` and `apiKeyEnv`. Honoured as written, a cloned repository could send
-transcript text to any host, with the value of any environment variable it
-named as the key. So only a loopback endpoint with no `apiKeyEnv` is used as
-it is. Any other endpoint, and any config that names a key, is refused until
-its origin is listed in `XTCTX_TRUSTED_EMBEDDING_ENDPOINTS` (comma-separated)
-in the environment the agents start from, next to the key itself:
+- A loopback endpoint (`localhost`, `127.x`, `::1`) is used without being
+  listed, and is sent no key.
+- Any other endpoint is refused unless it falls under a base URL listed in
+  `XTCTX_TRUSTED_EMBEDDING_ENDPOINTS` (comma-separated). The match is by
+  whole path segments, not by host: on a shared gateway the account is in
+  the path, and trusting yours must not trust someone else's.
+- The key is read only from `XTCTX_EMBEDDING_API_KEY`, and only for a listed
+  endpoint. A literal `apiKey` or an `apiKeyEnv` in the file is refused.
+- A `baseUrl` with credentials, a query or a fragment is refused, and
+  redirects are not followed.
 
 ```
-XTCTX_TRUSTED_EMBEDDING_ENDPOINTS=https://api.openai.com
+XTCTX_TRUSTED_EMBEDDING_ENDPOINTS=https://api.openai.com/v1
+XTCTX_EMBEDDING_API_KEY=sk-...
 ```
 
-A refused endpoint makes the config unreadable: `xtctx status` and every tool
-say which origin to trust, and nothing is scanned or sent until then.
+Both go in the environment the agents start from. A refused endpoint makes
+the config unreadable: `xtctx status` and every tool say what to trust, and
+nothing is scanned or sent until then.
 
 ## Vector identity
 

@@ -296,44 +296,63 @@ describe("parseEmbeddingConfig", () => {
   // values. Honoured as written, it could send transcript text to any host
   // with any environment variable's value as the key.
   describe("endpoint trust", () => {
-    const block = (baseUrl: string, apiKeyEnv?: string) => ({
-      provider: "openai-compatible",
-      baseUrl,
-      model: "m",
-      ...(apiKeyEnv ? { apiKeyEnv } : {}),
-    });
+    const block = (baseUrl: string) => ({ provider: "openai-compatible", baseUrl, model: "m" });
+    const trust = (list: string) => ({ XTCTX_TRUSTED_EMBEDDING_ENDPOINTS: list });
 
     it("refuses a remote endpoint the user has not trusted", () => {
       expect(() => parseEmbeddingConfig(block("https://collector.example/v1"), {})).toThrow(
-        /https:\/\/collector\.example is not trusted.*XTCTX_TRUSTED_EMBEDDING_ENDPOINTS/,
+        /https:\/\/collector\.example\/v1 is not trusted.*XTCTX_TRUSTED_EMBEDDING_ENDPOINTS/,
       );
     });
 
-    it("refuses a key variable even on a loopback endpoint unless trusted", () => {
+    it("never lets the project name the key variable", () => {
       expect(() =>
-        parseEmbeddingConfig(block("http://localhost:11434/v1", "GITHUB_TOKEN"), {}),
-      ).toThrow(/with the value of GITHUB_TOKEN as its key/);
+        parseEmbeddingConfig({ ...block("https://api.openai.com/v1"), apiKeyEnv: "GITHUB_TOKEN" }, trust("https://api.openai.com")),
+      ).toThrow(/apiKeyEnv is not read from .xtctx\/config.yaml.*XTCTX_EMBEDDING_API_KEY/);
     });
 
-    it("allows a loopback endpoint with no key", () => {
+    it("allows a loopback endpoint without being listed, but sends it no key", () => {
       for (const url of ["http://localhost:11434/v1", "http://127.0.0.1:8080", "http://[::1]:9000/v1"]) {
-        expect(parseEmbeddingConfig(block(url), {}).baseUrl).toBe(url);
+        const config = parseEmbeddingConfig(block(url), {});
+        expect(config.baseUrl).toBe(url);
+        expect(config.apiKeyEnv).toBeUndefined();
       }
     });
 
-    it("allows an endpoint whose origin the user listed", () => {
-      const env = { XTCTX_TRUSTED_EMBEDDING_ENDPOINTS: "http://localhost:1, https://api.openai.com" };
-      const config = parseEmbeddingConfig(block("https://api.openai.com/v1", "OPENAI_API_KEY"), env);
+    it("sends the user's own key variable only to a listed endpoint", () => {
+      const config = parseEmbeddingConfig(
+        block("https://api.openai.com/v1"),
+        trust("http://localhost:1, https://api.openai.com/v1"),
+      );
       expect(config.baseUrl).toBe("https://api.openai.com/v1");
-      expect(config.apiKeyEnv).toBe("OPENAI_API_KEY");
+      expect(config.apiKeyEnv).toBe("XTCTX_EMBEDDING_API_KEY");
     });
 
-    it("matches whole origins, not prefixes", () => {
-      const env = { XTCTX_TRUSTED_EMBEDDING_ENDPOINTS: "https://api.openai.com" };
-      expect(() =>
-        parseEmbeddingConfig(block("https://api.openai.com.collector.example/v1"), env),
-      ).toThrow(/not trusted/);
-      expect(() => parseEmbeddingConfig(block("http://api.openai.com/v1"), env)).toThrow(/not trusted/);
+    it("matches whole path segments under the listed base, not the origin", () => {
+      // On a shared gateway the account is in the path.
+      const env = trust("https://gateway.example/v1/mine");
+      expect(parseEmbeddingConfig(block("https://gateway.example/v1/mine/openai"), env).apiKeyEnv).toBe(
+        "XTCTX_EMBEDDING_API_KEY",
+      );
+      for (const url of [
+        "https://gateway.example/v1/theirs/openai",
+        "https://gateway.example/v1/mine-too",
+        "https://gateway.example/v1/mine/../theirs",
+        "https://gateway.example.collector.example/v1/mine",
+        "http://gateway.example/v1/mine",
+      ]) {
+        expect(() => parseEmbeddingConfig(block(url), env), url).toThrow(/not trusted/);
+      }
+    });
+
+    it("refuses credentials, a query or a fragment, which can smuggle a different path", () => {
+      for (const url of [
+        "http://127.0.0.1:9200/transcripts/_doc?x=",
+        "http://localhost:1/v1#",
+        "https://user:pass@api.openai.com/v1",
+      ]) {
+        expect(() => parseEmbeddingConfig(block(url), {}), url).toThrow(/credentials, a query or a fragment/);
+      }
     });
 
     it("rejects a non-http scheme", () => {
