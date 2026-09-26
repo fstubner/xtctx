@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { inspectManagedFile, pathExists } from "../config/setup.js";
 import { inspectMcpWiring, type McpWiringState } from "../config/mcp-config.js";
 import { inspectSkillStatus } from "../config/skills.js";
@@ -15,6 +15,7 @@ import { readXtctxPackage } from "../utils/package-info.js";
 
 interface StatusOptions {
   projectPath?: string;
+  verbose?: boolean;
 }
 
 export async function runStatus(options: StatusOptions = {}): Promise<void> {
@@ -35,7 +36,7 @@ export async function runStatus(options: StatusOptions = {}): Promise<void> {
   // database behind in one it had only been asked to look at.
   const services = await createProjectServices(projectRoot, { createIfMissing: false });
   try {
-    process.stdout.write((await renderStatusBlock(services)) + "\n");
+    process.stdout.write((await renderStatusBlock(services, { verbose: options.verbose })) + "\n");
   } finally {
     await services.sessions.close().catch(() => {});
   }
@@ -48,6 +49,12 @@ interface StatusRenderOptions {
    * or every globally-scoped tool looks unwired.
    */
   homeDir?: string;
+  /**
+   * Every format surprise with its sightings and location, skill hashes, and
+   * absolute paths. Off by default: those are for diagnosing a reader, and
+   * printed every time they were most of the report.
+   */
+  verbose?: boolean;
 }
 
 /** @internal Exported for tests only. */
@@ -74,11 +81,22 @@ export async function renderStatusBlock(
     })),
   );
 
+  const verbose = options.verbose === true;
+  // Paths inside the project are shown relative to it: the Project line
+  // already names the root, and the same absolute prefix on every other line
+  // was most of the width. Anything outside it -- a global MCP config, a store
+  // -- stays absolute, because that is the part worth noticing.
+  const show = (path: string): string => {
+    if (verbose) return path;
+    const rel = relative(services.projectRoot, path);
+    return rel && !rel.startsWith("..") && !isAbsolute(rel) ? rel : path;
+  };
+
   const lines: string[] = [];
   lines.push(`xtctx ${version} - handoff status`);
   lines.push("");
   lines.push(`Project  ${services.projectRoot}`);
-  lines.push(`Config   ${configPresent ? services.configPath : "missing (run xtctx setup)"}`);
+  lines.push(`Config   ${configPresent ? show(services.configPath) : "missing (run xtctx setup)"}`);
   if (services.config.error) {
     // Loud, and immediately under the path it refers to: nothing is being
     // scanned at all while this holds, which is otherwise invisible — the
@@ -86,7 +104,7 @@ export async function renderStatusBlock(
     lines.push(`         UNREADABLE: ${services.config.error}`);
     lines.push(`         No transcripts are being read until this is fixed.`);
   }
-  lines.push(`Index    ${services.dbPath}`);
+  lines.push(`Index    ${show(services.dbPath)}`);
   lines.push(`MCP      ${describeMcpCommand(mcpWiring)}`);
   const scanTook = formatDuration(status.last_scan_ms);
   lines.push(
@@ -135,7 +153,10 @@ export async function renderStatusBlock(
   // is on the CPU, which is what every machine did before calibration existed,
   // and does not need a line saying so on every status call.
   if (status.vector_device && status.vector_device !== "cpu") {
-    lines.push(`Device   ${status.vector_device} (from \`xtctx calibrate\`)`);
+    // Measured automatically the first time this machine embeds; `xtctx
+    // calibrate` only re-measures. Crediting the command read as though the
+    // user had run something they never had.
+    lines.push(`Device   ${status.vector_device} (measured on this machine)`);
   }
   // An endpoint is the one thing that sends transcript text off this machine,
   // so it is stated in full and unconditionally whenever one is configured.
@@ -178,26 +199,33 @@ export async function renderStatusBlock(
     // Named for what it means rather than what the code calls it: these are
     // the places another tool's transcripts did not look the way this reader
     // expected, which is the first sign a tool has changed its format.
-    lines.push("Format surprises:");
-    for (const { tool, log } of drift) {
-      const kinds = plural(log.surprises.length, "kind");
-      // `droppedSurprises` counts what the last write discarded, so it is only
-      // ever about that write — not a running total of everything ever lost.
-      const dropped =
-        log.droppedSurprises > 0 ? `, ${log.droppedSurprises} dropped at the ceiling` : "";
-      lines.push(`  ${tool.padEnd(13)} ${kinds}${dropped}`);
-      for (const entry of log.surprises.slice(0, 3)) {
-        lines.push(`      ${entry.surprise}`);
-        // The entry's own last sighting, not the file's write time: with the
-        // whole-file timestamp a surprise that stopped months ago read exactly
-        // like one still happening. And "sightings" rather than "records",
-        // because the count accumulates across scans — a re-scan of the same
-        // file raises it without a single new transcript record.
-        lines.push(`        ${plural(entry.records, "sighting")}, last seen ${entry.lastSeen}`);
-        lines.push(`        first at ${entry.firstLocation}`);
-      }
-      if (log.surprises.length > 3) {
-        lines.push(`      ... and ${log.surprises.length - 3} more in ${tool}-drift.json`);
+    //
+    // One line by default. The full list -- record types, sighting counts,
+    // file locations -- is for diagnosing a reader, and printed on every run
+    // it was a third of the report, led by tens of thousands of "sightings"
+    // of records the reader skips on purpose.
+    if (!verbose) {
+      const summary = drift.map(({ tool, log }) => `${tool} (${log.surprises.length})`).join(", ");
+      lines.push(`Format surprises: ${summary} -- details: xtctx status --verbose`);
+    } else {
+      lines.push("Format surprises:");
+      for (const { tool, log } of drift) {
+        const kinds = plural(log.surprises.length, "kind");
+        // `droppedSurprises` counts what the last write discarded, so it is only
+        // ever about that write — not a running total of everything ever lost.
+        const dropped =
+          log.droppedSurprises > 0 ? `, ${log.droppedSurprises} dropped at the ceiling` : "";
+        lines.push(`  ${tool.padEnd(13)} ${kinds}${dropped}`);
+        for (const entry of log.surprises) {
+          lines.push(`      ${entry.surprise}`);
+          // The entry's own last sighting, not the file's write time: with the
+          // whole-file timestamp a surprise that stopped months ago read exactly
+          // like one still happening. And "sightings" rather than "records",
+          // because the count accumulates across scans — a re-scan of the same
+          // file raises it without a single new transcript record.
+          lines.push(`        ${plural(entry.records, "sighting")}, last seen ${entry.lastSeen}`);
+          lines.push(`        first at ${entry.firstLocation}`);
+        }
       }
     }
   }
@@ -216,11 +244,11 @@ export async function renderStatusBlock(
 
   lines.push("");
   lines.push("Skills:");
-  lines.push(`  Source ${skills.sourceDir}`);
+  lines.push(`  source        ${show(skills.sourceDir)}`);
   for (const skill of skills.selected) {
     const marker = skill.exists ? (skill.staleBuiltIn ? "stale" : "ok") : "missing";
-    const hash = skill.hash ? ` ${skill.hash.slice(0, 18)}` : "";
-    lines.push(`  ${marker.padEnd(8)} ${skill.id}${hash}`);
+    const hash = verbose && skill.hash ? ` ${skill.hash.slice(0, 18)}` : "";
+    lines.push(`  ${marker.padEnd(13)} ${skill.id}${hash}`);
     if (skill.staleBuiltIn) {
       lines.push(
         "           this project's copy predates the built-in skill shipped with " +
@@ -230,21 +258,26 @@ export async function renderStatusBlock(
   }
   for (const target of skills.targets) {
     const skillPart = target.skillId ? ` ${target.skillId}` : "";
-    const pathPart = target.path ? ` ${target.path}` : "";
-    lines.push(`  ${target.state.padEnd(13)} ${target.tool} ${target.mode}${skillPart}${pathPart}`);
+    const pathPart = target.path ? ` ${show(target.path)}` : "";
+    lines.push(
+      `  ${target.state.padEnd(13)} ${target.tool.padEnd(12)} ${target.mode.padEnd(20)}${skillPart}${pathPart}`,
+    );
   }
 
   if (mcpWiring.length > 0) {
     lines.push("");
     lines.push("MCP wiring:");
+    // The command per tool only when they differ: then "wired" alone does not
+    // say what would run. When they agree, the MCP line above already says it,
+    // and repeating it under every tool doubled the section.
+    const commandsDiffer = describeMcpCommand(mcpWiring).startsWith("varies");
     for (const entry of mcpWiring) {
       const scope = entry.scope === "global" ? " (global config)" : "";
       const detail = entry.detail ? ` — ${entry.detail}` : "";
-      // The command, per tool, because they can legitimately differ and
-      // because "wired" alone never said what would actually run.
-      const command = entry.command ? `\n${" ".repeat(28)}${entry.command}` : "";
+      const command =
+        entry.command && (commandsDiffer || verbose) ? `\n${" ".repeat(30)}${entry.command}` : "";
       lines.push(
-        `  ${(entry.wired ? "wired" : "not wired").padEnd(12)} ${entry.tool.padEnd(13)} ${entry.path}${scope}${detail}${command}`,
+        `  ${(entry.wired ? "wired" : "not wired").padEnd(13)} ${entry.tool.padEnd(12)} ${show(entry.path)}${scope}${detail}${command}`,
       );
     }
   }
@@ -264,7 +297,9 @@ export async function renderStatusBlock(
     if (file.staleReferences.length > 0) {
       details.push(`stale: ${file.staleReferences.join(", ")}`);
     }
-    lines.push(`  ${state.padEnd(12)} ${file.label} ${file.path}${details.length ? ` (${details.join("; ")})` : ""}`);
+    lines.push(
+      `  ${state.padEnd(13)} ${file.label.padEnd(15)} ${show(file.path)}${details.length ? ` (${details.join("; ")})` : ""}`,
+    );
   }
 
   // Status always ends with one concrete next step, as ux-walkthrough.md
@@ -274,25 +309,46 @@ export async function renderStatusBlock(
   // repair, and telling a first-time user to run a repair command reads as
   // though something is already broken. Never configured and configured-then-
   // damaged are different states and get different advice.
-  const needsRepair =
-    configPresent &&
-    // A tool that is enabled but has no xtctx entry in its own MCP config is
-    // the most complete way to be broken: the agent simply never sees xtctx.
-    // Status reported nothing at all for this, so deleting `.mcp.json` left it
-    // saying everything was fine.
-    // A config that was never written is not drift: `setup` only writes some
-    // global configs when asked (`--global-mcp`), so demanding one would tell
-    // a correctly-set-up project to repair itself forever. A config that
-    // exists but has lost its entry is the real thing.
-    (mcpWiring.some(
-      (entry) => !entry.wired && entry.configExists && detectedTools.has(entry.tool),
-    ) ||
-      managed.some((file) => file.exists && (file.blockCount !== 1 || file.staleReferences.length > 0)) ||
-    skills.selected.some((skill) => !skill.exists) ||
-    // Only `missing` and `drift` are faults. `managed-block` and
-    // `unsupported` are the normal, healthy states for tools that carry
-    // skills inside their instruction file or not at all.
-    skills.targets.some((target) => target.state === "missing" || target.state === "drift"));
+  // What is out of date, by kind, so the last line can say which. It used to
+  // say "Wiring has drifted" for all of them -- including a skill copy that
+  // differed, which is not wiring -- and send everyone to `setup --repair`,
+  // which deleted the index. Plain `setup` rewrites every one of these.
+  const outOfDate: string[] = [];
+  // A tool that is enabled but has no xtctx entry in its own MCP config is
+  // the most complete way to be broken: the agent simply never sees xtctx.
+  // A config that was never written is not drift: `setup` only writes some
+  // global configs when asked (`--global-mcp`), so demanding one would tell a
+  // correctly-set-up project to repair itself forever. A config that exists
+  // but has lost its entry is the real thing.
+  const unwired = mcpWiring.filter(
+    (entry) => !entry.wired && entry.configExists && detectedTools.has(entry.tool),
+  );
+  if (unwired.length > 0) {
+    outOfDate.push(`MCP config for ${unwired.map((entry) => entry.tool).join(", ")}`);
+  }
+  const damagedBlocks = managed.filter(
+    (file) => file.exists && (file.blockCount !== 1 || file.staleReferences.length > 0),
+  );
+  if (damagedBlocks.length > 0) {
+    outOfDate.push(`instruction blocks in ${damagedBlocks.map((file) => show(file.path)).join(", ")}`);
+  }
+  if (skills.selected.some((skill) => !skill.exists)) {
+    outOfDate.push("the project skill source");
+  }
+  // Only `missing` and `drift` are faults. `managed-block` and `unsupported`
+  // are the normal, healthy states for tools that carry skills inside their
+  // instruction file or not at all.
+  const skewedSkills = [
+    ...new Set(
+      skills.targets
+        .filter((target) => target.state === "missing" || target.state === "drift")
+        .map((target) => target.tool),
+    ),
+  ];
+  if (skewedSkills.length > 0) {
+    outOfDate.push(`skill copies for ${skewedSkills.join(", ")}`);
+  }
+  const needsRepair = configPresent && outOfDate.length > 0;
 
   lines.push("");
   if (services.config.error) {
@@ -305,7 +361,8 @@ export async function renderStatusBlock(
     // The last line is the one people act on.
     lines.push(`Next     Fix ${services.configPath} — nothing is being read until it parses.`);
   } else if (needsRepair) {
-    lines.push("Next     Wiring has drifted. Run: xtctx setup --repair");
+    lines.push(`Next     Out of date: ${outOfDate.join("; ")}.`);
+    lines.push("         Run: xtctx setup --yes  (rewrites them; transcripts and the index are untouched)");
   } else if (status.sessions === 0) {
     // Worded as expected rather than as a fault. Running `status` straight
     // after `setup` is the obvious way to check setup worked, and it lands

@@ -240,7 +240,9 @@ function progressNote(service: SessionService): string {
     notes.push("embedding model still loading, so this answer is keyword-only");
   }
   if (progress.vectorBacklog > 0) {
-    notes.push(`${progress.vectorBacklog} windows not yet vectorized`);
+    notes.push(
+      `${progress.vectorBacklog} ${progress.vectorBacklog === 1 ? "window" : "windows"} not yet vectorized`,
+    );
   }
 
   // Said separately, because it is not about the index. A literal pass that
