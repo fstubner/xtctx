@@ -113,6 +113,30 @@ jobs:
             package-lock.json
             landing/package-lock.json
 
+      # Before the ten minutes of install and verify, and before anything is
+      # written: the push at the end is refused unless this token belongs to
+      # an admin (branch protection's only bypass), and an expired or
+      # under-scoped token otherwise shows up only there.
+      - name: Check the release token can push to main
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$GH_TOKEN" ]; then
+            echo "The RELEASE_PLEASE_TOKEN secret is not set." >&2
+            exit 1
+          fi
+          login=$(gh api user --jq .login) || {
+            echo "The RELEASE_PLEASE_TOKEN secret is rejected by GitHub (expired or revoked?)." >&2
+            exit 1
+          }
+          permission=$(gh api "repos/${GITHUB_REPOSITORY}/collaborators/${login}/permission" --jq .permission)
+          echo "release token belongs to ${login} (${permission})"
+          if [ "$permission" != "admin" ]; then
+            echo "${login} is not an admin here, so the push to protected main will be refused." >&2
+            exit 1
+          fi
+
       - name: Install root dependencies
         run: npm ci
 
