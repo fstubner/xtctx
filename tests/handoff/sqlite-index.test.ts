@@ -566,6 +566,62 @@ describe("SqliteHandoffIndex", () => {
   });
 
   it(
+    "opens a populated index while another server holds the write lock",
+    async () => {
+      // Opening must not need the write lock at all: every open used to run
+      // a DELETE of stale vectors, which waited out the busy timeout behind
+      // any other server's write even when there was nothing to delete.
+      const dbPath = join(tempDir, "xtctx.db");
+      const first = new SqliteHandoffIndex(dbPath, tempDir, [
+        { tool: "codex", scraper: new FixtureScraper([chunk("s", 0, "user", "hi")]) },
+      ]);
+      await first.listRecentSessions(5);
+      await first.close();
+
+      const Database = (await import("better-sqlite3")).default;
+      const holder = new Database(dbPath);
+      holder.exec("BEGIN IMMEDIATE");
+      try {
+        const index = new SqliteHandoffIndex(dbPath, tempDir, [
+          { tool: "codex", scraper: new FixtureScraper([]) },
+        ]);
+        const started = Date.now();
+        const sessions = await index.listIndexedSessions(5);
+        expect(sessions.map((session) => session.session_ref)).toEqual(["codex:s"]);
+        expect(Date.now() - started).toBeLessThan(3000);
+        await index.close();
+      } finally {
+        holder.exec("COMMIT");
+        holder.close();
+      }
+    },
+    30_000,
+  );
+
+  it("sets aside an index whose data pages are damaged, not just its header", async () => {
+    // The first page is fine, so the file opens; the damage only shows on
+    // the first read, which used to run outside the set-aside handling and
+    // failed every call, leaking a handle each time.
+    const dbPath = join(tempDir, "xtctx.db");
+    const chunks = Array.from({ length: 400 }, (_, i) => chunk(`s${i}`, 0, "user", `message ${i} `.repeat(20)));
+    const first = new SqliteHandoffIndex(dbPath, tempDir, [{ tool: "codex", scraper: new FixtureScraper(chunks) }]);
+    await first.listRecentSessions(5);
+    await first.close();
+    const bytes = await readFile(dbPath);
+    bytes.fill(0xa5, 4096);
+    await writeFile(dbPath, bytes);
+
+    const index = new SqliteHandoffIndex(dbPath, tempDir, [
+      { tool: "codex", scraper: new FixtureScraper([chunk("fresh", 0, "user", "hi")]) },
+    ]);
+    const sessions = await index.listRecentSessions(5);
+    await index.close();
+
+    expect(sessions.map((session) => session.session_ref)).toEqual(["codex:fresh"]);
+    expect((await readdir(tempDir)).filter((name) => /^xtctx\.db\.set-aside-[^.]+$/.test(name))).toHaveLength(1);
+  });
+
+  it(
     "does not set the index aside when another server holds the write lock, and retries",
     async () => {
       // With one server per MCP client, another server writing is the normal
@@ -592,6 +648,13 @@ describe("SqliteHandoffIndex", () => {
       // The next call opens it; the server is not dead for its lifetime.
       await expect(index.listIndexedSessions(5)).resolves.toEqual([]);
       await index.close();
+
+      // No handle from the failed attempt is still open. On Windows an open
+      // handle blocks the rename; elsewhere this cannot fail, and the leak
+      // matters less there.
+      const { rename } = await import("node:fs/promises");
+      await rename(dbPath, `${dbPath}.moved`);
+      await rename(`${dbPath}.moved`, dbPath);
     },
     30_000,
   );
