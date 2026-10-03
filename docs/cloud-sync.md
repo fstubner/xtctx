@@ -1,13 +1,13 @@
 # Cloud sync
 
-Optional, and opt-in per project. xtctx stays local unless you do both of these:
+Optional, self-hosted, and opt-in per project. There is no xtctx cloud service: sync talks only to a server you deploy yourself (see [Server](#server)). xtctx stays local unless you have that server and do both of these:
 
-1. **Log in:** `xtctx login` signs you in with GitHub and stores a token. It uploads nothing.
+1. **Log in:** `xtctx login --sync-url <your server's URL>` signs you in with GitHub and stores a token, and the URL, in your home directory. It uploads nothing. Without `--sync-url` (or `XTCTX_SYNC_URL`) it refuses: there is no default server.
 2. **Opt a project in:** `xtctx sync enable`, run in that project. Each project is its own decision.
 
 Either one alone sends nothing. `XTCTX_TOKEN` in the environment counts as logging in, not as opting in.
 
-What it is for: reading, from an agent on another machine, what your agents did here. The cloud serves the uploads back over MCP (see [Reading it back](#reading-it-back)).
+What it is for: reading, from an agent on another machine, what your agents did here. Your server serves the uploads back over MCP (see [Reading it back](#reading-it-back)).
 
 ## What is uploaded
 
@@ -35,7 +35,7 @@ Per upload:
 
 **Not uploaded:** the absolute path of the project or of any transcript file (the index's `source_pointer`, Antigravity's `sourcePath`), `referencedFiles`, Copilot CLI's `parentToolCallId`, your hostname, and any metadata field not listed above.
 
-**Message text is uploaded as written**, and it can contain anything your agents saw or printed: file paths, command output, a secret pasted into a chat. Opt in only projects whose transcripts you would put on that server. A message over 64 KB is cut to 64 KB and ends with a `[xtctx: truncated for upload ...]` marker.
+**Message text is uploaded as written**, and it can contain anything your agents saw or printed: file paths, command output, a secret pasted into a chat. Opt in only projects whose transcripts you would put on your server. A message over 64 KB is cut to 64 KB and ends with a `[xtctx: truncated for upload ...]` marker.
 
 The opt-in list is `~/.xtctx/cloud-projects.json` and the login is `~/.xtctx/credentials.json` (readable by you only). Both live in your home directory, not in `.xtctx/config.yaml`, so a repository cannot opt its readers in by committing a file. Nothing is written into your repository for sync.
 
@@ -52,13 +52,13 @@ If the server refuses one message as too large, that message is skipped from the
 
 ## Environment variables
 
-`XTCTX_TOKEN` and `XTCTX_SYNC_URL` override the saved login. An MCP config's `env` block can set them, and a repository can ship such a config, so when they name anything other than your saved login (another token, another server, or no saved login at all) xtctx **refuses to upload** and says why. Set `XTCTX_ALLOW_ENV_CREDENTIALS=1` as well when that is intended, such as on a machine nobody logs in on. `XTCTX_DEVICE_ID` and `XTCTX_DEVICE_NAME` name the device for environment credentials.
+`XTCTX_TOKEN` and `XTCTX_SYNC_URL` override the saved login. `XTCTX_TOKEN` with no server to send it to (no `XTCTX_SYNC_URL` and no saved login) fails with "No sync server is set". An MCP config's `env` block can set them, and a repository can ship such a config, so when they name anything other than your saved login (another token, another server, or no saved login at all) xtctx **refuses to upload** and says why. Set `XTCTX_ALLOW_ENV_CREDENTIALS=1` as well when that is intended, such as on a machine nobody logs in on. `XTCTX_DEVICE_ID` and `XTCTX_DEVICE_NAME` name the device for environment credentials.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `xtctx login [--device <name>]` | Sign in with GitHub (device code). This login can read, upload and delete. |
+| `xtctx login --sync-url <url> [--device <name>]` | Sign in to your own server with GitHub (device code). The URL is required (or set `XTCTX_SYNC_URL`) and is saved with the login, so later commands need nothing extra. This login can read, upload and delete. |
 | `xtctx sync enable` / `disable` | Choose whether this project uploads. |
 | `xtctx sync status` | Whether this project uploads, as whom, the last upload, the last failure, and skipped messages. `xtctx status` shows the same under `Cloud`. |
 | `xtctx sync` | Upload now. `--watch` repeats every 10 seconds. Exits non-zero on failure. |
@@ -71,16 +71,16 @@ If the server refuses one message as too large, that message is skipped from the
 
 ## Reading it back
 
-The server is an MCP server at `https://mcp.xtctx.com/mcp` with three tools, named so they cannot collide with the local server's when both are connected:
+Your server is an MCP server at `<your server's URL>/mcp`, for example `https://xtctx-sync.example.com/mcp`, with three tools, named so they cannot collide with the local server's when both are connected:
 
 - `xtctx_cloud_status`: when each of your devices last uploaded each project, and how many sessions it holds. Tells "synced, nothing new" from "never synced".
 - `xtctx_cloud_recent_sessions`: sessions from every device and every project, newest first; `repo_url` restricts it to one repository.
 - `xtctx_cloud_session_detail`: one session's messages in order, as `markdown` (default) or `json`.
 
-**MCP clients sign in with OAuth.** Add the URL to the client, for Claude Code `claude mcp add --transport http xtctx-cloud https://mcp.xtctx.com/mcp`, and it finds the sign-in itself, registers, and opens a browser where you approve it and sign in with GitHub. A client signed in this way can only read (scope `read`). Its access token lasts an hour and is refreshed for up to 30 days; it cannot upload or delete. Uploading and deleting need the CLI's own login.
+**MCP clients sign in with OAuth.** Add the URL to the client, for Claude Code `claude mcp add --transport http xtctx-cloud https://xtctx-sync.example.com/mcp`, and it finds the sign-in itself, registers, and opens a browser where you approve it and sign in with GitHub. A client signed in this way can only read (scope `read`). Its access token lasts an hour and is refreshed for up to 30 days; it cannot upload or delete. Uploading and deleting need the CLI's own login.
 
 A client without OAuth support can send a token from `xtctx sync token` as an `Authorization: Bearer ...` header. It is read-only as well, and `xtctx logout` revokes it.
 
 ## Server
 
-The service is the Worker in [`cloud/`](../cloud/README.md), which also describes running your own. The sync URL must be `https`; plain `http` is accepted only for `localhost`. Only the GitHub accounts the server's operator lists can sign in.
+xtctx does not run a hosted server, so cloud sync works only against one you run. Deploy the Worker in [`cloud/`](../cloud/README.md) to your own Cloudflare account (the README there has the steps, including a git-ignored `wrangler.local.toml` for your own domain and ids), list your GitHub account in its `ALLOWED_GITHUB_IDS`, and point `xtctx login --sync-url` at it. The sync URL must be `https`; plain `http` is accepted only for `localhost`. Only the GitHub accounts the server's operator lists can sign in, and that operator is you.

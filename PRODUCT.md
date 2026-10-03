@@ -32,7 +32,8 @@ written into `.xtctx/config.yaml` by hand and trusted by the user in
   served by `xtctx_handoff_manifest`.
 
 Single-user. Handoff itself is single-machine and needs no server. The one
-exception is optional cloud sync, opt-in per project: a logged-in user can
+exception is optional cloud sync, opt-in per project and self-hosted (the
+project runs no hosted service): a user logged in to their own Worker can
 upload an opted-in project's transcripts so agents on their other machines can
 read them over MCP ([docs/cloud-sync.md](docs/cloud-sync.md)). There is no
 team or shared component.
@@ -109,7 +110,8 @@ default.
   embedding endpoint named in `.xtctx/config.yaml`: it is never inferred from
   the environment, the API key is never stored in that file, and `xtctx
   status` prints the endpoint whenever one is set. The other is cloud sync,
-  which uploads an opted-in project's sessions to the xtctx cloud Worker
-  (`cloud/`) only while someone is logged in; the opt-in list lives in the
+  which uploads an opted-in project's sessions to a Worker the user deployed
+  themselves (`cloud/`; no hosted instance exists) only while someone is
+  logged in; the opt-in list lives in the
   user's home directory, so a repository cannot opt itself in, and `xtctx
   status` says whether it is on ([docs/cloud-sync.md](docs/cloud-sync.md)).

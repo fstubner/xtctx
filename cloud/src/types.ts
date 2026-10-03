@@ -9,7 +9,7 @@ export interface Env {
   /** Holds the open baseline-MCP SSE streams; see sse-session.ts. */
   SSE: DurableObjectNamespace;
   /**
-   * The canonical origin MCP clients reach, e.g. "https://mcp.xtctx.com".
+   * The canonical origin MCP clients reach, e.g. "https://xtctx-sync.example.com".
    * The MCP resource is `${PUBLIC_URL}/mcp`, and every token is bound to it.
    */
   PUBLIC_URL: string;

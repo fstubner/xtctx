@@ -1,5 +1,6 @@
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createJwt, mintToken } from "../src/auth.js";
+import { PUBLIC_URL_PLACEHOLDER, createJwt, mintToken } from "../src/auth.js";
 import { LIMITS } from "../src/db.js";
 import { SERVER_VERSION } from "../src/version.js";
 import { createEnv } from "./fake-env.js";
@@ -28,6 +29,42 @@ describe("without a signing secret", () => {
       expect(await res.json()).toEqual({ error: "server_misconfigured" });
     }
     expect((await call(env, "/health")).status).toBe(200);
+  });
+});
+
+describe("with PUBLIC_URL still the placeholder", () => {
+  it("refuses everything but the health check", async () => {
+    const { env } = createEnv({ PUBLIC_URL: PUBLIC_URL_PLACEHOLDER });
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    for (const path of ["/api/stream", "/mcp", "/auth/device/code"]) {
+      const res = await call(env, path, { method: "POST", body: "{}" });
+      expect(res.status, path).toBe(500);
+      expect(await res.json()).toEqual({ error: "server_misconfigured" });
+    }
+    expect((await call(env, "/health")).status).toBe(200);
+  });
+
+  it("is what wrangler.toml ships, with no route to a domain of the project's", () => {
+    const toml = readFileSync(new URL("../wrangler.toml", import.meta.url), "utf-8");
+    expect(toml).toContain(`PUBLIC_URL = "${PUBLIC_URL_PLACEHOLDER}"`);
+    const lines = toml.split(/\r?\n/);
+    expect(lines.filter((l) => /^\s*(routes|\{ pattern)/.test(l))).toEqual([]);
+    expect(toml).not.toMatch(/xtctx\.com/);
+  });
+
+  it("keeps wrangler.local.example.toml the same as wrangler.toml apart from what a deployer sets", () => {
+    const settings = (file: string) =>
+      readFileSync(new URL(`../${file}`, import.meta.url), "utf-8")
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter((l) => l && !l.startsWith("#"))
+        // Per-deployment values and the route, which only the example has.
+        .filter((l) => !/^(PUBLIC_URL|GITHUB_CLIENT_ID|ALLOWED_GITHUB_IDS|database_id|id|routes)\b|^[\]{]/.test(l));
+    expect(settings("wrangler.local.example.toml")).toEqual(settings("wrangler.toml"));
+    const example = readFileSync(new URL("../wrangler.local.example.toml", import.meta.url), "utf-8");
+    expect(example).toContain(`PUBLIC_URL = "${PUBLIC_URL_PLACEHOLDER}"`);
+    expect(example).not.toMatch(/xtctx\.com/);
   });
 });
 
