@@ -7,9 +7,13 @@ Entries are written by the `release` workflow when a release is cut by hand.
 
 ## [Unreleased]
 
-### Changed
+## [0.22.1](https://github.com/fstubner/xtctx/releases/tag/xtctx-v0.22.1) (2026-10-03)
 
-* Cloud sync is self-hosted only: there is no default server, so `xtctx login` needs `--sync-url <url>` (or `XTCTX_SYNC_URL`) pointing at a Worker you deployed from `cloud/`. The Worker's `wrangler.toml` no longer routes to any domain of the project's.
+## What's Changed
+* feat(cloud)!: self-hosted only — no default sync server, no xtctx.com in the Worker config by @fstubner in https://github.com/fstubner/xtctx/pull/411
+
+
+**Full Changelog**: https://github.com/fstubner/xtctx/compare/xtctx-v0.22.0...xtctx-v0.22.1
 
 ## [0.22.0](https://github.com/fstubner/xtctx/releases/tag/xtctx-v0.22.0) (2026-10-03)
 
