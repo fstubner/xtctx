@@ -186,7 +186,7 @@ export async function main(argv = process.argv): Promise<void> {
 
   program
     .command("login")
-    .option("--sync-url <url>", "Sync server URL (default: https://sync.xtctx.com)")
+    .option("--sync-url <url>", "URL of your own sync server (or set XTCTX_SYNC_URL); see docs/cloud-sync.md")
     .option("--device <name>", "Name this device shows as in the cloud (default: a random label)")
     .description("Sign in to xtctx cloud with GitHub (uploads nothing by itself)")
     .action(async (options: { syncUrl?: string; device?: string }) => {

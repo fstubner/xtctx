@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import {
-  DEFAULT_SYNC_URL,
   assertSecureSyncUrl,
   callCloud,
   clientHeader,
   NO_KEEP_ALIVE,
+  NoSyncServerError,
   deleteCredentials,
   getCredentialsPath,
   loadSavedCredentials,
@@ -41,7 +41,8 @@ export async function runLogin(options: {
   /** Test seam; the real flow waits as long as GitHub says. */
   wait?: (ms: number) => Promise<unknown>;
 }): Promise<void> {
-  const syncUrl = options.syncUrl || process.env.XTCTX_SYNC_URL || DEFAULT_SYNC_URL;
+  const syncUrl = options.syncUrl || process.env.XTCTX_SYNC_URL;
+  if (!syncUrl) throw new NoSyncServerError();
   // Not the hostname: see randomDeviceName.
   const deviceName = options.deviceName || randomDeviceName();
   const wait = options.wait ?? sleep;

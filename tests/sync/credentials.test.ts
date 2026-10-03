@@ -1,7 +1,8 @@
 import { readFileSync, statSync } from "node:fs";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { deleteCredentials, getCredentialsPath, saveCredentials } from "@xtctx/sync/client";
 import { isOptedIn, setOptedIn } from "@xtctx/sync/consent";
+import { describeCloudSync } from "@xtctx/sync/report";
 import { sandbox } from "./helpers";
 
 const creds = {
@@ -37,5 +38,13 @@ describe("credentials and consent files", () => {
     expect(await isOptedIn(box.project)).toBe(true);
     await setOptedIn(box.project, false);
     expect(await isOptedIn(box.project)).toBe(false);
+  });
+
+  it("status says there is no server when XTCTX_TOKEN is set without one to send it to", async () => {
+    await setOptedIn(box.project, true);
+    vi.stubEnv("XTCTX_TOKEN", "a.b.c");
+    const lines = (await describeCloudSync(box.project)).join(" ");
+    expect(lines).toMatch(/NOT uploading/);
+    expect(lines).toMatch(/No sync server is set/);
   });
 });
