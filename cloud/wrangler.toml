@@ -23,7 +23,7 @@ enabled = true
 [[d1_databases]]
 binding = "DB"
 database_name = "xtctx-db"
-database_id = "f64a7fc9-60a3-41be-964f-efbca6897f88"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
 migrations_dir = "migrations"
 
 # KV: OAuth grants, tokens and registered clients (workers-oauth-provider).
@@ -51,7 +51,7 @@ PUBLIC_URL = "https://REPLACE-WITH-YOUR-WORKER-URL.invalid"
 # Client id of YOUR GitHub OAuth App (device flow for the CLI, web flow for
 # /authorize); see cloud/README.md. The id shipped here is the project's own
 # app, whose callback is not your PUBLIC_URL, so replace it.
-GITHUB_CLIENT_ID = "Ov23liFUTodqfoH9mgHA"
+GITHUB_CLIENT_ID = "REPLACE_WITH_YOUR_GITHUB_OAUTH_CLIENT_ID"
 # Comma-separated numeric GitHub user ids allowed to sign in. Empty means
 # nobody can (fail closed). Find yours: https://api.github.com/users/<login> -> "id".
 ALLOWED_GITHUB_IDS = ""
