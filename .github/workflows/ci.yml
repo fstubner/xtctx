@@ -105,12 +105,16 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             site/package-lock.json
+            cloud/package-lock.json
 
       - name: Install root dependencies
         run: npm ci
 
       - name: Install site dependencies
         run: npm --prefix site ci
+
+      - name: Install cloud dependencies
+        run: npm --prefix cloud ci
 
       # Every job here loads the real embedding model, so each one pulls the
       # 86MB MiniLM from HuggingFace: four jobs a run, and HuggingFace starts
@@ -138,6 +142,9 @@ jobs:
       - name: Typecheck (including the test tree)
         run: npm run typecheck
 
+      - name: Cloud Worker typecheck and tests
+        run: npm run test:cloud
+
       - name: Root security tests and checklist
         run: |
           npm run test:security
@@ -154,7 +161,10 @@ jobs:
           npm run check:review-coverage
 
       - name: Site dependency audit
-        run: npm --prefix site audit
+        # The whole tree, not --omit=dev: the site is static files, so Astro
+        # and Starlight only ever run at build time, and the browser-check
+        # tooling in devDependencies runs on developers' machines.
+        run: npm run audit:site
 
       # Ranking quality gate. Single platform on purpose: the baseline is
       # derived from float embeddings, so its portability across runners is

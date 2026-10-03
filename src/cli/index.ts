@@ -1,15 +1,21 @@
 #!/usr/bin/env node
 import { Command, Option } from "commander";
+import { runExport, runImport } from "./backup.js";
 import { runCalibrate } from "./calibrate.js";
 import { runDisconnect } from "./disconnect.js";
 import { runHook } from "./hook.js";
 import { runScan } from "./scan.js";
 import { runSetup } from "./setup.js";
 import { runStatus } from "./status.js";
+import { runLogin, runLogout } from "./login.js";
+import { runSync, runSyncSetting } from "./sync.js";
+import { startAutoSync, type AutoSync } from "../sync/auto-sync.js";
 import { createProjectServices } from "../runtime/services.js";
 import { startMcpServer } from "../mcp/server.js";
 import { readXtctxPackage } from "../utils/package-info.js";
 import { runBackgroundWork } from "../runtime/background.js";
+import { localEmbeddingsActive } from "../handoff/embedding-config.js";
+import { runEmbeddingsDisable, runEmbeddingsEnable } from "./embeddings.js";
 
 const { version: CLI_VERSION } = readXtctxPackage(import.meta.url);
 
@@ -21,6 +27,7 @@ export async function main(argv = process.argv): Promise<void> {
     // like a configured project with no history.
     const unconfiguredProjectRoot = services.config.present ? undefined : services.projectRoot;
     let closed = false;
+    let autoSync: AutoSync | undefined;
     const shutdown = (exit: boolean) => {
       if (closed) return;
       closed = true;
@@ -33,17 +40,30 @@ export async function main(argv = process.argv): Promise<void> {
       // accumulates those.
       //
       // So give the clean close a moment, then leave. Nothing is lost by not
-      // waiting: the index is derived data, every chunk is committed as it is
-      // written, and an unfinished scan simply resumes on the next run.
-      const graceMs = 2_000;
+      // waiting: every chunk is committed as it is written, and an
+      // unfinished scan simply resumes on the next run.
+      //
+      // `close()` now stops a scan at its next checkpoint, a few tens of
+      // milliseconds away, so the clean close normally wins and releases the
+      // scan lease and empties the write-ahead log on the way out. The timer
+      // is the backstop for work that cannot be interrupted. It used to be
+      // the usual way out, which also meant the index was never closed.
+      //
+      // The cloud flush has its own bound, added on top: it is a network call,
+      // not the scan this grace window exists to cut short.
+      const graceMs = 2_000 + (autoSync ? 1_500 : 0);
       const timer = setTimeout(() => {
         if (exit) process.exit(0);
       }, graceMs);
       timer.unref?.();
 
-      void services.sessions
-        .close()
-        .catch(() => {})
+      // Upload what the last interval left while the index closes. Side by
+      // side, not one after the other: the upload reads the index through its
+      // own read-only connection, so closing this one does not disturb it, and
+      // a slow upload must not hold back the close that stops the scan and
+      // releases the scan lease. Each statement the upload runs is its own
+      // short read, so it does not keep the close from emptying the log.
+      void Promise.allSettled([autoSync?.stop() ?? Promise.resolve(), services.sessions.close()])
         .finally(() => {
           clearTimeout(timer);
           if (exit) process.exit(0);
@@ -56,10 +76,9 @@ export async function main(argv = process.argv): Promise<void> {
     // server otherwise sat there for 84 seconds while a scan finished. An MCP
     // host that spawns a server per session accumulates those.
     //
-    // Nothing is lost by leaving before a scan finishes: the index is derived
-    // data, every chunk is committed as it is written, and a scraper's cursor
-    // only advances once its loop completes, so interrupted work is re-read
-    // rather than skipped.
+    // Nothing is lost by leaving before a scan finishes: every chunk is
+    // committed as it is written, and a scraper's cursor only advances once
+    // its loop completes, so interrupted work is re-read rather than skipped.
     //
     // A tool call still in flight when stdin closes may go unanswered — the
     // grace window above is enough for ordinary calls, not for one waiting on
@@ -97,7 +116,15 @@ export async function main(argv = process.argv): Promise<void> {
     // incremental scan this costs measured 9.7s in the background against a
     // 19GB Codex store, and the cursor design keeps it from re-reading.
     if (!unconfiguredProjectRoot && !services.config.error) {
-      void runBackgroundWork({ sessions: services.sessions });
+      void runBackgroundWork({
+        sessions: services.sessions,
+        localEmbeddings: localEmbeddingsActive(services.config.embedding),
+      });
+      // Uploads only when logged in and this project is opted in; see auto-sync.ts.
+      autoSync = startAutoSync({
+        projectRoot: services.projectRoot,
+        log: (line) => process.stderr.write(`${line}\n`),
+      });
     }
     return;
   }
@@ -158,6 +185,40 @@ export async function main(argv = process.argv): Promise<void> {
     });
 
   program
+    .command("login")
+    .option("--sync-url <url>", "Sync server URL (default: https://sync.xtctx.com)")
+    .option("--device <name>", "Name this device shows as in the cloud (default: a random label)")
+    .description("Sign in to xtctx cloud with GitHub (uploads nothing by itself)")
+    .action(async (options: { syncUrl?: string; device?: string }) => {
+      await runLogin({ syncUrl: options.syncUrl, deviceName: options.device });
+    });
+
+  program
+    .command("logout")
+    .option("--delete-data", "Also delete everything uploaded to your cloud account", false)
+    .description("Sign out of xtctx cloud and revoke this account's tokens")
+    .action(async (options: { deleteData?: boolean }) => {
+      await runLogout({ deleteData: options.deleteData });
+    });
+
+  program
+    .command("sync")
+    .argument("[action]", "enable, disable or status for this project; device [name]; token; omit to upload once")
+    .argument("[value]", "the new name, for `sync device <name>`")
+    .option("-p, --project <path>", "Project root (defaults to cwd)")
+    .option("-w, --watch", "Keep uploading every few seconds until interrupted", false)
+    .description("Cloud sync: choose whether this project uploads, or upload now")
+    .action(async (action: string | undefined, value: string | undefined, options: { project?: string; watch?: boolean }) => {
+      const globalOptions = program.opts<{ project?: string }>();
+      const projectDir = options.project ?? globalOptions.project;
+      if (action) {
+        await runSyncSetting(action, { projectDir, value });
+      } else {
+        await runSync({ projectDir, watch: options.watch });
+      }
+    });
+
+  program
     .command("scan")
     .option("-p, --project <path>", "Project root (defaults to cwd)")
     .option(
@@ -180,11 +241,55 @@ export async function main(argv = process.argv): Promise<void> {
     });
 
   program
+    .command("export")
+    .option("-p, --project <path>", "Project root (defaults to cwd)")
+    .option(
+      "-o, --out <file>",
+      "File to write; '-' for stdout (default: xtctx-export-<time>.jsonl here). Never overwrites",
+    )
+    .description(
+      "Back up this project's indexed sessions, including those whose transcripts are gone",
+    )
+    .action(async (options: { project?: string; out?: string }) => {
+      const globalOptions = program.opts<{ project?: string }>();
+      await runExport({ projectPath: options.project ?? globalOptions.project, out: options.out });
+    });
+
+  program
+    .command("import")
+    .argument("<file>", "A file written by xtctx export")
+    .option("-p, --project <path>", "Project root (defaults to cwd)")
+    .description("Merge an xtctx export into this project's index; safe to repeat")
+    .action(async (file: string, options: { project?: string }) => {
+      const globalOptions = program.opts<{ project?: string }>();
+      await runImport({ projectPath: options.project ?? globalOptions.project, file });
+    });
+
+  program
     .command("calibrate")
     .option("--force", "Measure again even if this machine already has a verdict", false)
     .description("Find the fastest device on this machine for indexing, and use it")
     .action(async (options: { force: boolean }) => {
       await runCalibrate({ force: options.force });
+    });
+
+  const embeddings = program
+    .command("embeddings")
+    .description("Turn local semantic search on or off (it is an optional add-on)");
+
+  embeddings
+    .command("enable")
+    .option("-y, --yes", "Install without asking, for scripts and agents", false)
+    .description("Install the local embedding model so search can match by meaning as well as by keyword")
+    .action(async (options: { yes: boolean }) => {
+      await runEmbeddingsEnable({ yes: options.yes });
+    });
+
+  embeddings
+    .command("disable")
+    .description("Remove the local embedding model and its runtime; search goes back to keyword only")
+    .action(async () => {
+      await runEmbeddingsDisable();
     });
 
   program

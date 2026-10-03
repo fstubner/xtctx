@@ -1,7 +1,7 @@
 /**
  * `npm version` writes `package.json` and the lockfile. Five other files carry
  * the version too — three plugin manifests, the marketplace entry, and the
- * landing site — and Release Please used to write those. When it was removed
+ * site — and Release Please used to write those. When it was removed
  * nothing took the job over.
  *
  * The consequence was not cosmetic. The release workflow bumps, commits, tags

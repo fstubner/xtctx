@@ -1,7 +1,7 @@
 # Embedding providers
 
 Design for letting a project embed through an OpenAI-compatible endpoint
-instead of the bundled local model.
+instead of the optional local model.
 
 **Built on 2026-09-21**, with two deliberate deviations and two parts left
 out. Deviations: the local vector identity stays the bare HuggingFace id
@@ -17,9 +17,12 @@ current.
 ## What stays true
 
 xtctx ships local-only and stays local-only by default. The default model —
-`Xenova/bge-small-en-v1.5` since 2026-09-21, downloaded on first use rather
-than bundled, since the package ships `dist` only — is what runs when nobody
-configures anything.
+`Xenova/bge-small-en-v1.5` since 2026-09-21 — is what runs once semantic search
+is enabled and nobody configures anything else. It is an add-on, not part of
+the package: the runtime is installed into `~/.xtctx/embeddings` by
+`xtctx embeddings enable` and the model downloaded with it, so a fresh install
+searches by keyword only. An endpoint needs no local runtime, and works the
+same whether or not the add-on is installed.
 
 An endpoint is opt-in, per project, and never inferred — no environment
 variable that happens to be set, no auto-detection of a local server on a
@@ -31,7 +34,8 @@ local-only. It does not upload transcripts or run telemetry" is true of what
 xtctx does on its own and should say so:
 
 > xtctx is local-only by default: it never uploads transcripts and runs no
-> telemetry. A project can opt into an external embedding endpoint, in which
+> telemetry; cloud sync sends nothing until you log in and opt a project in.
+> A project can opt into an external embedding endpoint, in which
 > case window text is sent there for vectorizing — `xtctx status` reports the
 > endpoint whenever one is configured.
 
@@ -82,16 +86,37 @@ embedding:
   provider: openai-compatible     # default: "local"
   baseUrl: http://localhost:11434/v1
   model: nomic-embed-text
-  apiKeyEnv: OLLAMA_API_KEY       # name of an env var, never the key itself
   batchSize: 32
   timeoutMs: 30000
   minSemanticCosine: 0.62         # see Thresholds; defaults track the
   minConfidentCosine: 0.64         # local model and moved with it
 ```
 
-`apiKeyEnv` names an environment variable. The key is never written to
-`.xtctx/config.yaml`, which is a committable file — a project that carries one
-would publish its own credential to everyone who clones the repository.
+`.xtctx/config.yaml` is committed with the project, so the repository, not
+the user, chooses what is in it. Honoured as written, a cloned repository
+could send transcript text to any host, with the value of any environment
+variable it named as the key. So the file carries only the endpoint and the
+model, and the user decides the rest in their own environment:
+
+- A loopback endpoint (`localhost`, `127.x`, `::1`) is used without being
+  listed, and is sent no key.
+- Any other endpoint is refused unless it falls under a base URL listed in
+  `XTCTX_TRUSTED_EMBEDDING_ENDPOINTS` (comma-separated). The match is by
+  whole path segments, not by host: on a shared gateway the account is in
+  the path, and trusting yours must not trust someone else's.
+- The key is read only from `XTCTX_EMBEDDING_API_KEY`, and only for a listed
+  endpoint. A literal `apiKey` or an `apiKeyEnv` in the file is refused.
+- A `baseUrl` with credentials, a query or a fragment is refused, and
+  redirects are not followed.
+
+```
+XTCTX_TRUSTED_EMBEDDING_ENDPOINTS=https://api.openai.com/v1
+XTCTX_EMBEDDING_API_KEY=sk-...
+```
+
+Both go in the environment the agents start from. A refused endpoint makes
+the config unreadable: `xtctx status` and every tool say what to trust, and
+nothing is scanned or sent until then.
 
 ## Vector identity
 

@@ -1,6 +1,6 @@
 {
   "name": "xtctx",
-  "version": "0.21.8",
+  "version": "0.22.0",
   "description": "Local cross-tool handoff for AI coding agents.",
   "type": "module",
   "bin": {
@@ -24,8 +24,10 @@
     "test:watch": "vitest",
     "security:checklist": "node scripts/verify-security-checklist.mjs",
     "audit:production": "node scripts/audit-production.mjs",
+    "audit:site": "node scripts/audit-production.mjs --site",
     "lint": "eslint src/ tests/ scripts/",
     "demo:public": "node scripts/public-demo-smoke.mjs",
+    "test:cloud": "npm --prefix cloud run typecheck && npm --prefix cloud test",
     "site:changelog": "node -e \"require('node:fs').copyFileSync('CHANGELOG.md', 'site/CHANGELOG.md')\"",
     "site:dev": "npm run site:changelog && npm --prefix site run dev",
     "site:build": "npm run site:changelog && npm --prefix site run build",
@@ -33,7 +35,7 @@
     "site:check": "npm run site:build && npm --prefix site run check && npm --prefix site run check:content && npm --prefix site run check:css && npm --prefix site run check:regions && npm --prefix site run check:wordmark && npm --prefix site run check:changelog && node site/scripts/check-file-size.mjs",
     "prepare": "npm run build",
     "smoke:cli": "node dist/src/cli/index.js --help",
-    "verify:release": "npm run lint && npm run typecheck && npm test && npm run test:security && npm run security:checklist && npm run check:review-coverage && npm run check:workflows && npm run audit:production && npm --prefix site audit && npm run test:drift && npm run test:integration && npm run test:smoke && npm run test:eval && npm pack --dry-run && npm run demo:public && npm run site:check && npm run smoke:cli",
+    "verify:release": "npm run lint && npm run typecheck && npm test && npm run test:cloud && npm run test:security && npm run security:checklist && npm run check:review-coverage && npm run check:workflows && npm run audit:production && npm run audit:site && npm run test:drift && npm run test:integration && npm run test:smoke && npm run test:eval && npm pack --dry-run && npm run demo:public && npm run site:check && npm run smoke:cli",
     "sync:version": "node scripts/sync-version.mjs",
     "version": "node scripts/sync-version.mjs",
     "test:eval": "vitest run tests/eval",
@@ -45,7 +47,6 @@
     "check:workflows": "node ./scripts/check-workflows.mjs"
   },
   "dependencies": {
-    "@huggingface/transformers": "^4.2.0",
     "@iarna/toml": "^2.2.5",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "better-sqlite3": "^13.0.3",
@@ -54,6 +55,7 @@
     "yaml": "^2.9.0"
   },
   "devDependencies": {
+    "@huggingface/transformers": "^4.2.0",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^26.2.0",
     "eslint": "^10.8.1",
@@ -77,6 +79,7 @@
   "files": [
     "dist",
     "src",
+    "embeddings-runtime",
     "README.md",
     "LICENSE",
     "CHANGELOG.md"
