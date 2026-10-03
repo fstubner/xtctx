@@ -68,12 +68,14 @@ export const installClients: InstallClient[] = [
     name: 'Claude Code',
     kind: 'terminal',
     maker: 'Anthropic',
+    oneBox: true,
     commands: ['claude plugin marketplace add fstubner/xtctx', 'claude plugin install xtctx@xtctx'],
   },
   {
     name: 'Codex',
     kind: 'terminal',
     maker: 'OpenAI',
+    oneBox: true,
     commands: ['codex plugin marketplace add fstubner/xtctx', 'codex plugin add xtctx@xtctx'],
   },
   {
@@ -93,6 +95,7 @@ export const installClients: InstallClient[] = [
     name: 'Copilot CLI',
     kind: 'terminal',
     maker: 'GitHub',
+    oneBox: true,
     commands: ['copilot plugin marketplace add fstubner/xtctx', 'copilot plugin install xtctx@xtctx'],
   },
   {
