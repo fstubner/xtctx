@@ -1,3 +1,4 @@
+import { NoSyncServerError } from "./client.js";
 import { NotLoggedInError, NotOptedInError, runDiffSync, type DiffSyncResult } from "./diff-sync.js";
 
 export interface AutoSync {
@@ -50,7 +51,7 @@ export function startAutoSync(options: AutoSyncOptions): AutoSync {
       }
       lastError = "";
     } catch (err) {
-      if (err instanceof NotLoggedInError || err instanceof NotOptedInError) return;
+      if (err instanceof NotLoggedInError || err instanceof NotOptedInError || err instanceof NoSyncServerError) return;
       // Said once per distinct failure, not every ten seconds. The failure is
       // also recorded for `xtctx sync status`.
       const message = err instanceof Error ? err.message : String(err);

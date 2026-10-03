@@ -39,6 +39,17 @@ export function apiAudience(env: Env): string {
   return `${publicOrigin(env)}/api`;
 }
 
+/**
+ * What `PUBLIC_URL` is in the shipped wrangler.toml. Whoever deploys the Worker
+ * must replace it with their own origin; while it is still this the Worker
+ * refuses to serve (see index.ts).
+ */
+export const PUBLIC_URL_PLACEHOLDER = "https://REPLACE-WITH-YOUR-WORKER-URL.invalid";
+
+export function publicUrlIsUnset(env: Env): boolean {
+  return !env.PUBLIC_URL || env.PUBLIC_URL.includes("REPLACE-WITH");
+}
+
 export function publicOrigin(env: Env): string {
   return new URL(env.PUBLIC_URL).origin;
 }

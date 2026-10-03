@@ -1,5 +1,5 @@
 import { accountKey, readAccountState } from "./state.js";
-import { EnvCredentialsRefusedError, loadSavedCredentials, resolveUploadCredentials } from "./client.js";
+import { EnvCredentialsRefusedError, NoSyncServerError, loadSavedCredentials, resolveUploadCredentials } from "./client.js";
 import { isOptedIn } from "./consent.js";
 
 /**
@@ -15,7 +15,7 @@ export async function describeCloudSync(projectRoot: string): Promise<string[]> 
   try {
     effective = await resolveUploadCredentials();
   } catch (err) {
-    if (err instanceof EnvCredentialsRefusedError) envProblem = err.message;
+    if (err instanceof EnvCredentialsRefusedError || err instanceof NoSyncServerError) envProblem = err.message;
     else throw err;
   }
 

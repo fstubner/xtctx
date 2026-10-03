@@ -122,7 +122,7 @@ const LAYERS = [
       /^\.gitattributes$/,
       /^\.github\/dependabot\.yml$/,
       // The Worker's deploy surface: what it binds, what its database looks like.
-      /^cloud\/(wrangler\.toml|package(-lock)?\.json|tsconfig\.json|schema\.sql|migrations\/.*)$/,
+      /^cloud\/(wrangler\.toml|wrangler\.local\.example\.toml|package(-lock)?\.json|tsconfig\.json|schema\.sql|migrations\/.*)$/,
       // What `xtctx embeddings enable` installs. If `files` stops shipping it,
       // enable fails for every user, and nothing else notices.
       /^embeddings-runtime\//,

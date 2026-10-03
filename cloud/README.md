@@ -1,6 +1,6 @@
 # xtctx-cloud
 
-The optional server behind [xtctx cloud sync](../docs/cloud-sync.md): a Cloudflare Worker that stores what opted-in projects upload (D1) and serves it back over MCP. Nothing reaches it unless a user logs in **and** opts a project in.
+The optional, self-hosted server behind [xtctx cloud sync](../docs/cloud-sync.md): a Cloudflare Worker that stores what opted-in projects upload (D1) and serves it back over MCP. xtctx runs no hosted instance and the CLI has no default server: you deploy this Worker to your own Cloudflare account and point `xtctx login --sync-url` at it. Nothing reaches it unless a user logs in **and** opts a project in.
 
 ## What it serves
 
@@ -47,6 +47,21 @@ These keep a request inside D1's limits: messages go in as one JSON parameter pe
 
 In this order. Nothing here is run by the tests or by CI.
 
+### 0. Your own config
+
+The committed `wrangler.toml` deploys to no domain: it has no routes and its `PUBLIC_URL` is a placeholder, and while `PUBLIC_URL` is still that placeholder the Worker answers every route except `/health` with `500 server_misconfigured`. Make your own, untracked copy and use it for every wrangler command below:
+
+```bash
+cp wrangler.local.example.toml wrangler.local.toml    # git-ignored
+```
+Fill in what it marks `REPLACE`: your domain (the `routes` entry, on a zone in your Cloudflare account), `PUBLIC_URL` (that domain as `https://...`, no path), the D1 and KV ids (steps 2 and 3), your GitHub OAuth app's client id (step 5) and `ALLOWED_GITHUB_IDS` (step 6). Add `--config wrangler.local.toml` to each `wrangler` command, so the migration and deploy commands are:
+
+```bash
+npx wrangler d1 migrations apply xtctx-db --remote --config wrangler.local.toml
+npx wrangler deploy --config wrangler.local.toml
+```
+The `npm run deploy` and `npm run d1:migrate:remote` scripts use the committed `wrangler.toml`, which is not meant to be deployed as it stands.
+
 ### 1. Install
 
 ```bash
@@ -56,7 +71,7 @@ npm install
 
 ### 2. D1 database
 
-New deployment only: `npx wrangler d1 create xtctx-db`, then put the printed `database_id` in `wrangler.toml`.
+`npx wrangler d1 create xtctx-db`, then put the printed `database_id` in `wrangler.local.toml`.
 
 ### 3. KV namespace for OAuth
 
@@ -64,12 +79,12 @@ New deployment only: `npx wrangler d1 create xtctx-db`, then put the printed `da
 npx wrangler kv namespace create OAUTH_KV
 ```
 
-Put the printed id in `wrangler.toml` under `[[kv_namespaces]]`, replacing `REPLACE_WITH_OAUTH_KV_NAMESPACE_ID`, which is not a namespace.
+Put the printed id in `wrangler.local.toml` under `[[kv_namespaces]]`, replacing `REPLACE_WITH_OAUTH_KV_NAMESPACE_ID`, which is not a namespace.
 
 ### 4. Schema
 
 ```bash
-npm run d1:migrate:remote      # wrangler d1 migrations apply xtctx-db --remote
+npx wrangler d1 migrations apply xtctx-db --remote --config wrangler.local.toml
 ```
 
 Migrations live in `migrations/` and `wrangler` records which ran in the database's `d1_migrations` table. Apply them **before** deploying code that needs them. `0000_baseline.sql` is the schema as it was when tracking started; `0001_sync_v2.sql` adds the token epochs and the upload status table, and drops the columns that held absolute paths.
@@ -86,38 +101,38 @@ A database made from the old `schema.sql` (with or without the old `0001_token_v
    ```bash
    npx wrangler d1 execute xtctx-db --remote --command "ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0"
    ```
-2. Run `npm run d1:migrate:remote`. It applies `0000_baseline.sql`, which is all `CREATE ... IF NOT EXISTS` and so changes nothing on this database, then `0001_sync_v2.sql`, which copies each user's `token_version` into `token_epochs` (nobody is signed out by the copy) and drops `users.token_version`, `sessions.status`, `sessions.source_path` and `messages.source_pointer`.
+2. Run the migrations command above. It applies `0000_baseline.sql`, which is all `CREATE ... IF NOT EXISTS` and so changes nothing on this database, then `0001_sync_v2.sql`, which copies each user's `token_version` into `token_epochs` (nobody is signed out by the copy) and drops `users.token_version`, `sessions.status`, `sessions.source_path` and `messages.source_pointer`.
 
 Existing rows stay. Messages uploaded by clients before 0.2 have ids in the old scheme; the first sync from each device after it updates replaces them, because the session counts differ and the client then sends the session whole with its ids.
 
 ### 5. GitHub OAuth app
 
-At [GitHub Developer Settings](https://github.com/settings/developers) → OAuth Apps, on the app whose client id is `GITHUB_CLIENT_ID` in `wrangler.toml`:
+At [GitHub Developer Settings](https://github.com/settings/developers) → OAuth Apps, Create your own OAuth app (the client id in the committed `wrangler.toml` is not yours) and put its client id in `GITHUB_CLIENT_ID` in `wrangler.local.toml`. On that app:
 
 1. Enable **Device Flow** (for `xtctx login`).
-2. Set the **Authorization callback URL** to `https://mcp.xtctx.com/oauth/github/callback`, that is `PUBLIC_URL` + `/oauth/github/callback`.
+2. Set the **Authorization callback URL** to `https://xtctx-sync.example.com/oauth/github/callback` (with your own domain), that is `PUBLIC_URL` + `/oauth/github/callback`.
 3. Generate a client secret for the next step.
 
 ### 6. Secrets and variables
 
 ```bash
-npx wrangler secret put JWT_SECRET            # required; e.g. openssl rand -base64 48
-npx wrangler secret put GITHUB_CLIENT_SECRET  # the OAuth app's secret, for browser sign-in
+npx wrangler secret put JWT_SECRET --config wrangler.local.toml            # required; e.g. openssl rand -base64 48
+npx wrangler secret put GITHUB_CLIENT_SECRET --config wrangler.local.toml  # the OAuth app's secret, for browser sign-in
 ```
 
 - Until `JWT_SECRET` is set every route except `/health` answers 500. Changing it later invalidates every CLI and pasted token.
 - Without `GITHUB_CLIENT_SECRET` the CLI's device flow still works and `/authorize` answers 503.
-- Set `ALLOWED_GITHUB_IDS` in `wrangler.toml` `[vars]` to the comma-separated numeric GitHub ids allowed to sign in (yours is `"id"` in `https://api.github.com/users/<login>`). It ships empty, which lets nobody in.
-- `PUBLIC_URL` (in `wrangler.toml`) is the origin MCP clients connect to; tokens are bound to `PUBLIC_URL/mcp`, so it must match the domain clients use.
+- Set `ALLOWED_GITHUB_IDS` in `wrangler.local.toml` `[vars]` to the comma-separated numeric GitHub ids allowed to sign in (yours is `"id"` in `https://api.github.com/users/<login>`). Left empty, it lets nobody in.
+- `PUBLIC_URL` (in `wrangler.local.toml`) is the origin MCP clients connect to; tokens are bound to `PUBLIC_URL/mcp`, so it must match the domain clients use. It is also the URL you give `xtctx login --sync-url`.
 - `ALLOWED_ORIGINS` (optional, comma-separated) is the only way a browser origin gets CORS headers, and the only foreign `Origin` `/mcp` accepts.
 
 ### 7. Deploy
 
 ```bash
-npm run deploy
+npx wrangler deploy --config wrangler.local.toml
 ```
 
-The Worker is served only on its custom domains (`workers_dev = false`): `mcp.xtctx.com` for MCP clients and `sync.xtctx.com` for the CLI. Logs and traces go to Workers Observability (`[observability]`).
+The Worker is served only on the custom domain in your `routes` (`workers_dev = false`), for MCP clients and the CLI alike. Then run `xtctx login --sync-url https://<your domain>` on each machine. Logs and traces go to Workers Observability (`[observability]`).
 
 After a deploy, CLI users of a version before 0.2 get `426` on upload and must update xtctx, and tokens from before this version (they carry no scopes) are refused, so everyone runs `xtctx login` once.
 
@@ -132,7 +147,7 @@ node node_modules/wrangler/bin/wrangler.js dev --local --port 8787 \
   --var GITHUB_CLIENT_SECRET:<a local OAuth app's secret> --var ALLOWED_GITHUB_IDS:<your id>
 ```
 
-- `--local-upstream` and `--upstream-protocol`: without them `wrangler dev` presents requests as `https://mcp.xtctx.com/...` (the first route), so the resource metadata and challenge do not match `http://localhost:8787` and MCP clients cannot discover the sign-in.
+- `--local-upstream` and `--upstream-protocol`: without them `wrangler dev` presents requests as `https://<your domain>/...` (the first route of a config that has one), so the resource metadata and challenge do not match `http://localhost:8787` and MCP clients cannot discover the sign-in.
 - On Windows keep `--persist-to` short (`C:\tmp\xw`, say); a long path runs past `MAX_PATH` and D1 commands fail.
 - The browser sign-in needs a GitHub OAuth app whose callback is `http://localhost:8787/oauth/github/callback`; a GitHub OAuth app has one callback URL, so use a separate app for local work.
 - Point the CLI at it with `xtctx login --sync-url http://localhost:8787` (plain `http` is accepted only for `localhost`).

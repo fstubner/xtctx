@@ -14,8 +14,9 @@ It indexes the transcript files your local coding agents already write, and
 exposes them over MCP so the next tool you open can find recent sessions and
 read the raw messages. It does not run a daemon, host an API, generate
 summaries, or maintain durable project memory. Everything stays on your
-machine unless you opt a project in to cloud sync, which is optional and off
-by default ([`docs/cloud-sync.md`](docs/cloud-sync.md)).
+machine unless you opt a project in to cloud sync, which is optional, off by
+default, and self-hosted: you run the server
+([`docs/cloud-sync.md`](docs/cloud-sync.md)).
 
 Each project opts in once with `xtctx setup`. The MCP server resolves the
 project from the working directory, and in a project that has not opted in it
@@ -313,7 +314,8 @@ startup hooks; others receive MCP config plus managed instructions only.
   telemetry. Cloud sync is optional and opt-in per project: it sends nothing
   until you log in (`xtctx login`) *and* opt a project in (`xtctx sync enable`),
   and then sends that project's transcript text, including whatever paths or
-  output the agents wrote into it, to the xtctx cloud server, where your other
+  output the agents wrote into it, to a sync server you deployed yourself (there
+  is no hosted xtctx service, and no default server), where your other
   machines' agents can read it over MCP. `xtctx status` says whether it is on
   for the project and when it last uploaded
   ([`docs/cloud-sync.md`](docs/cloud-sync.md)).

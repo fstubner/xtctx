@@ -18,7 +18,21 @@ export interface SyncCredentials {
   syncUrl: string;
 }
 
-export const DEFAULT_SYNC_URL = "https://sync.xtctx.com";
+/**
+ * There is no hosted xtctx service, so there is no server to fall back to:
+ * cloud sync talks to a Worker the user deployed (cloud/README.md). Every path
+ * that needs a server URL and has none fails with this.
+ */
+export class NoSyncServerError extends Error {
+  constructor() {
+    super(
+      "No sync server is set. xtctx cloud sync needs your own server: deploy the Worker in cloud/ to your Cloudflare " +
+        "account, then pass --sync-url <url> to `xtctx login` or set XTCTX_SYNC_URL. " +
+        "See docs/cloud-sync.md and cloud/README.md in the xtctx repository.",
+    );
+    this.name = "NoSyncServerError";
+  }
+}
 
 export function getCredentialsPath(): string {
   return join(xtctxHome(), "credentials.json");
@@ -58,6 +72,8 @@ function credentialsFromEnv(saved: SyncCredentials | null): SyncCredentials | nu
   } catch {
     // Not a decodable JWT; the server is what judges the token.
   }
+  const syncUrl = envUrl || saved?.syncUrl;
+  if (!syncUrl) throw new NoSyncServerError();
   // Stable across runs without saying anything about the machine.
   const stableId = `device-${createHash("sha256").update(hostname()).digest("hex").slice(0, 12)}`;
   return {
@@ -65,7 +81,7 @@ function credentialsFromEnv(saved: SyncCredentials | null): SyncCredentials | nu
     user: { id: userId, username },
     deviceId: process.env.XTCTX_DEVICE_ID || saved?.deviceId || stableId,
     deviceName: process.env.XTCTX_DEVICE_NAME || saved?.deviceName || stableId,
-    syncUrl: envUrl || saved?.syncUrl || DEFAULT_SYNC_URL,
+    syncUrl,
   };
 }
 

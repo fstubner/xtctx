@@ -50,3 +50,7 @@ tests/eval/results/ranking-latest.json
 
 # Next-gen implementation plan
 IMPLEMENTATION_PLAN.md
+
+# A deployer's own Worker config, copied from cloud/wrangler.local.example.toml.
+# It holds ids and an allowlist that belong to one account.
+cloud/wrangler.local.toml
