@@ -1,10 +1,12 @@
 import type { Hero, HeroCommands, HeroDownload } from './types';
 
 export const hero: Hero = {
-  // The name, spelled out: x (cross) · t (tool) · ctx (context). No
-  // releaseLink: with one, the page replaces this text with the latest
-  // version once GitHub answers, and the changelog is in the nav anyway.
+  // The latest release, linked to the changelog: the page swaps this text
+  // for "v0.22.1 · What changed →" once GitHub answers. The text below is
+  // what shows until then, or if the lookup fails: the name spelled out,
+  // x (cross) · t (tool) · ctx (context).
   badge: 'Cross · Tool · Context',
+  releaseLink: '/changelog/',
   // A non-breaking hyphen (U+2011) in "re‑explaining": with a plain one the
   // balanced heading broke it across the two lines.
   heading: 'Switch coding agents without re‑explaining the work.',
