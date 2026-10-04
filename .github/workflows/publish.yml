@@ -109,7 +109,7 @@ jobs:
 
   # A deploy is not done until its health is observed: install the published
   # version from the registry and smoke it. Failure here pages via the
-  # workflow failure notification and is the trigger to follow RELEASE.md's
+  # workflow failure notification and is the trigger to follow docs/release.md's
   # rollback section.
   post-publish-smoke:
     needs: publish-npm

@@ -45,6 +45,8 @@ describe("review coverage", () => {
       "package.json",
       "README.md",
       "docs/testing-strategy.md",
+      "docs/design/xtctx-tokens.css",
+      ".github/CONTRIBUTING.md",
       "site/src/data/site-content/hero.ts",
       "design-direction.md",
       "ux-walkthrough.md",
