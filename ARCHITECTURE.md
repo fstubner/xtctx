@@ -3,7 +3,8 @@
 One npm package, no services on the handoff path. Everything runs in the
 invoking process on the developer's machine. The one exception is optional and
 off by default: cloud sync, which uploads an opted-in project's sessions to a
-separate Worker (`cloud/`) so the same user's agents on other machines can read
+separate Worker (`cloud/`) that the user deploys themselves (there is no hosted
+service and no default server) so the same user's agents on other machines can read
 them. Handoff never depends on it. `docs/architecture.md` describes module
 internals; this document fixes the parts, how a handoff actually flows through
 them, the boundaries between them, and what each part is allowed to trust.
@@ -58,7 +59,7 @@ them, the boundaries between them, and what each part is allowed to trust.
   its own read-only connection; keeps its position per project and account in
   `~/.xtctx/sync/`, never in the index. See `docs/cloud-sync.md`.
 - **Cloud Worker** (`cloud/`) — a separate Cloudflare Worker, not shipped in
-  the npm package. Stores uploads in D1 and serves them back over MCP to the
+  the npm package, that the user deploys to their own Cloudflare account. Stores uploads in D1 and serves them back over MCP to the
   same account. Has its own tests (`npm run test:cloud`) and deploy steps
   (`cloud/README.md`).
 - **Site** (`site/`) — static Astro site on GitHub Pages, a subtree of

@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { EnvCredentialsRefusedError, saveCredentials, type SyncCredentials } from "@xtctx/sync/client";
+import { EnvCredentialsRefusedError, NoSyncServerError, saveCredentials, type SyncCredentials } from "@xtctx/sync/client";
 import { setOptedIn } from "@xtctx/sync/consent";
 import { CloudAuthError, NotOptedInError, runDiffSync } from "@xtctx/sync/diff-sync";
 import { accountKey, acquireUploadLock, readAccountState, updateAccountState } from "@xtctx/sync/state";
@@ -52,8 +52,16 @@ describe("diff sync", () => {
     expect(cloud.requests).toEqual([]);
   });
 
-  it("uploads nothing when only XTCTX_TOKEN is set", async () => {
+  it("uploads nothing when only XTCTX_TOKEN is set and there is no server to send it to", async () => {
     vi.stubEnv("XTCTX_TOKEN", "a.b.c");
+    seedIndex(box.project, 3);
+    await expect(runDiffSync({ projectDir: box.project })).rejects.toBeInstanceOf(NoSyncServerError);
+    expect(cloud.requests).toEqual([]);
+  });
+
+  it("uploads nothing when only XTCTX_TOKEN and XTCTX_SYNC_URL are set and the project is not opted in", async () => {
+    vi.stubEnv("XTCTX_TOKEN", "a.b.c");
+    vi.stubEnv("XTCTX_SYNC_URL", "https://sync.test");
     seedIndex(box.project, 3);
     await expect(runDiffSync({ projectDir: box.project })).rejects.toBeInstanceOf(NotOptedInError);
     expect(cloud.requests).toEqual([]);

@@ -1,7 +1,7 @@
 import { OAuthError, OAuthProvider, insufficientScope } from "@cloudflare/workers-oauth-provider";
 import type { Env, AuthUser } from "./types.js";
 import { SCOPE_READ } from "./types.js";
-import { isAccountCurrent, mcpResource, publicOrigin, verifyBearer } from "./auth.js";
+import { isAccountCurrent, mcpResource, publicOrigin, publicUrlIsUnset, verifyBearer } from "./auth.js";
 import { MAX_MCP_BODY_BYTES, allowedOrigins, handleApp, readBodyCapped } from "./app.js";
 import { handleMcpPost, LEGACY_VERSIONS, MODERN_VERSIONS } from "./mcp.js";
 import type { OAuthGrantProps } from "./oauth.js";
@@ -154,8 +154,10 @@ export default {
       // Without a signing secret nothing below can be trusted, so none of it
       // runs. There used to be a built-in default, which made every token
       // forgeable on a deployment that forgot to set one.
-      if (!env.JWT_SECRET || !env.PUBLIC_URL) {
-        console.error(JSON.stringify({ event: "misconfigured", jwtSecret: !!env.JWT_SECRET, publicUrl: !!env.PUBLIC_URL }));
+      // Nor can it with PUBLIC_URL still the placeholder from wrangler.toml:
+      // every token is bound to that origin, so it has to be the deployer's own.
+      if (!env.JWT_SECRET || publicUrlIsUnset(env)) {
+        console.error(JSON.stringify({ event: "misconfigured", jwtSecret: !!env.JWT_SECRET, publicUrl: !publicUrlIsUnset(env) }));
         return withServerHeaders(json({ error: "server_misconfigured" }, 500));
       }
 

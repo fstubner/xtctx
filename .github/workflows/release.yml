@@ -12,8 +12,12 @@ name: release
 # capping unwanted releases still leaves them unwanted. Nothing is released now
 # unless someone runs this.
 #
-# Notes come from GitHub's own generator over the commits since the last tag,
-# so there is no changelog tooling to keep in step with the commit history.
+# The release notes are the hand-written text under `## [Unreleased]` in
+# CHANGELOG.md, moved under the new version's heading and reused as the GitHub
+# release's body. GitHub's own generator over the commits since the last tag
+# supplies only links to the pull requests behind it (and is the fallback body,
+# labelled as such, when nobody wrote anything under Unreleased): a list of PR
+# titles is a record of the work, not a description of what changed for a user.
 #
 # Every value that reaches a shell goes through the environment. `${{ }}` is
 # substituted before the shell parses the line, and release notes are arbitrary
@@ -194,6 +198,11 @@ jobs:
             echo "${delimiter}"
           } >> "$GITHUB_OUTPUT"
 
+      # The entry's body is whatever was written under `## [Unreleased]`, so a
+      # reader gets the notes a person wrote, not a list of pull-request titles.
+      # GitHub's generated notes add only a "Pull requests" line of links
+      # (numbers pulled out with a pattern, so a PR title cannot put markup in
+      # the file) and are the body only when Unreleased is empty.
       - name: Write the CHANGELOG entry
         env:
           NOTES: ${{ steps.notes.outputs.body }}
@@ -202,32 +211,61 @@ jobs:
         run: |
           set -euo pipefail
           today=$(date -u +%Y-%m-%d)
+          repo_url="https://github.com/${GITHUB_REPOSITORY}"
+
+          # The hand-written body: everything between the Unreleased heading
+          # and the next `## ` heading, without leading or trailing blank lines.
+          awk '
+            /^## \[Unreleased\]/ { in_unreleased = 1; next }
+            in_unreleased && /^## / { exit }
+            in_unreleased { print }
+          ' CHANGELOG.md | awk '
+            NF { started = 1 }
+            started { lines[++n] = $0 }
+            END {
+              while (n > 0 && lines[n] ~ /^[[:space:]]*$/) n--
+              for (i = 1; i <= n; i++) print lines[i]
+            }
+          ' > /tmp/unreleased.md
+
           {
-            printf '## [%s](https://github.com/%s/releases/tag/%s) (%s)\n\n' \
-              "$VERSION" "$GITHUB_REPOSITORY" "$TAG" "$today"
-            printf '%s\n\n' "$NOTES"
+            printf '## [%s](%s/releases/tag/%s) (%s)\n\n' "$VERSION" "$repo_url" "$TAG" "$today"
+            if [ -s /tmp/unreleased.md ]; then
+              cat /tmp/unreleased.md
+              printf '\n'
+              prs=$(printf '%s\n' "$NOTES" | grep -oE '/pull/[0-9]+' | cut -d/ -f3 | awk '!seen[$0]++' \
+                | while read -r number; do printf '[#%s](%s/pull/%s), ' "$number" "$repo_url" "$number"; done || true)
+              compare=$(printf '%s\n' "$NOTES" | grep -oE "https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/compare/[A-Za-z0-9_.-]+" | head -n1 || true)
+              if [ -n "$prs" ]; then
+                printf '**Pull requests:** %s\n\n' "${prs%, }"
+              fi
+              if [ -n "$compare" ]; then
+                printf '**Full changelog:** %s\n\n' "$compare"
+              fi
+            else
+              printf '_Nothing was written under Unreleased for this release, so this is GitHub'"'"'s generated list of its pull requests._\n\n'
+              # Its own `## What's Changed` heading would be read as a release.
+              printf '%s\n\n' "$NOTES" | sed 's/^## /### /'
+            fi
           } > /tmp/entry.md
-          # Insert above the previous newest entry, keeping the file's header.
-          # Release Please owned this file before; its format is preserved so
-          # the existing entries stay readable alongside the new ones.
-          #
-          # An `## [Unreleased]` section, when present, stays at the top and
-          # the new entry goes beneath it: inserting above the first `## `
-          # heading would put the release above Unreleased and leave the
-          # section describing work that has now shipped. Its hand-written
-          # body is replaced by the generated notes (which cover the same
-          # commits), so the heading is kept and the body dropped.
+
+          # Placement. `## [Unreleased]`, when present, stays at the top and
+          # the new entry goes beneath it; its old body now lives in the entry,
+          # so it is left empty. Without one the entry goes above the newest
+          # existing entry, keeping the file's header.
           first_entry=$(grep -n '^## ' CHANGELOG.md | grep -v ':## \[Unreleased\]' | head -n1 | cut -d: -f1 || true)
           unreleased=$(grep -n '^## \[Unreleased\]' CHANGELOG.md | head -n1 | cut -d: -f1 || true)
-          if [ -n "${first_entry:-}" ]; then
-            head -n "$(( ${unreleased:-$first_entry} - 1 ))" CHANGELOG.md > /tmp/new.md
-            if [ -n "${unreleased:-}" ]; then
-              printf '## [Unreleased]\n\n' >> /tmp/new.md
-            fi
-            cat /tmp/entry.md >> /tmp/new.md
-            tail -n +"${first_entry}" CHANGELOG.md >> /tmp/new.md
+          if [ -n "${unreleased:-}" ]; then
+            head -n "$(( unreleased - 1 ))" CHANGELOG.md > /tmp/new.md
+            printf '## [Unreleased]\n\n' >> /tmp/new.md
+          elif [ -n "${first_entry:-}" ]; then
+            head -n "$(( first_entry - 1 ))" CHANGELOG.md > /tmp/new.md
           else
-            cat CHANGELOG.md /tmp/entry.md > /tmp/new.md
+            cat CHANGELOG.md > /tmp/new.md
+          fi
+          cat /tmp/entry.md >> /tmp/new.md
+          if [ -n "${first_entry:-}" ]; then
+            tail -n +"${first_entry}" CHANGELOG.md >> /tmp/new.md
           fi
           mv /tmp/new.md CHANGELOG.md
 
@@ -256,16 +294,25 @@ jobs:
           git push "https://x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:${GITHUB_REF_NAME}"
           git push "https://x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$TAG"
 
+      # The release page carries the same text as the CHANGELOG entry just
+      # committed, read back out of the file rather than rebuilt, so the two
+      # cannot differ. Its heading is left off: the page has its own title.
       - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NOTES: ${{ steps.notes.outputs.body }}
           VERSION: ${{ steps.bump.outputs.version }}
           TAG: ${{ steps.bump.outputs.tag }}
         run: |
           set -euo pipefail
-          # --notes-file, not --notes, for the same reason as the step above.
-          printf '%s\n' "$NOTES" > /tmp/notes.md
+          awk '
+            index($0, "## [" ENVIRON["VERSION"] "](") == 1 { in_entry = 1; next }
+            in_entry && /^## / { exit }
+            in_entry { print }
+          ' CHANGELOG.md > /tmp/notes.md
+          if ! grep -q '[^[:space:]]' /tmp/notes.md; then
+            echo "CHANGELOG.md has no entry for ${VERSION}; refusing to publish a release with empty notes." >&2
+            exit 1
+          fi
           gh release create "$TAG" --title "xtctx: v${VERSION}" --notes-file /tmp/notes.md
 
       # Starts publish.yml as a run of its own, against the tag just pushed,

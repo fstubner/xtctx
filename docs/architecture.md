@@ -14,7 +14,7 @@ surface.
 Cloud sync is the one optional part that leaves the machine, and it is opt-in
 per project: only when the user has logged in (`xtctx login`) and opted the
 project in (`xtctx sync enable`) does the MCP server upload that project's
-index to the Worker in `cloud/`, every 10 seconds while it runs and once on
+index to the user's own deployment of the Worker in `cloud/` (there is no hosted instance and no default server), every 10 seconds while it runs and once on
 shutdown. The Worker serves the uploads back over MCP to the same user's
 agents on other machines. It is not on the handoff path: everything above
 works with it off, which is the default. See

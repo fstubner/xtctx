@@ -43,6 +43,27 @@ describe("login and logout", () => {
     expect(await isOptedIn(box.project)).toBe(false);
   });
 
+  it("has no default server: without --sync-url or XTCTX_SYNC_URL it fails, says why, contacts nothing and saves nothing", async () => {
+    const fetchMock = vi.fn(async () => Response.json(code));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(runLogin({ wait: clock().wait })).rejects.toThrow(/your own server.*docs\/cloud-sync\.md.*cloud\/README\.md/s);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(existsSync(getCredentialsPath())).toBe(false);
+  });
+
+  it("takes the server from XTCTX_SYNC_URL, and keeps it in the saved login", async () => {
+    vi.stubEnv("XTCTX_SYNC_URL", "https://env-sync.test");
+    const fetchMock = vi.fn(async (url: string) => Response.json(String(url).endsWith("/code") ? code : { token: "tok", user }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await runLogin({ wait: clock().wait });
+
+    expect(String(fetchMock.mock.calls[0][0])).toBe("https://env-sync.test/auth/device/code");
+    expect(JSON.parse(readFileSync(getCredentialsPath(), "utf-8")).syncUrl).toBe("https://env-sync.test");
+  });
+
   it("slows down when told to, and gives up when the code expires", async () => {
     vi.stubGlobal("fetch", vi.fn(async (url: string) =>
       Response.json(String(url).endsWith("/code") ? { ...code, expires_in: 30 } : { error: "slow_down" }),
