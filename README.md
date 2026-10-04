@@ -36,7 +36,7 @@ The **plugin** is the smaller commitment: it registers the MCP server and the
 handoff skill machine-wide, and writes nothing into your project. The tools
 resolve the project from the working directory. In a project that has been
 set up they answer; in one that has not, every tool says so and names
-`xtctx setup`, so the agent can offer it — nothing is scanned or written
+`xtctx setup`, so the agent can offer it. Nothing is scanned or written
 into a directory nobody opted in. What you are relying on is the agent
 choosing to call a tool, which the skill prompts it to do.
 
@@ -94,8 +94,8 @@ cursor-agent plugin marketplace add https://github.com/fstubner/xtctx
 
 VS Code reads the same package but has no CLI route: its plugin management
 lives in the Chat view, behind the `chat.plugins.enabled` setting. opencode
-has its own plugin system — JavaScript modules under `.opencode/plugins/`, or
-npm packages named in `opencode.json` — but does not implement the Agent
+has its own plugin system (JavaScript modules under `.opencode/plugins/`, or
+npm packages named in `opencode.json`) but does not implement the Agent
 Plugins standard the package above is built against, so `setup` is the only
 route there.
 
@@ -106,8 +106,8 @@ to the xtctx that ran it, and re-running setup is what moves the pin.
 One thing to know about the plugin specifically: it is installed from this
 repository, so its skill text comes from `main`, while the server it launches
 is whatever `npx -y xtctx` resolves to on npm. Those are not the same commit
-whenever work has landed but not been released — which is the normal state
-here — so a plugin install can describe behaviour the server it runs does not
+whenever work has landed but not been released, which is the normal state
+here, so a plugin install can describe behaviour the server it runs does not
 have yet. `xtctx status` reports a skill copy that predates the built-in one;
 it cannot see the server's version from the other side. Because the plugin writes no project config, `xtctx status`
 reports a plugin-only project as `Config missing (run xtctx setup)`, and the
@@ -179,7 +179,7 @@ blocks where that tool owns them, removes supported startup hooks, and marks the
 tool disabled in `.xtctx/config.yaml`. It removes generated skill adapters for
 that tool. It does not delete transcript sources, canonical project skills, or
 the local SQLite index. Use `xtctx disconnect --all` to remove xtctx from every
-supported tool — that one also deletes `.xtctx/skills`, since with nothing left
+supported tool. That one also deletes `.xtctx/skills`, since with nothing left
 managing skills the synced source is xtctx's own scaffolding. A skill you
 wrote yourself and selected at setup is kept where you wrote it. Antigravity and Copilot CLI keep one MCP config for every
 project on the machine, so a project disconnect leaves those two files alone;
@@ -191,7 +191,7 @@ writes Antigravity's config without the flag, because Antigravity has no
 project-scoped MCP file and there is nowhere else to put it; `setup
 --global-mcp` additionally writes Copilot CLI's. Neither file holds a
 per-project entry, so a project disconnect cannot remove "this project's"
-wiring from them — it can only remove xtctx from that client for every project
+wiring from them. It can only remove xtctx from that client for every project
 at once. Doing that silently is exactly what it used to do, and it took xtctx
 away from every other project on the machine, so it is an explicit step now.
 
@@ -205,7 +205,7 @@ are already gone: the index is their only copy.
 Lines file (`xtctx-export-<time>.jsonl` in the current directory, or
 `--out <file>`; `--out -` for stdout). It reads the index as it stands, never
 touches a transcript, and never overwrites an existing file. `xtctx import
-<file>` merges an export back into a project's index — after the index was
+<file>` merges an export back into a project's index, for example after the index was
 deleted, on another machine, or into a project that has moved. Sessions keep
 their ids, so importing the same file twice, or into an index that already
 has some of its sessions, adds only what is missing. Retrieval windows are
@@ -218,14 +218,14 @@ exits. The MCP server does the same thing on its own every time it starts, so
 the session after another tool's work starts with that work already indexed.
 The scan is incremental and runs in the background: it resumes from a
 per-file offset, so after the first pass it reads only what each tool has
-appended. The first pass over a large history is the expensive one — see the
-note above.
+appended. The first pass over a large history is the expensive one (see the
+note above).
 
 `xtctx scan --embed` additionally vectorizes every window the scan leaves
 without one, running to completion however long that takes rather than to a
 budget. It needs semantic search to be enabled (`xtctx embeddings enable`) and
 says so when it is not. You need it when `xtctx status` says the backlog is
-too large to finish in the background — otherwise the server gets there on its
+too large to finish in the background. Otherwise the server gets there on its
 own.
 
 Once semantic search is enabled, indexing picks a device by measuring it, and
@@ -240,7 +240,7 @@ device wins, so this changes speed and nothing else.
 Nothing is measured while semantic search is off, since there is no model to
 time. `xtctx calibrate` runs that measurement on demand and prints it. You need it
 only to re-measure after the hardware changes (`--force`) or to see the
-numbers — it is not a setup step. `scan --no-calibrate` skips the automatic
+numbers. It is not a setup step. `scan --no-calibrate` skips the automatic
 run for anyone who would rather start embedding immediately.
 
 Generated MCP clients should use:
@@ -321,7 +321,7 @@ startup hooks; others receive MCP config plus managed instructions only.
   ([`docs/cloud-sync.md`](docs/cloud-sync.md)).
   A project can opt into an external embedding endpoint by writing
   one into `.xtctx/config.yaml`, in which case window text is sent there to be
-  vectorized — never inferred from an environment variable, and `xtctx status`
+  vectorized. The endpoint is never inferred from an environment variable, and `xtctx status`
   names the endpoint in full whenever one is configured.
 - Transcript formats belong to each upstream tool and can drift. The drift
   tests and format fingerprints exist to catch parser breakage, but `xtctx status`
@@ -391,8 +391,8 @@ processes and load a real embedding model. What each suite defends, what it
 structurally cannot catch, and how that was measured is in
 [`docs/testing-strategy.md`](docs/testing-strategy.md).
 
-Indexing throughput — what has been measured, what was tried and rejected, and
-what is still open — is in
+Indexing throughput (what has been measured, what was tried and rejected, and
+what is still open) is in
 [`docs/embedding-performance.md`](docs/embedding-performance.md). Read it
 before optimizing the embedding path; several of the obvious ideas have
 already been measured and lost.
@@ -420,14 +420,14 @@ GitHub release, and publishes to npm.
 
 Untick `publish_npm` to cut a release without publishing. To publish a version
 that was tagged earlier, run the **publish** workflow on its own against that
-tag — it verifies the checked-out commit really carries the tag for the version
+tag. It verifies the checked-out commit really carries the tag for the version
 in `package.json`, so a branch tip cannot be published by mistake.
 
 This replaced an automatic pipeline. Every `fix:`/`feat:` merge opened a release
 PR that a second workflow auto-merged within seconds, so merging any change at
 all cut a release: five versions went out between 09:34 and 16:58 on
 2026-08-30, none awaited, none soaked. A per-day ceiling was tried first and was
-the wrong shape — capping unwanted releases still leaves them unwanted.
+the wrong shape: capping unwanted releases still leaves them unwanted.
 
 Releases are published rather than drafted, deliberately, and `publish.yml` has
 no `release: published` trigger. It had one once, with releases drafted so
