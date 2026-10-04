@@ -44,7 +44,7 @@ npx -y xtctx status
 ## Release Notes
 
 - Releases are cut by one manually dispatched workflow; nothing is released by
-  merging. See RELEASE.md.
+  merging. See docs/release.md.
 - Commit prefixes are for readers, not for tooling: release notes come from
   GitHub's own generator over the commit range.
 

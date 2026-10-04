@@ -57,3 +57,8 @@ IMPLEMENTATION_PLAN.md
 # A deployer's own Worker config, copied from cloud/wrangler.local.example.toml.
 # It holds ids and an allowlist that belong to one account.
 cloud/wrangler.local.toml
+
+# Written by xtctx setup in each checkout (the managed block names this
+# machine's project root), so they are not committed.
+CLAUDE.md
+GEMINI.md

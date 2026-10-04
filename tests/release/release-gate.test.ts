@@ -125,16 +125,16 @@ describe("release gate", () => {
     // The runbook described release-please, an `auto-merge-release-pr`
     // workflow and a `RELEASE_PLEASE_TOKEN` secret for a day after all three
     // were deleted, while README described the current process — so the two
-    // contradicted each other and an operator following RELEASE.md waited for
+    // contradicted each other and an operator following docs/release.md waited for
     // a release PR that never comes. Asserting against the workflow directory
     // rather than a word list, so this fails whenever the docs name machinery
     // that is not there.
-    const runbook = await readFile(join(process.cwd(), "RELEASE.md"), "utf-8");
+    const runbook = await readFile(join(process.cwd(), "docs/release.md"), "utf-8");
     const workflows = (await readdir(WORKFLOW_DIR)).map((file) => file.replace(/\.ya?ml$/, ""));
 
     for (const named of runbook.matchAll(/`([a-z][a-z0-9-]*)\.ya?ml`|`([a-z][a-z0-9-]+)` workflow/g)) {
       const workflow = (named[1] ?? named[2]).replace(/\.ya?ml$/, "");
-      expect(workflows, `RELEASE.md names a workflow that does not exist: ${workflow}`).toContain(
+      expect(workflows, `docs/release.md names a workflow that does not exist: ${workflow}`).toContain(
         workflow,
       );
     }
