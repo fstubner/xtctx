@@ -5,8 +5,6 @@ import { describe, expect, it } from "vitest";
 const CURRENT_SURFACE_FILES = [
   "README.md",
   "AGENTS.md",
-  "CLAUDE.md",
-  "GEMINI.md",
   join(".github", "copilot-instructions.md"),
   join("docs", "architecture.md"),
   join("docs", "demo.md"),
