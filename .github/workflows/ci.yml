@@ -83,14 +83,19 @@ jobs:
       - name: Public demo smoke
         run: npm run demo:public
 
-  # OS-independent gates: linting, security, dependency audits, the landing
-  # site, and packaging. Running these once keeps the matrix cheap.
+  # OS-independent gates: linting, security, dependency audits, the site, and
+  # packaging. Running these once keeps the matrix cheap.
   checks:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The site's check:changelog asks git whether every dated CHANGELOG
+          # version is tagged, and fails rather than skipping when it can see
+          # no tags; the default shallow clone has none.
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -99,14 +104,14 @@ jobs:
           cache: npm
           cache-dependency-path: |
             package-lock.json
-            landing/package-lock.json
+            site/package-lock.json
             cloud/package-lock.json
 
       - name: Install root dependencies
         run: npm ci
 
-      - name: Install landing dependencies
-        run: npm --prefix landing ci
+      - name: Install site dependencies
+        run: npm --prefix site ci
 
       - name: Install cloud dependencies
         run: npm --prefix cloud ci
@@ -155,10 +160,11 @@ jobs:
           npm run check:workflows
           npm run check:review-coverage
 
-      - name: Landing dependency audit
-        # The landing site has only devDependencies (Astro is a build-time
-        # dependency of a static site), so --omit=dev would audit nothing.
-        run: npm run audit:landing
+      - name: Site dependency audit
+        # The whole tree, not --omit=dev: the site is static files, so Astro
+        # and Starlight only ever run at build time, and the browser-check
+        # tooling in devDependencies runs on developers' machines.
+        run: npm run audit:site
 
       # Ranking quality gate. Single platform on purpose: the baseline is
       # derived from float embeddings, so its portability across runners is
@@ -167,8 +173,12 @@ jobs:
       - name: Retrieval ranking eval
         run: npm run test:eval
 
-      - name: Build landing
-        run: npm --prefix landing run build
+      # Build, types, and the template's static gates: sample content left
+      # behind, dead CSS, docs style regions, the wordmark inset, changelog
+      # dates against tags, and the file-size guard. The rendered contrast and
+      # a11y sweeps drive a browser and are run locally for now.
+      - name: Site build and checks
+        run: npm run site:check
 
       - name: Package dry run
         run: npm pack --dry-run

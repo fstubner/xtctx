@@ -15,7 +15,7 @@ when someone runs it.
 3. It runs `verify:release` *before* writing anything, bumps the version
    across every file that carries it (`npm version` triggers the `version`
    script, which syncs the plugin manifests, the marketplace entry and the
-   landing site), writes the CHANGELOG entry, then commits, tags and creates
+   site's JSON-LD version), writes the CHANGELOG entry, then commits, tags and creates
    the GitHub Release.
 
    **The release notes are the ones you wrote.** `CHANGELOG.md` keeps an
@@ -108,8 +108,10 @@ Code deletes them after 30 days by default).
 - [ ] `npx -y xtctx@latest --version` prints the new version
 - [ ] `npm run demo:public` passes against this checkout (it imports the local
       `dist/`, not the published package)
-- [ ] Landing site footer shows the new version (synced by the `version`
-      script; see `landing/src/data/site.ts` and `scripts/sync-version.mjs`)
+- [ ] The site's JSON-LD `softwareVersion` shows the new version (synced by
+      the `version` script; see `site/src/data/site-content/version.ts` and
+      `scripts/sync-version.mjs`), and the changelog page lists the release
+      once `deploy-site` has run
 
 ## Watching for upstream format drift
 

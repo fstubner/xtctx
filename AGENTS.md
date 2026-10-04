@@ -5,7 +5,7 @@ Guidance for coding agents working in this repository.
 ## Project Scope
 
 - `src/`: CLI, MCP, scraper, setup, status, and local handoff-index code
-- `landing/`: Astro public landing site deployed via GitHub Pages
+- `site/`: the xtctx.com site (landing page and docs), built on product-site-template and deployed via GitHub Pages; see `site/AGENTS.md`
 - `tests/`: scraper, setup, MCP, status, and drift tests
 - `docs/`: historical design notes and security documentation
 
@@ -18,7 +18,7 @@ writeback layer.
 
 ```bash
 npm ci
-npm --prefix landing ci
+npm --prefix site ci
 npm run verify:release
 ```
 

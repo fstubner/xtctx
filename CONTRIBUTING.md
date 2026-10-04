@@ -7,10 +7,10 @@ Thanks for contributing.
 1. Install Node.js 24+.
 2. Install dependencies:
    - `npm ci`
-   - `npm --prefix landing ci`
+   - `npm --prefix site ci`
 3. Build:
    - `npm run build`
-   - `npm --prefix landing run build`
+   - `npm run site:build`
 
 ## Local Validation
 
@@ -23,7 +23,7 @@ Before opening a PR, run:
 - `npm run test:integration`
 - `npm run test:drift`
 - `npm run build`
-- `npm --prefix landing run build`
+- `npm run site:check`
 - `npm run smoke:cli`
 
 Or run everything with:
@@ -34,7 +34,7 @@ Or run everything with:
 
 - `src/`: CLI, MCP, setup/status, local handoff index, and transcript scrapers
 - `tests/`: scraper, setup, MCP, security, integration, and drift tests
-- `landing/`: Astro public landing site
+- `site/`: the xtctx.com site, built on product-site-template (`npm run site:dev` to preview it)
 - `docs/`: security docs and historical design notes
 
 ## Pull Request Guidelines
@@ -58,7 +58,7 @@ Or run everything with:
 - Prefer explicit error handling for local file and transcript parsing.
 - Breaking changes are allowed while the project is pre-1.0, but they must be reflected in README, setup/status behavior, and tests.
 - Keep MCP tool responses stable and test-covered.
-- Keep landing changes accessible.
+- Keep site changes accessible: `npm --prefix site run check:contrast` and `npm --prefix site run test:a11y` measure the rendered pages.
 
 ## Reporting Bugs
 

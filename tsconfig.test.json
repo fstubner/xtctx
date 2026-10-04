@@ -15,5 +15,5 @@
     "types": ["node"]
   },
   "include": ["src/**/*", "tests/**/*", "scripts/**/*.ts"],
-  "exclude": ["node_modules", "dist", "web", "landing"]
+  "exclude": ["node_modules", "dist", "web", "site"]
 }

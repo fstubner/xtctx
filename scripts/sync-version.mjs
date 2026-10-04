@@ -4,13 +4,13 @@
  * Seven files declare this package's version: `package.json` and its lockfile,
  * three plugin manifests (one per client family), the marketplace entry Claude
  * Code's `plugin tag` refuses to cut a release against when it disagrees, and
- * the landing site's footer and JSON-LD `softwareVersion`.
+ * the site's JSON-LD `softwareVersion`.
  *
  * `npm version` writes two of them. Release Please used to write the rest, and
  * when it was removed nothing took the job over — so a bump left five files
  * behind, and the commit the release workflow then tagged failed its own test
  * suite (`tests/release/plugin-package.test.ts`,
- * `tests/landing/version-sync.test.ts`). The release could not have completed.
+ * `tests/site/version-sync.test.ts`). The release could not have completed.
  *
  * Wired as the npm `version` lifecycle script, so it runs inside `npm version`
  * rather than being a step someone has to remember. `--check` verifies without
@@ -34,6 +34,9 @@ const JSON_TARGETS = [
   "plugin/.claude-plugin/plugin.json",
   "plugin/.codex-plugin/plugin.json",
 ];
+
+const SITE_VERSION_FILE = "site/src/data/site-content/version.ts";
+const SITE_VERSION = /productVersion\s*=\s*'([^']+)'/;
 
 const stale = [];
 
@@ -90,19 +93,20 @@ for (const relative of JSON_TARGETS) {
   }
 }
 
-// The landing site keeps it in a TypeScript literal, tagged with the marker
-// Release Please used so the line stays findable.
+// The site keeps it in a TypeScript literal, tagged with the marker Release
+// Please used so the line stays findable. It feeds the site's JSON-LD
+// `softwareVersion`, which search engines index.
 {
-  const path = resolve(root, "landing/src/data/site.ts");
+  const path = resolve(root, SITE_VERSION_FILE);
   const raw = await readFile(path, "utf-8");
-  const current = /version:\s*'([^']+)'/.exec(raw);
+  const current = SITE_VERSION.exec(raw);
   if (!current) {
-    throw new Error(`No version literal in ${path}.`);
+    throw new Error(`No productVersion literal in ${path}.`);
   }
   if (current[1] !== version) {
-    stale.push(`landing/src/data/site.ts: ${current[1]} -> ${version}`);
+    stale.push(`${SITE_VERSION_FILE}: ${current[1]} -> ${version}`);
     if (!check) {
-      await writeFile(path, raw.replace(/(version:\s*)'[^']+'/, `$1'${version}'`), "utf-8");
+      await writeFile(path, raw.replace(/(productVersion\s*=\s*)'[^']+'/, `$1'${version}'`), "utf-8");
     }
   }
 }

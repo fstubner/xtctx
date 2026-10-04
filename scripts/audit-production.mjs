@@ -31,29 +31,45 @@ import { spawnSync } from "node:child_process";
 const PRODUCTION_EXCEPTIONS = [];
 
 /**
- * The landing site (`landing/`, run with `--landing`). It has only
- * devDependencies, all of them build tooling for a static site served as
- * files, so its whole tree is audited, under the same rules.
+ * The site (`site/`, run with `--site`). It ships as static files: Astro and
+ * Starlight run only at build time, and the browser-check tooling in its
+ * devDependencies (lighthouse, and @axe-core/cli with the chromedriver it
+ * pulls in) runs only by hand on a developer's machine. Its whole tree is
+ * audited, under the same rules.
  *
  * @type {Exception[]}
  */
-const LANDING_EXCEPTIONS = [
+const SITE_EXCEPTIONS = [
   {
     advisory: "GHSA-ch52-4w7c-c8xp",
     package: "http-cache-semantics",
     why:
-      "Only astro's build-time remote-image fetcher imports it (astro 7.3.3 dist/assets/build/remote.js, " +
-      "the sole import in its dist), and the landing site uses no remote images: no astro:assets imports, " +
-      "no <Image>/<Picture>, no image config in astro.config.mjs. The advisory concerns a shared cache " +
-      "serving one user's response to another; the site is static files with no server and no cache of its own.",
+      "Only astro's build-time remote-image fetcher imports it (astro 7.3.5 dist/assets/build/remote.js, " +
+      "the sole import in its dist), and the site uses no remote images: no astro:assets imports, " +
+      "no <Image>/<Picture>, no image config in astro.config.mjs, and the Starlight logo is a local file. " +
+      "The advisory concerns a shared cache serving one user's response to another; the site is static " +
+      "files with no server and no cache of its own.",
     removedBy: "A fixed http-cache-semantics (every version is affected as of 2026-10-03), or astro dropping it.",
+  },
+  {
+    advisory: "GHSA-c475-qrg2-pj4r",
+    package: "basic-ftp",
+    why:
+      "Reached only through proxy-agent > pac-proxy-agent > get-uri, which opens an FTP connection only " +
+      "when the proxy is configured as a pac+ftp:// URL. proxy-agent is used by chromedriver's driver " +
+      "download and lighthouse's browser fetch, devDependencies run by hand on a developer's machine for " +
+      "the a11y and Lighthouse checks; neither runs in CI or ships in the built site. The advisory is CPU " +
+      "denial of service while parsing a directory listing sent by that FTP server.",
+    removedBy:
+      "get-uri accepting basic-ftp 6.2.1 or later (get-uri 8.0.1, the latest, pins ^5.3.1 as of " +
+      "2026-10-03), or the site dropping lighthouse and @axe-core/cli.",
   },
 ];
 
-const LANDING = process.argv.includes("--landing");
-const EXCEPTIONS = LANDING ? LANDING_EXCEPTIONS : PRODUCTION_EXCEPTIONS;
-const AUDIT_COMMAND = LANDING ? "npm --prefix landing audit --json" : "npm audit --omit=dev --json";
-const SCOPE = LANDING ? "Landing site dependency" : "Production dependency";
+const SITE = process.argv.includes("--site");
+const EXCEPTIONS = SITE ? SITE_EXCEPTIONS : PRODUCTION_EXCEPTIONS;
+const AUDIT_COMMAND = SITE ? "npm --prefix site audit --json" : "npm audit --omit=dev --json";
+const SCOPE = SITE ? "Site dependency" : "Production dependency";
 
 /**
  * npm reports one entry per package along the chain, so a single advisory
@@ -175,7 +191,7 @@ function main() {
     }
     process.stderr.write(
       "\nFix it, or add an exception to scripts/audit-production.mjs stating why\n" +
-        `the vulnerable path is unreachable from ${LANDING ? "the landing build" : "xtctx"} and what would remove the\n` +
+        `the vulnerable path is unreachable from ${SITE ? "the site build" : "xtctx"} and what would remove the\n` +
         "exception. An advisory nobody can write that argument for is not eligible.\n",
     );
   }

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="xtctx">
+  <!-- The tc join from the wordmark on the amber tile: the t's crossbar
+       carried on into the c of ctx. Source for apple-touch-icon.png too;
+       see brand/render.mjs. -->
+  <rect width="64" height="64" rx="14" fill="#e8b878"/>
+  <path d="M20 12 V40 Q20 48 28 48 M12 24 H44 A11 11 0 0 0 33 35 A11 11 0 0 0 44 46 A11 11 0 0 0 51.8 42.8"
+        fill="none" stroke="#0a1424" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

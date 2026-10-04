@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="xtctx">
+  <!-- Not used by the xtctx site. The template's `npm run assets:wordmark`
+       would set this beside the typed name; xtctx's wordmark is drawn
+       instead (brand/wordmark-*.svg, rasterised by brand/render.mjs), so do
+       not run it. Kept as the tc join so anything that does read it gets the
+       right mark. -->
+  <path d="M20 12 V40 Q20 48 28 48 M12 24 H44 A11 11 0 0 0 33 35 A11 11 0 0 0 44 46 A11 11 0 0 0 51.8 42.8"
+        fill="none" stroke="#e8b878" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

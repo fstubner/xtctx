@@ -62,7 +62,8 @@ them, the boundaries between them, and what each part is allowed to trust.
   the npm package, that the user deploys to their own Cloudflare account. Stores uploads in D1 and serves them back over MCP to the
   same account. Has its own tests (`npm run test:cloud`) and deploy steps
   (`cloud/README.md`).
-- **Landing site** (`landing/`) — static Astro site on GitHub Pages;
+- **Site** (`site/`) — static Astro site on GitHub Pages, a subtree of
+  product-site-template;
   no runtime relationship to the package.
 
 ## Lifecycle

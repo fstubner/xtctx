@@ -1,7 +1,7 @@
 # xtctx
 
 [![CI](https://github.com/fstubner/xtctx/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/fstubner/xtctx/actions/workflows/ci.yml)
-[![Landing Deploy](https://github.com/fstubner/xtctx/actions/workflows/deploy-landing.yml/badge.svg?branch=main)](https://github.com/fstubner/xtctx/actions/workflows/deploy-landing.yml)
+[![Site Deploy](https://github.com/fstubner/xtctx/actions/workflows/deploy-site.yml/badge.svg?branch=main)](https://github.com/fstubner/xtctx/actions/workflows/deploy-site.yml)
 [![Release](https://github.com/fstubner/xtctx/actions/workflows/release.yml/badge.svg)](https://github.com/fstubner/xtctx/actions/workflows/release.yml)
 [![npm Publish](https://github.com/fstubner/xtctx/actions/workflows/publish.yml/badge.svg)](https://github.com/fstubner/xtctx/actions/workflows/publish.yml)
 [![Latest Release](https://img.shields.io/github/v/release/fstubner/xtctx?display_name=tag&sort=semver)](https://github.com/fstubner/xtctx/releases)
@@ -372,7 +372,7 @@ blocks.
 
 ```bash
 npm ci
-npm --prefix landing ci
+npm --prefix site ci
 npm run verify:release
 ```
 

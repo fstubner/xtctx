@@ -152,10 +152,11 @@ describe("release gate", () => {
 });
 
 describe("workflows that run the release gate install what it needs", () => {
-  // verify:release runs test:cloud and the landing build, each against its own
-  // lockfile. release.yml installed only the root and landing, so the first
-  // real release run failed typechecking the Worker, after CI had been green.
-  it("installs root, landing and cloud dependencies before verify:release", async () => {
+  // verify:release runs test:cloud and the site build, each against its own
+  // lockfile. release.yml installed only the root and the site (then the old
+  // landing/ site), so the first real release run failed typechecking the
+  // Worker, after CI had been green.
+  it("installs root, site and cloud dependencies before verify:release", async () => {
     const dir = join(process.cwd(), ".github", "workflows");
     const gated: string[] = [];
     for (const name of await readdir(dir)) {
@@ -163,7 +164,7 @@ describe("workflows that run the release gate install what it needs", () => {
       const gate = text.indexOf("npm run verify:release");
       if (gate === -1) continue;
       gated.push(name);
-      for (const install of ["npm ci", "npm --prefix landing ci", "npm --prefix cloud ci"]) {
+      for (const install of ["npm ci", "npm --prefix site ci", "npm --prefix cloud ci"]) {
         const at = text.indexOf(`run: ${install}`);
         expect(at, `${name} runs \`${install}\``).toBeGreaterThan(-1);
         expect(at, `${name} runs \`${install}\` before verify:release`).toBeLessThan(gate);
