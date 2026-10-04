@@ -15,11 +15,22 @@ when someone runs it.
 3. It runs `verify:release` *before* writing anything, bumps the version
    across every file that carries it (`npm version` triggers the `version`
    script, which syncs the plugin manifests, the marketplace entry and the
-   landing site), writes the CHANGELOG entry from GitHub's generated notes,
-   then commits, tags and creates the GitHub Release. `CHANGELOG.md` keeps an
-   `## [Unreleased]` section at the top for work merged but not released; the
-   new entry is written beneath it and the section's body is dropped, because
-   the generated notes cover the same commits.
+   landing site), writes the CHANGELOG entry, then commits, tags and creates
+   the GitHub Release.
+
+   **The release notes are the ones you wrote.** `CHANGELOG.md` keeps an
+   `## [Unreleased]` section at the top; write what changed for a person using
+   xtctx there as work merges (Added / Changed / Fixed / Removed, no
+   refactors, tests or CI). The workflow moves that body under the new
+   `## [x.y.z](link) (date)` heading and leaves `[Unreleased]` empty above it.
+   GitHub's generated notes are used only for a **Pull requests** line of
+   links (and a full-changelog link) under your text. An empty
+   `[Unreleased]` does not block the release: the entry then holds GitHub's
+   generated list of pull-request titles under a line saying nothing was
+   written. Write the notes before dispatching so that does not happen. The
+   GitHub Release body is read back out of the committed `CHANGELOG.md`
+   section, so the release page and the file say the same thing. Tested in
+   `tests/release/changelog-step.test.ts`.
 4. With `publish_npm` left on, it then starts the `publish` workflow as a
    separate run against the tag it just created: tag check,
    `verify:release`, then `npm publish --provenance` over OIDC trusted
