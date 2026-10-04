@@ -176,10 +176,9 @@ function linkClass(link: (typeof navLinks)[number], index: number): string | und
       display: flex;
       align-items: center;
       justify-content: center;
-      /* 20px between links, and the separator centred in a 40px gap: the same as the landing bar (Nav.astro). */
-      gap: 20px;
+      gap: var(--ui-nav-link-gap);
       min-width: 0;
-      font-size: 0.8125rem;
+      font-size: var(--ui-nav-font-size);
       height: var(--sl-nav-height);
       line-height: 1;
     }
@@ -213,14 +212,13 @@ function linkClass(link: (typeof navLinks)[number], index: number): string | und
      * sits in that margin, negatively inset. */
     .docs-nav-links a.nav-group-start {
       position: relative;
-      margin-inline-start: 20px;
+      margin-inline-start: var(--ui-nav-group-gap);
     }
 
     .docs-nav-links a.nav-group-start::before {
       content: "";
       position: absolute;
-      inset-inline-start: -20px;
-      transform: translateX(-50%);
+      inset-inline-start: calc((var(--ui-nav-group-gap) + var(--ui-nav-link-gap) + 1px) / -2);
       top: 50%;
       width: 1px;
       height: 18px;
@@ -286,21 +284,6 @@ function linkClass(link: (typeof navLinks)[number], index: number): string | und
         padding-inline: 1rem;
       }
 
-      /* Tighter here, to fit beside search and the theme control; the group
-         gap keeps the same proportion to the link gap as at full width. */
-      .docs-nav-links {
-        gap: 12px;
-        font-size: 0.78rem;
-      }
-
-      .docs-nav-links a.nav-group-start {
-        margin-inline-start: 12px;
-      }
-
-      .docs-nav-links a.nav-group-start::before {
-        inset-inline-start: -12px;
-      }
-
       .docs-header-search {
         flex-basis: 8.75rem;
         width: 8.75rem;
@@ -333,8 +316,6 @@ function linkClass(link: (typeof navLinks)[number], index: number): string | und
 
       .docs-nav-links {
         margin-left: auto;
-        gap: 0.7rem;
-        font-size: 0.76rem;
       }
 
       .docs-header-search {
