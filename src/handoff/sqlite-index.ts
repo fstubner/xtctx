@@ -21,7 +21,8 @@ import {
   DEFAULT_WINDOW_SIZE,
   DEFAULT_WINDOW_STRIDE,
   type MessageRow,
-  planRetrievalUnits,
+  type RetrievalUnitPlan,
+  planRetrievalUnitWindows,
 } from "./retrieval-units.js";
 import { ScanInterrupted, scanTool, waitWithBudget } from "./scan.js";
 import {
@@ -40,6 +41,7 @@ import {
   sessionLine,
 } from "./export-file.js";
 import { literalSearch } from "./literal-search.js";
+import { WalCheckpointer } from "./wal-checkpointer.js";
 import {
   MIGRATED_FROM_SETTING,
   type PreparedStatements,
@@ -210,6 +212,14 @@ const SCAN_LEASE_POLL_MS = 250;
  * the lease heartbeat and the shutdown timer in between.
  */
 const SCAN_YIELD_INTERVAL_MS = 20;
+
+/**
+ * Longest one transaction of a session's window rebuild spends inserting.
+ * Half the yield interval, leaving room for the commit that follows: it
+ * writes the batch's full-text index, measured at about half as long as the
+ * inserts before it.
+ */
+const UNIT_BATCH_MS = SCAN_YIELD_INTERVAL_MS / 2;
 
 /**
  * The real model unless `XTCTX_DISABLE_EMBEDDINGS=1`.
@@ -740,7 +750,7 @@ export class SqliteHandoffIndex implements SessionService {
     }
     for (const ref of changed) {
       this.prepared().sessionRollup.run(ref);
-      this.rebuildRetrievalUnitsForSession(ref);
+      await this.rebuildRetrievalUnitsForSession(ref);
     }
     summary.complete = end !== null && end.sessions === summary.sessionsInFile;
     return summary;
@@ -893,8 +903,9 @@ export class SqliteHandoffIndex implements SessionService {
     // for.
     const heartbeat = setInterval(() => lease.renew(), SCAN_LEASE_RENEW_MS);
     heartbeat.unref?.();
+    const checkpointer = WalCheckpointer.start(this.getDb(), this.dbPath);
     try {
-      await this.scanUnderLease(lease);
+      await this.scanUnderLease(lease, checkpointer);
     } catch (error) {
       if (error instanceof ScanInterrupted) {
         // Closing, or the lease went to another process: stop as a killed
@@ -904,6 +915,7 @@ export class SqliteHandoffIndex implements SessionService {
       throw error;
     } finally {
       clearInterval(heartbeat);
+      await checkpointer.stop();
       lease.release();
     }
     await this.warmVectors();
@@ -914,10 +926,15 @@ export class SqliteHandoffIndex implements SessionService {
    * has held it for `SCAN_YIELD_INTERVAL_MS`, and stops the scan when the
    * index is closing or the lease is no longer this process's.
    */
-  private scanCheckpoint(lease: ScanLease): () => Promise<void> {
+  private scanCheckpoint(lease: ScanLease, checkpointer: WalCheckpointer): () => Promise<void> {
     return async () => {
       if (Date.now() - this.lastYieldAt >= SCAN_YIELD_INTERVAL_MS) {
         await new Promise<void>((resolve) => setImmediate(resolve));
+        // Here, where the scan is not writing (see `WalCheckpointer`), and not
+        // once the index is closing: `close` would wait for it.
+        if (!this.closed) {
+          await checkpointer.checkpointIfDue();
+        }
         this.lastYieldAt = Date.now();
       }
       if (this.closed) {
@@ -970,9 +987,9 @@ export class SqliteHandoffIndex implements SessionService {
     }
   }
 
-  private async scanUnderLease(lease: ScanLease): Promise<void> {
+  private async scanUnderLease(lease: ScanLease, checkpointer: WalCheckpointer): Promise<void> {
     const db = this.getDb();
-    const checkpoint = this.scanCheckpoint(lease);
+    const checkpoint = this.scanCheckpoint(lease, checkpointer);
     this.lastYieldAt = Date.now();
     const startedAt = new Date().toISOString();
     const touchedSessions = new Set<string>();
@@ -993,6 +1010,7 @@ export class SqliteHandoffIndex implements SessionService {
         stmts: this.prepared(),
         scopedRoot: this.scopedRoot,
         checkpoint,
+        durable: () => checkpointer.durable(),
       });
       for (const sessionRef of scanned.touchedSessions) {
         touchedSessions.add(sessionRef);
@@ -1010,7 +1028,7 @@ export class SqliteHandoffIndex implements SessionService {
       // Roll up message_count/preview once per touched session rather than
       // once per inserted message (which made indexing O(N²) per session).
       this.prepared().sessionRollup.run(sessionRef);
-      this.rebuildRetrievalUnitsForSession(sessionRef);
+      await this.rebuildRetrievalUnitsForSession(sessionRef, checkpoint);
       await checkpoint();
     }
     // Whatever the pass above did not reach, now that the stores are read.
@@ -1118,12 +1136,34 @@ export class SqliteHandoffIndex implements SessionService {
       if (Date.now() >= deadline) {
         return;
       }
-      this.rebuildRetrievalUnitsForSession(sessionRef);
+      await this.rebuildRetrievalUnitsForSession(sessionRef, checkpoint);
       await checkpoint();
     }
   }
 
-  private rebuildRetrievalUnitsForSession(sessionRef: string): void {
+  /**
+   * Bring one session's windows in line with its messages.
+   *
+   * The windows are planned one at a time and go in over several
+   * transactions of at most `UNIT_BATCH_MS` each, with `checkpoint` awaited
+   * between them. One transaction per session held the thread for most of a
+   * scan of one 1,600-message session: 0.73 of it at the median of 30 runs,
+   * up to 1.7 seconds. It grows with the session.
+   *
+   * Until the last transaction the session keeps its old windows beside the
+   * new ones and stays marked stale. The last one removes the old windows and
+   * clears the mark together, so a search in between never finds the session
+   * with fewer windows than it had before the rebuild began, and a scan
+   * stopped in between leaves the mark for the next rebuild, whose diff picks
+   * up where this one stopped. The mark is cleared only if the session's
+   * messages are still the ones the windows were planned from; otherwise it
+   * stays, and the reconcile pass at the end of the scan rebuilds the session
+   * again.
+   */
+  private async rebuildRetrievalUnitsForSession(
+    sessionRef: string,
+    checkpoint: () => Promise<void> = async () => {},
+  ): Promise<void> {
     const db = this.getDb();
     const stmts = this.prepared();
     const messages = stmts.selectSessionMessages.all(sessionRef) as MessageRow[];
@@ -1149,15 +1189,73 @@ export class SqliteHandoffIndex implements SessionService {
     // everything: unit ids are deterministic content hashes, so unchanged
     // windows (and, via the FK, their vectors) survive a re-index untouched.
     const now = new Date().toISOString();
-    const desired = planRetrievalUnits(sessionRef, messages, this.windowSize, this.windowStride);
+    const desired = new Map<string, RetrievalUnitPlan>();
+    for (const [unitId, unit] of planRetrievalUnitWindows(
+      sessionRef,
+      messages,
+      this.windowSize,
+      this.windowStride,
+    )) {
+      desired.set(unitId, unit);
+      await checkpoint();
+    }
 
     const existing = new Set(
       (stmts.selectUnitIds.all(sessionRef) as Array<{ id: string }>).map((row) => row.id),
     );
+    const missing = [...desired].filter(([unitId]) => !existing.has(unitId));
 
-    const stale = [...existing].filter((unitId) => !desired.has(unitId));
+    let next = 0;
+    const insertBatch = db.transaction(() => {
+      // A session found by its coverage alone has no mark, and once the new
+      // last window is in, its coverage no longer gives it away.
+      stmts.markUnitsStale.run(staleKey, now);
+      const started = Date.now();
+      while (next < missing.length && Date.now() - started < UNIT_BATCH_MS) {
+        const [unitId, unit] = missing[next++];
+        const inserted = stmts.insertUnit.run(
+          unitId,
+          sessionRef,
+          session.tool,
+          unit.start.message_index,
+          unit.end.message_index,
+          unit.start.timestamp,
+          unit.end.timestamp,
+          unit.content,
+          unit.contentHash,
+          now,
+        );
+        // Written since `existing` was read, by whoever else rebuilt this
+        // session while this one waited.
+        if (inserted.changes === 0) {
+          continue;
+        }
+        // Only the transcript text is keyword-indexed. `unit.content` also
+        // carries the window scaffolding ("Session: …", "Turn 1/8 |
+        // message_index=0 | user @ …") that gives the embedding model
+        // ordering context; indexing it made `message_index` or a tool name
+        // match every session.
+        stmts.insertUnitFts.run(unitId, sessionRef, session.tool, unit.searchableText);
+      }
+    });
+    while (next < missing.length) {
+      insertBatch();
+      await checkpoint();
+    }
 
-    const applyDiff = db.transaction(() => {
+    db.transaction(() => {
+      const current = stmts.selectSessionMessageIds.all(sessionRef) as Array<{ id: string }>;
+      if (
+        current.length !== messages.length ||
+        current.some((row, position) => row.id !== messages[position].id)
+      ) {
+        // Planned from messages that have since changed; see above.
+        stmts.markUnitsStale.run(staleKey, now);
+        return;
+      }
+      const stale = (stmts.selectUnitIds.all(sessionRef) as Array<{ id: string }>)
+        .map((row) => row.id)
+        .filter((unitId) => !desired.has(unitId));
       // The FTS delete goes out once for the whole batch rather than once per
       // unit. `unit_id` is an UNINDEXED column of an FTS5 table, so every
       // delete against it scans the virtual table — measured at ~9ms across
@@ -1173,33 +1271,9 @@ export class SqliteHandoffIndex implements SessionService {
       for (const unitId of stale) {
         stmts.deleteUnit.run(unitId);
       }
-      for (const [unitId, unit] of desired) {
-        if (existing.has(unitId)) {
-          continue;
-        }
-        stmts.insertUnit.run(
-          unitId,
-          sessionRef,
-          session.tool,
-          unit.start.message_index,
-          unit.end.message_index,
-          unit.start.timestamp,
-          unit.end.timestamp,
-          unit.content,
-          unit.contentHash,
-          now,
-        );
-        // Only the transcript text is keyword-indexed. `unit.content` also
-        // carries the window scaffolding ("Session: …", "Turn 1/8 |
-        // message_index=0 | user @ …") that gives the embedding model
-        // ordering context; indexing it made `message_index` or a tool name
-        // match every session.
-        stmts.insertUnitFts.run(unitId, sessionRef, session.tool, unit.searchableText);
-      }
       // In the same transaction as the windows it vouches for.
       stmts.clearUnitsStale.run(staleKey);
-    });
-    applyDiff();
+    })();
   }
 
   private prepared(): PreparedStatements {
