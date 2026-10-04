@@ -38,7 +38,7 @@
     "chromedriver": "^153.0.1",
     "lighthouse": "^13.4.1",
     "linkedom": "^0.18.13",
-    "selenium-webdriver": "^4.49.0",
+    "selenium-webdriver": "^4.50.0",
     "sharp": "^0.35.4",
     "typescript": "^5.5.0"
   }
