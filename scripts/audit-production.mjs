@@ -51,19 +51,6 @@ const SITE_EXCEPTIONS = [
       "files with no server and no cache of its own.",
     removedBy: "A fixed http-cache-semantics (every version is affected as of 2026-10-03), or astro dropping it.",
   },
-  {
-    advisory: "GHSA-c475-qrg2-pj4r",
-    package: "basic-ftp",
-    why:
-      "Reached only through proxy-agent > pac-proxy-agent > get-uri, which opens an FTP connection only " +
-      "when the proxy is configured as a pac+ftp:// URL. proxy-agent is used by chromedriver's driver " +
-      "download and lighthouse's browser fetch, devDependencies run by hand on a developer's machine for " +
-      "the a11y and Lighthouse checks; neither runs in CI or ships in the built site. The advisory is CPU " +
-      "denial of service while parsing a directory listing sent by that FTP server.",
-    removedBy:
-      "get-uri accepting basic-ftp 6.2.1 or later (get-uri 8.0.1, the latest, pins ^5.3.1 as of " +
-      "2026-10-03), or the site dropping lighthouse and @axe-core/cli.",
-  },
 ];
 
 const SITE = process.argv.includes("--site");
