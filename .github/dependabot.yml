@@ -20,6 +20,14 @@ updates:
     groups:
       dev-dependencies:
         dependency-type: development
+    # TypeScript 7 (the native compiler) is held back until the tools that
+    # declare it as a peer accept it: on 2026-10-05 typescript-eslint 8.71
+    # wanted <6.1.0 and @astrojs/check 0.9.10 wanted ^5 || ^6, so every bump
+    # to 7 failed at npm install (#406, #414). The same rule is on each npm
+    # entry below.
+    ignore:
+      - dependency-name: typescript
+        versions: [">=7.0.0"]
 
   - package-ecosystem: npm
     directory: /site
@@ -27,6 +35,9 @@ updates:
       interval: weekly
     commit-message:
       prefix: deps
+    ignore:
+      - dependency-name: typescript
+        versions: [">=7.0.0"]
 
   # The Worker: wrangler, workers-types and the OAuth provider move often, and
   # the provider is security-relevant.
@@ -39,3 +50,6 @@ updates:
     groups:
       dev-dependencies:
         dependency-type: development
+    ignore:
+      - dependency-name: typescript
+        versions: [">=7.0.0"]
