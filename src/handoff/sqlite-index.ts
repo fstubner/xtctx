@@ -906,12 +906,15 @@ export class SqliteHandoffIndex implements SessionService {
     // for.
     const heartbeat = setInterval(() => lease.renew(), SCAN_LEASE_RENEW_MS);
     heartbeat.unref?.();
-    const checkpointer = WalCheckpointer.start(this.getDb(), this.dbPath);
-    this.scanCheckpointer = checkpointer;
-    if (this.closed) {
-      checkpointer.abandon();
-    }
+    let checkpointer: WalCheckpointer | null = null;
     try {
+      // Inside the try, so a worker that cannot be created still releases
+      // the lease rather than leaving the heartbeat to renew it for good.
+      checkpointer = WalCheckpointer.start(this.getDb(), this.dbPath);
+      this.scanCheckpointer = checkpointer;
+      if (this.closed) {
+        checkpointer.abandon();
+      }
       await this.scanUnderLease(lease, checkpointer);
     } catch (error) {
       if (error instanceof ScanInterrupted) {
@@ -922,8 +925,10 @@ export class SqliteHandoffIndex implements SessionService {
       throw error;
     } finally {
       clearInterval(heartbeat);
+      // Cleared after `stop`, so a close that arrives during it can still
+      // abandon the worker rather than wait for its last checkpoint.
+      await checkpointer?.stop();
       this.scanCheckpointer = null;
-      await checkpointer.stop();
       lease.release();
     }
     await this.warmVectors();

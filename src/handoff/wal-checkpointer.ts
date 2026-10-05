@@ -51,30 +51,28 @@ parentPort.on("message", (message) => {
 /**
  * Keeps a scan's disk flushes off the thread that answers tool calls.
  *
- * The scan yields every 20ms, but a commit cannot be interrupted, and at the
- * default `synchronous = FULL` every commit flushes the write-ahead log to
- * disk, while the commit that crosses 1,000 pages also checkpoints: it copies
- * the log into the database and flushes both. With two other processes
- * committing to the same disk, one commit took 4,445ms of a 6,515ms scan;
- * that is the event loop, and every tool call queued behind it, waiting on
- * the disk.
+ * The scan yields every 20ms, but a commit cannot be interrupted, and the
+ * commit that takes the write-ahead log past 1,000 pages also checkpoints: it
+ * copies the log into the database and flushes both to disk. With two other
+ * processes committing to the same disk, one commit took 4,445ms of a 6,515ms
+ * scan; that is the event loop, and every tool call queued behind it, waiting
+ * on the disk.
  *
- * While a scan runs, this sets `synchronous = NORMAL`, under which a commit in
- * write-ahead-log mode writes the log without flushing it, and turns SQLite's
- * automatic checkpoint off. A worker thread with its own connection
- * checkpoints instead, so the flushes happen on its thread, and the scan
- * awaits each one at a yield point rather than writing alongside it: a
- * checkpoint left to run on a timer while the scan kept committing held
- * those commits up instead, by up to 417ms each with two scans running at
- * once.
+ * While a scan runs, this turns SQLite's automatic checkpoint off, and a
+ * worker thread with its own connection checkpoints instead, so the flushes
+ * happen on its thread. The scan awaits each one at a yield point rather than
+ * writing alongside it: a checkpoint left to run on a timer while the scan
+ * kept committing held those commits up instead, by up to 417ms each with two
+ * scans running at once.
  *
- * `NORMAL` costs durability, not integrity: a process that is killed loses
- * nothing, because the log is written before each commit returns, but a power
- * cut can lose commits made since the last flush. Within the database that is
- * harmless, because the log is replayed in order, so what survives is always an
- * earlier state of the index. Outside it is not: a cursor is a separate file,
- * and one that survived the commits it vouches for would skip those messages
- * for good. `durable` flushes the log first, off this thread.
+ * Commits themselves do not flush: better-sqlite3 builds SQLite with
+ * `synchronous = NORMAL` for write-ahead-log databases, so a commit writes the
+ * log and returns, and a power cut can lose commits made since the last
+ * flush. Within the database that is harmless, because the log is replayed in
+ * order, so what survives is always an earlier state of the index. Outside it
+ * is not: a cursor is a separate file, and one that survived the commits it
+ * vouches for would skip those messages for good. `durable` flushes the log
+ * before a cursor is saved, off this thread.
  */
 export class WalCheckpointer {
   private lastCheckpointAt = Date.now();
@@ -89,16 +87,13 @@ export class WalCheckpointer {
     private readonly walPath: string,
     private readonly worker: Worker | null,
     private readonly exited: Promise<void>,
-    private readonly restore: { synchronous: number; autocheckpoint: number },
+    private readonly restoreAutocheckpoint: number,
   ) {
     worker?.on("message", (result: CheckpointResult | null) => this.settle(result));
   }
 
   static start(db: DatabaseHandle, dbPath: string): WalCheckpointer {
-    const restore = {
-      synchronous: db.pragma("synchronous", { simple: true }) as number,
-      autocheckpoint: db.pragma("wal_autocheckpoint", { simple: true }) as number,
-    };
+    const restore = db.pragma("wal_autocheckpoint", { simple: true }) as number;
     // Nothing to flush for an in-memory index, and no file for a worker to open.
     if (db.memory) {
       return new WalCheckpointer(db, "", null, Promise.resolve(), restore);
@@ -118,7 +113,6 @@ export class WalCheckpointer {
     worker.unref();
     const exited = new Promise<void>((resolve) => worker.once("exit", () => resolve()));
 
-    db.pragma("synchronous = NORMAL");
     db.pragma("wal_autocheckpoint = 0");
     const checkpointer = new WalCheckpointer(db, `${dbPath}-wal`, worker, exited, restore);
     void exited.then(() => {
@@ -167,7 +161,8 @@ export class WalCheckpointer {
   }
 
   /**
-   * Checkpoint once more on the worker, close it, and restore both settings.
+   * Checkpoint once more on the worker, close it, and turn the automatic
+   * checkpoint back on.
    * Resolves with that last checkpoint's result, or null when the worker did
    * not run one: it failed to start, or there is no file to checkpoint.
    */
@@ -175,13 +170,16 @@ export class WalCheckpointer {
     let result: CheckpointResult | null = null;
     if (!this.abandoned) {
       result = await this.request("stop");
+    }
+    // Checked again: `abandon` may have answered the request above, and the
+    // worker then exits only when its checkpoint returns.
+    if (!this.abandoned) {
       await this.exited;
     }
     try {
-      this.db.pragma(`synchronous = ${this.restore.synchronous}`);
-      this.db.pragma(`wal_autocheckpoint = ${this.restore.autocheckpoint}`);
+      this.db.pragma(`wal_autocheckpoint = ${this.restoreAutocheckpoint}`);
     } catch {
-      // Closed underneath: nothing left to restore them on.
+      // Closed underneath: nothing left to restore it on.
     }
     return result;
   }

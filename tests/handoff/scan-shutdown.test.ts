@@ -118,14 +118,13 @@ describe("a scan shares its thread", () => {
     // other processes were writing to (4,445ms of a 6,515ms scan of the short
     // ones). Windows now go in in batches, and the flushing happens on
     // a worker thread (see `WalCheckpointer`).
-    // The floor only checks the corpus gave the ratio something to measure:
-    // a quarter of the scan has to be well above the 20ms yield interval, or
-    // the ratio cannot tell a stall from an ordinary turn. Set by that rather
-    // than by how fast a runner is: it was 1,000ms, then 500ms, and failed at
-    // 994ms and 497ms as runners got faster. The ratio below is the assertion
-    // that matters.
+    // The floor only checks the corpus gave the check something to measure.
+    // It was 1,000ms, then 500ms, and failed at 994ms and 497ms as runners got
+    // faster. The gap allowed is a quarter of the scan, but never under 100ms:
+    // on a fast runner a quarter shrinks toward what one GC or antivirus pause
+    // takes, while the stall this guards against held the thread for 1.7s.
     expect(took).toBeGreaterThan(200);
-    expect(longestGap).toBeLessThan(took / 4);
+    expect(longestGap).toBeLessThan(Math.max(took / 4, 100));
   });
 
   it("stops at its next checkpoint when the index closes, and claims nothing it did not finish", async () => {

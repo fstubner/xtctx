@@ -29,14 +29,10 @@ describe("WalCheckpointer", () => {
     const dbPath = join(dir, "xtctx.db");
     const db = openDatabase(dbPath);
     try {
-      const before = {
-        synchronous: db.pragma("synchronous", { simple: true }),
-        autocheckpoint: db.pragma("wal_autocheckpoint", { simple: true }),
-      };
+      const before = db.pragma("wal_autocheckpoint", { simple: true });
 
       const checkpointer = WalCheckpointer.start(db, dbPath);
-      // NORMAL: commits write the log without flushing it; 0: no checkpoint here.
-      expect(db.pragma("synchronous", { simple: true })).toBe(1);
+      // No checkpoint on this connection while the worker has them.
       expect(db.pragma("wal_autocheckpoint", { simple: true })).toBe(0);
 
       const text = "x".repeat(100_000);
@@ -49,8 +45,7 @@ describe("WalCheckpointer", () => {
       expect(last).not.toBeNull();
       expect(last!.log).toBeGreaterThan(0);
       expect(last!.checkpointed).toBe(last!.log);
-      expect(db.pragma("synchronous", { simple: true })).toBe(before.synchronous);
-      expect(db.pragma("wal_autocheckpoint", { simple: true })).toBe(before.autocheckpoint);
+      expect(db.pragma("wal_autocheckpoint", { simple: true })).toBe(before);
     } finally {
       db.close();
     }
@@ -64,14 +59,14 @@ describe("WalCheckpointer", () => {
     const dbPath = join(dir, "xtctx.db");
     const db = openDatabase(dbPath);
     try {
-      const before = db.pragma("synchronous", { simple: true });
+      const before = db.pragma("wal_autocheckpoint", { simple: true });
       const checkpointer = WalCheckpointer.start(db, dbPath);
       db.prepare("INSERT INTO settings(key, value) VALUES (?, ?)").run("k", "x".repeat(100_000));
 
       checkpointer.abandon();
 
       expect(await checkpointer.stop()).toBeNull();
-      expect(db.pragma("synchronous", { simple: true })).toBe(before);
+      expect(db.pragma("wal_autocheckpoint", { simple: true })).toBe(before);
     } finally {
       db.close();
     }
