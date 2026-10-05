@@ -191,12 +191,35 @@ export abstract class AbstractScraper<T extends ConversationChunk = Conversation
    * scan — silently, since losing them only costs a re-read.
    */
   async saveScrapedPosition(state: Partial<ScraperState>): Promise<void> {
+    if (this.held) {
+      this.held = {
+        ...this.held,
+        ...state,
+        files: { ...(this.held.files ?? {}), ...(state.files ?? {}) },
+      };
+      return;
+    }
     const existing = await this.stateManager.load(this.tool);
     await this.stateManager.save(this.tool, {
       ...existing,
       ...state,
       files: { ...(existing.files ?? {}), ...(state.files ?? {}) },
     });
+  }
+
+  /** What `saveScrapedPosition` was given while held; null when not holding. */
+  private held: Partial<ScraperState> | null = null;
+
+  holdScrapedPosition(): void {
+    this.held = {};
+  }
+
+  async releaseScrapedPosition(write: boolean): Promise<void> {
+    const held = this.held;
+    this.held = null;
+    if (write && held && Object.keys(held).length > 0) {
+      await this.saveScrapedPosition(held);
+    }
   }
 }
 

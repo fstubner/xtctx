@@ -60,9 +60,9 @@ interface ScanToolDeps {
    */
   checkpoint?: () => Promise<void>;
   /**
-   * Awaited before the timestamp cursor is saved. Makes what the scan wrote
-   * survive a power cut first, so the cursor never outlives the rows it
-   * vouches for; see `WalCheckpointer`.
+   * Awaited before the scraper's state and the timestamp cursor are saved.
+   * Makes what the scan wrote survive a power cut first, so neither outlives
+   * the rows it vouches for; see `WalCheckpointer`.
    */
   durable?: () => Promise<void>;
 }
@@ -146,6 +146,8 @@ export async function scanTool(
     (sessionId, messageIndex) =>
       stmts.messageAtIndex.get(`${tool}:${sessionId}`, messageIndex) !== undefined,
   );
+  // Released below once what the scrape wrote is on disk; see there.
+  scraper.holdScrapedPosition?.();
   try {
     for await (const chunk of scraper.scrape()) {
       // Before the write, or the row about to be inserted would move the
@@ -198,10 +200,13 @@ export async function scanTool(
     // everything it never reached.
     pruneRereadSessions(db, stmts, writtenIds, lowestWritten, lowestStored, scanStartedAt);
 
-    // The cursors a scraper saves for itself, per file, are already on disk
-    // by now; those carry the last row they vouch for, and a scraper re-reads
-    // a file whose row the index no longer holds (`useIndexProbe`).
+    // What the scraper saved for itself is written only now, after the prune
+    // and the flush. Its scraper-version marker says a one-off re-read after
+    // an upgrade is done, and written before them, it could survive a power
+    // cut that lost the re-read rows and the prune of the old ones: the stale
+    // rows then sit where the index probe finds them, so nothing repairs them.
     await deps.durable?.();
+    await scraper.releaseScrapedPosition?.(true);
     if (latestTimestamp) {
       await scraper.saveScrapedPosition({
         lastTimestamp: overlapTimestamp(latestTimestamp),
@@ -223,6 +228,8 @@ export async function scanTool(
     // same window is safe (message ids are deterministic hashes).
   } finally {
     scraper.useIndexProbe?.(undefined);
+    // A scan that failed or was interrupted claims nothing it held.
+    await scraper.releaseScrapedPosition?.(false);
     // The last session a scraper yielded has nobody to move past it.
     if (openSession !== null) {
       stmts.sessionRollup.run(openSession);

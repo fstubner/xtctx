@@ -15,6 +15,24 @@ import type { Database as DatabaseHandle } from "better-sqlite3";
  */
 const CHECKPOINT_INTERVAL_MS = 100;
 
+/**
+ * Once per process: a worker that cannot start fails the same way on every
+ * scan, and a server scans on most tool calls.
+ */
+let workerFailureReported = false;
+
+function reportWorkerFailure(error: unknown): void {
+  if (workerFailureReported) {
+    return;
+  }
+  workerFailureReported = true;
+  process.stderr.write(
+    `xtctx: the scan's checkpoint worker failed ` +
+      `(${error instanceof Error ? error.message : String(error)}); ` +
+      `scans checkpoint on the main thread instead, which can hold up tool calls.\n`,
+  );
+}
+
 /** One row of `PRAGMA wal_checkpoint`: pages in the log, and how many are now in the database. */
 export interface CheckpointResult {
   busy: number;
@@ -107,8 +125,10 @@ export class WalCheckpointer {
       },
     });
     // A worker that fails to start answers nothing; the log then waits for
-    // `stop` to hand checkpointing back to this connection. Slower, never wrong.
-    worker.on("error", () => {});
+    // `stop` to hand checkpointing back to this connection. Slower, never
+    // wrong, so the scan carries on; but it is the stall this class exists to
+    // prevent, so it is said once, on stderr (stdout is the MCP channel).
+    worker.on("error", (error) => reportWorkerFailure(error));
     // Held open only while the scan waits on an answer; see `request`.
     worker.unref();
     const exited = new Promise<void>((resolve) => worker.once("exit", () => resolve()));
