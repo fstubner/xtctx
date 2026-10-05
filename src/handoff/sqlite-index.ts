@@ -322,6 +322,8 @@ export class SqliteHandoffIndex implements SessionService {
   private lastYieldAt = 0;
   /** Whether this process has scanned as the lease holder; see `truncateWal`. */
   private scannedAsHolder = false;
+  /** The running scan's, so `close` can stop waiting on it; see `WalCheckpointer.abandon`. */
+  private scanCheckpointer: WalCheckpointer | null = null;
   private readonly createIfMissing: boolean;
   /** Canonical, and compared normalized; see `canonicalRoot`. */
   private readonly scopedRoot: string;
@@ -761,6 +763,7 @@ export class SqliteHandoffIndex implements SessionService {
     // again, and one already running closes what it opened (see initialize).
     // A scan sees it at its next checkpoint and stops there.
     this.closed = true;
+    this.scanCheckpointer?.abandon();
     await this.initialized.catch(() => {});
     // A scan may still be running because a caller stopped waiting for it.
     // Closing the database underneath it would turn an ordinary shutdown into
@@ -904,6 +907,10 @@ export class SqliteHandoffIndex implements SessionService {
     const heartbeat = setInterval(() => lease.renew(), SCAN_LEASE_RENEW_MS);
     heartbeat.unref?.();
     const checkpointer = WalCheckpointer.start(this.getDb(), this.dbPath);
+    this.scanCheckpointer = checkpointer;
+    if (this.closed) {
+      checkpointer.abandon();
+    }
     try {
       await this.scanUnderLease(lease, checkpointer);
     } catch (error) {
@@ -915,6 +922,7 @@ export class SqliteHandoffIndex implements SessionService {
       throw error;
     } finally {
       clearInterval(heartbeat);
+      this.scanCheckpointer = null;
       await checkpointer.stop();
       lease.release();
     }

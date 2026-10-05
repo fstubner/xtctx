@@ -81,6 +81,8 @@ export class WalCheckpointer {
   private pending: ((result: CheckpointResult | null) => void) | null = null;
   /** Set once the worker has exited, after which nothing will answer. */
   private exitedAlready = false;
+  /** Set by `abandon`: nothing waits on the worker from then on. */
+  private abandoned = false;
 
   private constructor(
     private readonly db: DatabaseHandle,
@@ -170,8 +172,11 @@ export class WalCheckpointer {
    * not run one: it failed to start, or there is no file to checkpoint.
    */
   async stop(): Promise<CheckpointResult | null> {
-    const result = await this.request("stop");
-    await this.exited;
+    let result: CheckpointResult | null = null;
+    if (!this.abandoned) {
+      result = await this.request("stop");
+      await this.exited;
+    }
     try {
       this.db.pragma(`synchronous = ${this.restore.synchronous}`);
       this.db.pragma(`wal_autocheckpoint = ${this.restore.autocheckpoint}`);
@@ -181,9 +186,35 @@ export class WalCheckpointer {
     return result;
   }
 
+  /**
+   * Stop waiting on the worker, for an index that is closing.
+   *
+   * `stop` runs one more checkpoint and waits for the worker to exit, and a
+   * checkpoint already running cannot be cut short: it is native code, and
+   * `terminate` takes effect only when it returns. On a busy disk that is
+   * seconds, and a server told to shut down has a two-second grace window.
+   * Closing does not need the checkpoint, because the closing connection
+   * truncates the log itself when it can (`truncateWal`), and leaves it for
+   * the next server when it cannot.
+   *
+   * So this answers the scan's pending request now, with no result, and lets
+   * the worker go: terminated, and unreferenced so it does not hold the
+   * process open. A checkpoint cut off by the process exiting is a crash as
+   * far as SQLite is concerned, which the log is built to survive.
+   */
+  abandon(): void {
+    if (!this.worker || this.abandoned) {
+      return;
+    }
+    this.abandoned = true;
+    this.worker.unref();
+    void this.worker.terminate();
+    this.settle(null);
+  }
+
   /** One request at a time: the scan awaits each before it writes again. */
   private request(message: "checkpoint" | "stop"): Promise<CheckpointResult | null> {
-    if (!this.worker || this.exitedAlready) {
+    if (!this.worker || this.exitedAlready || this.abandoned) {
       return Promise.resolve(null);
     }
     const worker = this.worker;
@@ -193,7 +224,7 @@ export class WalCheckpointer {
     worker.ref();
     return new Promise((resolve) => {
       this.pending = (result) => {
-        if (message !== "stop") {
+        if (message !== "stop" && !this.abandoned) {
           worker.unref();
         }
         resolve(result);

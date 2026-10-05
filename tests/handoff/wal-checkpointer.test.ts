@@ -56,6 +56,27 @@ describe("WalCheckpointer", () => {
     }
   });
 
+  // Closing mid-scan waited for the worker: one more checkpoint in `stop`, after
+  // any already running. With the disk busy that took a close to 3,977ms
+  // (25 closes, two other processes writing and flushing), against a server's
+  // two-second grace window.
+  it("waits for no checkpoint once abandoned, and still hands the connection back", async () => {
+    const dbPath = join(dir, "xtctx.db");
+    const db = openDatabase(dbPath);
+    try {
+      const before = db.pragma("synchronous", { simple: true });
+      const checkpointer = WalCheckpointer.start(db, dbPath);
+      db.prepare("INSERT INTO settings(key, value) VALUES (?, ?)").run("k", "x".repeat(100_000));
+
+      checkpointer.abandon();
+
+      expect(await checkpointer.stop()).toBeNull();
+      expect(db.pragma("synchronous", { simple: true })).toBe(before);
+    } finally {
+      db.close();
+    }
+  });
+
   // The test runner keeps its own process alive, so only a process of its own
   // shows this: with the worker unreferenced, a scan awaiting its answer had
   // nothing holding the event loop open, and a one-off command such as
