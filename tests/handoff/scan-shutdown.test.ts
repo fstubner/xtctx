@@ -74,13 +74,23 @@ describe("a scan shares its thread", () => {
     await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
-  it("lets the event loop turn while it works", async () => {
+  // Many short sessions, as the index first meets most projects, and one long
+  // one, which is what a session's windows cost the most on.
+  it.each([
+    { corpus: "many short sessions", sessions: 40, messages: 40 },
+    { corpus: "one long session", sessions: 1, messages: 1_600 },
+  ])("lets the event loop turn while it works: $corpus", async ({ sessions, messages }) => {
     const scraper = new InMemoryScraper(function* () {
-      for (let s = 0; s < 40; s++) for (let i = 0; i < 40; i++) yield chunk(s, i);
+      for (let s = 0; s < sessions; s++) for (let i = 0; i < messages; i++) yield chunk(s, i);
     });
     index = new SqliteHandoffIndex(dbPath, dir, [{ tool: "codex", scraper }], {
       refreshBudgetMs: 0,
     });
+    // Opened before the clock starts: this is about the scan. Opening creates
+    // the schema in synchronous commits of its own, and with the disk busy it
+    // was once the longest stretch measured here (4.3s), before the scan had
+    // begun.
+    await index.listIndexedSessions(1);
 
     let last = Date.now();
     let longestGap = 0;
@@ -100,15 +110,21 @@ describe("a scan shares its thread", () => {
       clearInterval(ticker);
     }
 
-    // Relative, so a loaded machine slowing everything down does not fail it:
-    // before, one stretch held the thread for over nine-tenths of the scan
-    // (1,515ms of 1,621ms on this corpus); the longest now is one session's
-    // windows, a small fraction of it.
-    // The floor only checks the corpus gave the ratio something to measure.
-    // It was 1,000ms and failed at 994ms on a fast CI runner; the ratio below
-    // is the assertion that matters.
-    expect(took).toBeGreaterThan(500);
-    expect(longestGap).toBeLessThan(took / 4);
+    // Relative, so a loaded machine slowing everything down does not fail it.
+    // Before, one stretch held the thread for over nine-tenths of the scan
+    // (1,515ms of 1,621ms on the short sessions). After that the longest were
+    // a session's windows, built in one transaction (up to 1,721ms of a
+    // 2,188ms scan of the long session), and a commit flushing to a disk
+    // other processes were writing to (4,445ms of a 6,515ms scan of the short
+    // ones). Windows now go in in batches, and the flushing happens on
+    // a worker thread (see `WalCheckpointer`).
+    // The floor only checks the corpus gave the check something to measure.
+    // It was 1,000ms, then 500ms, and failed at 994ms and 497ms as runners got
+    // faster. The gap allowed is a quarter of the scan, but never under 100ms:
+    // on a fast runner a quarter shrinks toward what one GC or antivirus pause
+    // takes, while the stall this guards against held the thread for 1.7s.
+    expect(took).toBeGreaterThan(200);
+    expect(longestGap).toBeLessThan(Math.max(took / 4, 100));
   });
 
   it("stops at its next checkpoint when the index closes, and claims nothing it did not finish", async () => {
@@ -161,6 +177,69 @@ describe("a scan shares its thread", () => {
       expect(existsSync(wal) ? statSync(wal).size : 0).toBe(0);
     } finally {
       other.close();
+    }
+  });
+
+  // Windows now go in over many transactions, so a scan can stop between two
+  // of them. What it leaves must be safe to find in that state: the session
+  // still marked for the windows it did not get, the keyword index matching
+  // the windows, and the next scan finishing the job.
+  it("leaves a session it stopped windowing marked, and the next scan finishes it", async () => {
+    const sessionRef = "codex:s0";
+    const scraper = new InMemoryScraper(function* () {
+      for (let i = 0; i < 1_600; i++) yield chunk(0, i);
+    });
+    index = new SqliteHandoffIndex(dbPath, dir, [{ tool: "codex", scraper }], {
+      refreshBudgetMs: 0,
+    });
+    await index.listIndexedSessions(1);
+
+    // 8-message windows every 4 messages over 1,600 messages.
+    const allWindows = 399;
+    const reader = new Database(dbPath, { readonly: true });
+    const count = (sql: string) => (reader.prepare(sql).get(sessionRef) as { c: number }).c;
+    const unitsSql = "SELECT COUNT(*) AS c FROM retrieval_units WHERE session_ref = ?";
+    const ftsSql = "SELECT COUNT(*) AS c FROM retrieval_units_fts WHERE session_ref = ?";
+    const markSql = "SELECT COUNT(*) AS c FROM settings WHERE key = 'units_stale:' || ?";
+    let seenMidway = -1;
+    try {
+      let closing: Promise<void> | undefined;
+      const watcher = setInterval(() => {
+        const units = count(unitsSql);
+        if (!closing && units > 0) {
+          seenMidway = units;
+          closing = index!.close();
+        }
+      }, 2);
+      try {
+        await index.listRecentSessions(5);
+        await index.whenScanSettled();
+        await closing;
+      } finally {
+        clearInterval(watcher);
+      }
+      index = undefined;
+
+      // Stopped partway: in one transaction this saw all of them or none.
+      expect(seenMidway).toBeGreaterThan(0);
+      expect(seenMidway).toBeLessThan(allWindows);
+      const leftUnits = count(unitsSql);
+      expect(leftUnits).toBeLessThan(allWindows);
+      expect(count(ftsSql)).toBe(leftUnits);
+      expect(count(markSql)).toBe(1);
+
+      const nothingNew = new InMemoryScraper(() => []);
+      index = new SqliteHandoffIndex(dbPath, dir, [{ tool: "codex", scraper: nothingNew }], {
+        refreshBudgetMs: 0,
+      });
+      await index.listRecentSessions(5);
+      await index.whenScanSettled();
+
+      expect(count(unitsSql)).toBe(allWindows);
+      expect(count(ftsSql)).toBe(allWindows);
+      expect(count(markSql)).toBe(0);
+    } finally {
+      reader.close();
     }
   });
 });

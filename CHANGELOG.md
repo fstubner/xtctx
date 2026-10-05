@@ -16,6 +16,14 @@ Each group lists the versions it covers and says which of them reached npm.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Tool calls no longer wait behind a scan.** A scan could still hold the
+  server for most of its run: about three-quarters of it while building
+  search windows for one long session, and seconds at a time while writing to
+  a busy disk. Windows are now built in small batches, and the disk flushes
+  happen on a background thread.
+
 ## [0.22.1](https://github.com/fstubner/xtctx/releases/tag/xtctx-v0.22.1) (2026-10-03)
 
 xtctx no longer points at any hosted sync service. Cloud sync stays available

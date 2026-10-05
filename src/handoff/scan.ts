@@ -59,6 +59,12 @@ interface ScanToolDeps {
    * during a long scan and stop it by throwing `ScanInterrupted`.
    */
   checkpoint?: () => Promise<void>;
+  /**
+   * Awaited before the timestamp cursor is saved. Makes what the scan wrote
+   * survive a power cut first, so the cursor never outlives the rows it
+   * vouches for; see `WalCheckpointer`.
+   */
+  durable?: () => Promise<void>;
 }
 
 /**
@@ -192,6 +198,10 @@ export async function scanTool(
     // everything it never reached.
     pruneRereadSessions(db, stmts, writtenIds, lowestWritten, lowestStored, scanStartedAt);
 
+    // The cursors a scraper saves for itself, per file, are already on disk
+    // by now; those carry the last row they vouch for, and a scraper re-reads
+    // a file whose row the index no longer holds (`useIndexProbe`).
+    await deps.durable?.();
     if (latestTimestamp) {
       await scraper.saveScrapedPosition({
         lastTimestamp: overlapTimestamp(latestTimestamp),
