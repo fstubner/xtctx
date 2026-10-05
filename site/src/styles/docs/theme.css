@@ -72,7 +72,7 @@ html[data-theme='light'] ::backdrop {
      on a declared surface and then failed on a composite one (the
      changelog's release header lays a 1.8% wash over a card that lays a
      2.8% wash over the page). #4e6386 is xtctx light muted from
-     design-tokens.json / xtctx-tokens.css. Do not lighten this. */
+     design-tokens.json / docs/design/xtctx-tokens.css. Do not lighten this. */
   --sl-color-gray-3: #4e6386;
   --sl-color-gray-4: #c6d0dd;
   --sl-color-gray-5: #e6efff;

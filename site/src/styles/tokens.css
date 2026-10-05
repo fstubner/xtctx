@@ -75,7 +75,7 @@
   color-scheme: dark;
 
   /* Brand accent: xtctx amber (#e8b878 from the live landing / branding
-   * gradient), not the template's green #22c55e. styles/xtctx-tokens.css
+   * gradient), not the template's green #22c55e. docs/design/xtctx-tokens.css
    * still declares teal #31d4ab; the shipped landing uses amber.
    *
    * The -rgb form is the same colour as a bare triple, for the rgba() call
@@ -137,7 +137,7 @@
    * its own alpha. */
 
   /* Hairlines, dividers, and the neutral washes drawn from them.
-     Blueprint line from styles/xtctx-tokens.css --xt-line (72, 107, 170). */
+     Blueprint line from docs/design/xtctx-tokens.css --xt-line (72, 107, 170). */
   --ui-hairline-rgb: 72, 107, 170;
   /* The direction "raised" points: white on a dark surface. */
   --ui-lift-rgb: 255, 255, 255;
@@ -161,7 +161,7 @@
    * 4.5 floor -- gray-4 is a BORDER colour there, and using it for text was
    * the mistake. The dimmest text this site draws is --ui-text-muted.
    *
-   * xtctx values from styles/xtctx-tokens.css (--xt-text / soft / muted)
+   * xtctx values from docs/design/xtctx-tokens.css (--xt-text / soft / muted)
    * and design-tokens.json. */
   --ui-text-strong: #e8f1ff;
   --ui-text: #b8c7df;
@@ -282,12 +282,12 @@ html[data-theme='light'] {
      --sl-color-gray-3 carries a note about not lightening it; the same
      applies to --ui-text-muted, which is the same value and is checked
      against every surface by scripts/design-tokens.mjs.
-     Values from styles/xtctx-tokens.css :root.light-mode and design-tokens.json. */
+     Values from docs/design/xtctx-tokens.css :root.light-mode and design-tokens.json. */
   --ui-text-strong: #142640;
   --ui-text: #3b5278;
   --ui-text-muted: #4e6386;
 
-  /* Light surfaces from styles/xtctx-tokens.css light-mode. Depth inverts
+  /* Light surfaces from docs/design/xtctx-tokens.css light-mode. Depth inverts
      with the theme -- a raised surface is lighter than the page in the dark
      theme and darker than it here -- which is why these are named for depth
      rather than for a colour. */

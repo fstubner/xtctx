@@ -51,7 +51,7 @@ The workflow `.github/workflows/drift-canary.yml` runs on manual
 **Manual, not nightly, because every run spends real API credits.** It used to
 run at 03:00 UTC whether or not anything upstream had changed, which paid for a
 signal that only matters after a tool ships a release. The nightly watching is
-now done for free by `upstream-watch` (see `RELEASE.md`), which files an issue
+now done for free by `upstream-watch` (see `release.md`), which files an issue
 when a tracked tool releases; this canary is the stronger check a human reaches
 for once that issue exists.
 

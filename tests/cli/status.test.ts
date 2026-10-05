@@ -330,13 +330,29 @@ describe("status", () => {
       ],
       {
         cwd: process.cwd(),
-        env: { ...process.env, XTCTX_NO_AUTO_MCP: "1" },
+        // Point the child at the sandbox home like setupProject above, so the
+        // run does not depend on (or read) the real home of whoever runs it.
+        env: {
+          ...process.env,
+          XTCTX_NO_AUTO_MCP: "1",
+          HOME: homeDir,
+          USERPROFILE: homeDir,
+          APPDATA: join(homeDir, "AppData", "Roaming"),
+          LOCALAPPDATA: join(homeDir, "AppData", "Local"),
+        },
+        timeout: 55_000,
       },
     );
 
     expect(stdout).toContain(`Project  ${projectRoot}`);
     expect(stdout).not.toContain(`Project  ${process.cwd()}`);
-  }, 15_000);
+    // 60s, not the 15s this had. It is the one test that starts a cold `tsx`
+    // process (the whole CLI is transpiled on every start), and that cost
+    // scales with how loaded the machine is: about 1s idle, 2-6s in a normal
+    // full-suite run, up to 47s with eight suites running at once. The 15s cap
+    // measured the machine, not the CLI. The execFile timeout is just under it
+    // so a hung child is killed rather than left running after the test fails.
+  }, 60_000);
 });
 
 /**
