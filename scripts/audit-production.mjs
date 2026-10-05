@@ -39,19 +39,7 @@ const PRODUCTION_EXCEPTIONS = [];
  *
  * @type {Exception[]}
  */
-const SITE_EXCEPTIONS = [
-  {
-    advisory: "GHSA-ch52-4w7c-c8xp",
-    package: "http-cache-semantics",
-    why:
-      "Only astro's build-time remote-image fetcher imports it (astro 7.3.5 dist/assets/build/remote.js, " +
-      "the sole import in its dist), and the site uses no remote images: no astro:assets imports, " +
-      "no <Image>/<Picture>, no image config in astro.config.mjs, and the Starlight logo is a local file. " +
-      "The advisory concerns a shared cache serving one user's response to another; the site is static " +
-      "files with no server and no cache of its own.",
-    removedBy: "A fixed http-cache-semantics (every version is affected as of 2026-10-03), or astro dropping it.",
-  },
-];
+const SITE_EXCEPTIONS = [];
 
 const SITE = process.argv.includes("--site");
 const EXCEPTIONS = SITE ? SITE_EXCEPTIONS : PRODUCTION_EXCEPTIONS;
