@@ -19,6 +19,8 @@ export interface PreparedStatements {
   /** Clears that record, once the units are rebuilt. */
   clearUnitsStale: Statement;
   selectSessionMessages: Statement;
+  /** The ids `selectSessionMessages` returns, in its order. */
+  selectSessionMessageIds: Statement;
   /**
    * The message ids a session held when a scan began: every row indexed at or
    * before a given time. See the prune in `scanTool` for why the time bound.
@@ -511,6 +513,12 @@ export function prepareStatements(db: DatabaseHandle): PreparedStatements {
        WHERE session_ref = ?
        ORDER BY timestamp ASC, message_index ASC, id ASC`,
     ),
+    selectSessionMessageIds: db.prepare(
+      `SELECT id
+       FROM messages
+       WHERE session_ref = ?
+       ORDER BY timestamp ASC, message_index ASC, id ASC`,
+    ),
     /**
      * How many messages of a session sort before a given `message_index`.
      *
@@ -523,8 +531,8 @@ export function prepareStatements(db: DatabaseHandle): PreparedStatements {
      * which is what made a match point somewhere unrelated.
      *
      * The ordering below is character-for-character the one
-     * `selectSessionMessages` and `getSessionDetail` use. If any of the
-     * three changes, all three must.
+     * `selectSessionMessages`, `selectSessionMessageIds` and
+     * `getSessionDetail` use. If any of the four changes, all four must.
      */
     messageOffsetInSession: db.prepare(
       // `LIMIT 1`, because `message_index` is not unique — the 828 duplicates
@@ -554,7 +562,7 @@ export function prepareStatements(db: DatabaseHandle): PreparedStatements {
     selectSessionTool: db.prepare("SELECT tool FROM sessions WHERE session_ref = ?"),
     selectUnitIds: db.prepare("SELECT id FROM retrieval_units WHERE session_ref = ?"),
     insertUnit: db.prepare(
-      `INSERT INTO retrieval_units
+      `INSERT OR IGNORE INTO retrieval_units
        (id, session_ref, tool, message_start_index, message_end_index,
         started_at, ended_at, content, content_hash, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,

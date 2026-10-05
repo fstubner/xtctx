@@ -36,7 +36,7 @@ export interface MessageRow {
 export const DEFAULT_WINDOW_SIZE = 8;
 export const DEFAULT_WINDOW_STRIDE = 4;
 
-interface RetrievalUnitPlan {
+export interface RetrievalUnitPlan {
   start: MessageRow;
   end: MessageRow;
   content: string;
@@ -57,7 +57,20 @@ export function planRetrievalUnits(
   windowSize: number,
   windowStride: number,
 ): Map<string, RetrievalUnitPlan> {
-  const desired = new Map<string, RetrievalUnitPlan>();
+  return new Map(planRetrievalUnitWindows(sessionRef, messages, windowSize, windowStride));
+}
+
+/**
+ * `planRetrievalUnits` one window at a time, so a caller can let the event
+ * loop turn between them: formatting and hashing every window of a long
+ * session is work that grows with the session.
+ */
+export function* planRetrievalUnitWindows(
+  sessionRef: string,
+  messages: MessageRow[],
+  windowSize: number,
+  windowStride: number,
+): Generator<[string, RetrievalUnitPlan]> {
   for (const window of buildMessageWindows(messages, windowSize, windowStride)) {
     const content = formatRetrievalUnitContent(sessionRef, window.messages);
     const searchableText = window.messages.map((message) => message.content).join("\n");
@@ -69,15 +82,17 @@ export function planRetrievalUnits(
       String(window.end.message_index),
       contentHash,
     ]);
-    desired.set(unitId, {
-      start: window.start,
-      end: window.end,
-      content,
-      searchableText,
-      contentHash,
-    });
+    yield [
+      unitId,
+      {
+        start: window.start,
+        end: window.end,
+        content,
+        searchableText,
+        contentHash,
+      },
+    ];
   }
-  return desired;
 }
 
 function buildMessageWindows(
