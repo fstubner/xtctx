@@ -1,6 +1,6 @@
 /**
- * The checkpointer swallows a worker that fails, by design: the scan must not
- * fail over a checkpoint. That makes a broken worker invisible — the log just
+ * The checkpointer carries on past a worker that fails, by design: the scan must
+ * not fail over a checkpoint. That makes a broken worker easy to miss — the log just
  * waits for this connection to checkpoint it, on the thread the worker exists
  * to keep that off — so these check the worker actually did the work.
  */
@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openDatabase } from "@xtctx/handoff/schema";
 import { WalCheckpointer } from "@xtctx/handoff/wal-checkpointer";
 
@@ -47,6 +47,31 @@ describe("WalCheckpointer", () => {
       expect(last!.checkpointed).toBe(last!.log);
       expect(db.pragma("wal_autocheckpoint", { simple: true })).toBe(before);
     } finally {
+      db.close();
+    }
+  });
+
+  // A worker that dies leaves every checkpoint to the scan's own thread when
+  // `stop` turns the automatic one back on: the stall the worker exists to
+  // prevent, and it was swallowed without a word. Once per process, because a
+  // worker that cannot start fails again on every scan.
+  it("says once on stderr that its worker failed, and still hands the connection back", async () => {
+    const dbPath = join(dir, "xtctx.db");
+    const db = openDatabase(dbPath);
+    const write = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      const before = db.pragma("wal_autocheckpoint", { simple: true });
+      for (let i = 0; i < 2; i++) {
+        // The worker opens with `fileMustExist`, so a path with no file kills it.
+        const checkpointer = WalCheckpointer.start(db, join(dir, "missing.db"));
+        expect(await checkpointer.stop()).toBeNull();
+      }
+
+      const lines = write.mock.calls.map(([chunk]) => String(chunk));
+      expect(lines.filter((line) => line.includes("checkpoint worker failed"))).toHaveLength(1);
+      expect(db.pragma("wal_autocheckpoint", { simple: true })).toBe(before);
+    } finally {
+      write.mockRestore();
       db.close();
     }
   });

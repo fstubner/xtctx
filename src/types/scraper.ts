@@ -146,6 +146,19 @@ export interface ConversationScraper<
    */
   useIndexProbe?(probe: IndexProbe | undefined): void;
   /**
+   * Optional. From this call until `releaseScrapedPosition`, what the scraper
+   * saves is kept in memory rather than written. The scan holds it while it
+   * scrapes, because a scraper saves at the end of its read, before the scan
+   * has pruned and flushed the rows that read wrote; a saved state outliving
+   * those rows (a power cut, a process killed in between) never re-reads them.
+   */
+  holdScrapedPosition?(): void;
+  /**
+   * Optional; ends a `holdScrapedPosition`. Writes what was held when `write`
+   * is true, and drops it otherwise.
+   */
+  releaseScrapedPosition?(write: boolean): Promise<void>;
+  /**
    * The ids (`ConversationChunk.sessionId`) of every session whose transcript
    * is in the store now, without reading any of them; null when the store
    * cannot be listed.

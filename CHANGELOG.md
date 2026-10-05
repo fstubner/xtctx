@@ -23,6 +23,9 @@ Each group lists the versions it covers and says which of them reached npm.
   search windows for one long session, and seconds at a time while writing to
   a busy disk. Windows are now built in small batches, and the disk flushes
   happen on a background thread.
+- **A power cut during the one-time re-read after an upgrade no longer leaves
+  old rows uncorrected for good.** The re-read could be marked done before
+  what it wrote was safely on disk.
 
 ## [0.22.1](https://github.com/fstubner/xtctx/releases/tag/xtctx-v0.22.1) (2026-10-03)
 
