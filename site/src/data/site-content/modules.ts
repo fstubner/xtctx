@@ -8,7 +8,7 @@ import type { Modules } from './types';
 export const modules: Modules = {
   docs: true,
   changelog: true,
-  // The privacy page. Off for a product with no app-store listing and
-  // nothing to disclose beyond its README; the page is then not built.
-  privacy: true,
+  // Off: xtctx is an npm package with no app-store listing, so nothing asks
+  // for a privacy URL. What it sends anywhere is in the docs' overview.
+  privacy: false,
 };
