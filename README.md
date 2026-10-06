@@ -103,7 +103,7 @@ Either route registers the same MCP server and the same handoff skill. The
 plugin runs `npx -y xtctx`; `setup` writes `npx -y xtctx@<version>`, pinned
 to the xtctx that ran it, and re-running setup is what moves the pin.
 
-One thing to know about the plugin specifically: it is installed from this
+The plugin is installed from this
 repository, so its skill text comes from `main`, while the server it launches
 is whatever `npx -y xtctx` resolves to on npm. Those are not the same commit
 whenever work has landed but not been released, which is the normal state
@@ -139,7 +139,7 @@ Pointing a project at an OpenAI-compatible endpoint (see
 [`docs/embedding-providers.md`](docs/embedding-providers.md)) needs none of
 this: nothing local is installed for it.
 
-One thing to expect in a project with a large transcript history: the first
+In a project with a large transcript history, the first
 scan builds the index from scratch and can run for minutes. The server starts
 it as soon as it starts, calls return within a refresh budget with whatever
 has landed so far, and each answer names the tools it has not read yet, so
@@ -404,7 +404,7 @@ handoff tools. It does not scan private local transcript directories. See
 
 ## Orchestrator Integration
 
-xtctx is supporting fabric, not an orchestrator. An external control plane can
+xtctx is not an orchestrator. An external control plane can
 call `xtctx_handoff_manifest` to obtain project-scoped handoff IDs and the
 corresponding `xtctx_session_detail` calls, then retain its own task, branch,
 ownership, and scheduling state. See
