@@ -39,7 +39,21 @@ const PRODUCTION_EXCEPTIONS = [];
  *
  * @type {Exception[]}
  */
-const SITE_EXCEPTIONS = [];
+const SITE_EXCEPTIONS = [
+  {
+    advisory: "GHSA-rj75-hqrm-r3gf",
+    package: "postcss-selector-parser",
+    why:
+      "Reached only through @expressive-code/core > postcss-nested 6, which parses the selectors of " +
+      "Expressive Code's own code-block styles while the docs are built (core 0.44.2 dist/index.js, the " +
+      "only postcss-nested call). Every selector it sees comes from Expressive Code and this repo's " +
+      "theme config, never from a visitor, and nothing runs after the build: the site is static files. " +
+      "The advisory is CPU exhaustion on a crafted selector.",
+    removedBy:
+      "@expressive-code/core moving to postcss-nested 7 or later, which takes postcss-selector-parser " +
+      "^7.1.4 (core 0.44.2, the latest, still declares ^6.0.1 as of 2026-10-06).",
+  },
+];
 
 const SITE = process.argv.includes("--site");
 const EXCEPTIONS = SITE ? SITE_EXCEPTIONS : PRODUCTION_EXCEPTIONS;
