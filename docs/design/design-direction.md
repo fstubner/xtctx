@@ -2,7 +2,7 @@
 
 The product's user-facing surfaces are (1) CLI output, (2) markdown returned
 to agents over MCP, and (3) the static site at xtctx.com. There is no
-app UI, and none is planned (see PRODUCT.md non-goals).
+app UI, and none is planned (see [PRODUCT.md](../PRODUCT.md) non-goals).
 
 ## Interview
 
@@ -23,8 +23,8 @@ interview; recorded here so it can be argued with later:
   site in `site/` is built on product-site-template, so the palette lives in
   `site/src/styles/tokens.css` and is changed with `npm --prefix site run
   theme -- --accent "#e8b878" --verify`. All copy is in
-  `site/src/data/site-content/` so it stays testable. `docs/design/xtctx-tokens.css`
-  and `design-tokens.json` are the palette the site's tokens were taken from;
+  `site/src/data/site-content/` so it stays testable. `xtctx-tokens.css`
+  and `design-tokens.json` in this folder are the palette the site's tokens were taken from;
   nothing builds from them any more.
 - **Accessibility bar:** site pages must remain readable with CSS off
   (semantic HTML first), and CLI output must not encode meaning in color

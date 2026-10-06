@@ -12,7 +12,7 @@
  * distinguishes them is provenance, which `.xtctx/config.yaml` already
  * records as `skills.selected.<id>.source`.
  *
- * PRODUCT.md: "Setup is reversible: `xtctx disconnect` removes xtctx's
+ * docs/PRODUCT.md: "Setup is reversible: `xtctx disconnect` removes xtctx's
  * management without deleting transcript data."
  */
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";

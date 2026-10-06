@@ -162,7 +162,7 @@
    * the mistake. The dimmest text this site draws is --ui-text-muted.
    *
    * xtctx values from docs/design/xtctx-tokens.css (--xt-text / soft / muted)
-   * and design-tokens.json. */
+   * and docs/design/design-tokens.json. */
   --ui-text-strong: #e8f1ff;
   --ui-text: #b8c7df;
   --ui-text-muted: #91a8cf;
@@ -282,7 +282,7 @@ html[data-theme='light'] {
      --sl-color-gray-3 carries a note about not lightening it; the same
      applies to --ui-text-muted, which is the same value and is checked
      against every surface by scripts/design-tokens.mjs.
-     Values from docs/design/xtctx-tokens.css :root.light-mode and design-tokens.json. */
+     Values from docs/design/xtctx-tokens.css :root.light-mode and docs/design/design-tokens.json. */
   --ui-text-strong: #142640;
   --ui-text: #3b5278;
   --ui-text-muted: #4e6386;

@@ -72,7 +72,7 @@ describe("the homepage visitors are sent to", () => {
   it("still says the thing that makes the product what it is", async () => {
     const page = await homepageSources();
 
-    // PRODUCT.md's first constraint. Deliberately not a ban on the words
+    // docs/PRODUCT.md's first constraint. Deliberately not a ban on the words
     // "daemon" or "dashboard": the page uses them to say it has neither, and a
     // substring check flagged that correct copy as a false promise. Asserting
     // the commitment is present is the check that survives rewording of the

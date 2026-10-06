@@ -128,7 +128,7 @@ export function runtimeConversationMatchesProject(
  * `c:/Users/Someone/.gemini/antigravity/playground/api/...` was filed under a
  * project at `D:/work/api` — different drive, different user account. Any two
  * projects sharing a basename cross-contaminated, which is the boundary
- * PRODUCT.md promises and the comment above this one already says was
+ * docs/PRODUCT.md promises and the comment above this one already says was
  * supposed to have been removed.
  *
  * What remains: a playground directory inside this reader's own Antigravity

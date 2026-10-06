@@ -1,6 +1,6 @@
 /**
  * The project boundary is the whole safety story of a tool that reads private
- * developer conversations. PRODUCT.md states it outright: "content from other
+ * developer conversations. docs/PRODUCT.md states it outright: "content from other
  * projects on the machine never crosses the project boundary."
  *
  * `pathMatchesProject` already carries a docstring about this bug class being

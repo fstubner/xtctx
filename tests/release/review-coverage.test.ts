@@ -48,8 +48,13 @@ describe("review coverage", () => {
       "docs/design/xtctx-tokens.css",
       ".github/CONTRIBUTING.md",
       "site/src/data/site-content/hero.ts",
-      "design-direction.md",
-      "ux-walkthrough.md",
+      "docs/design/design-direction.md",
+      "docs/design/ux-walkthrough.md",
+      "docs/design/design-tokens.json",
+      "docs/design/index-backup.md",
+      "docs/PRODUCT.md",
+      "docs/ARCHITECTURE.md",
+      "docs/modules.md",
       "tsconfig.json",
       ".gitignore",
     ];
@@ -72,9 +77,9 @@ describe("review coverage", () => {
     const { overlapping } = coverage(["src/handoff/x.ts", "tests/x.test.ts"]);
     expect(overlapping).toEqual([]);
 
-    // `design-direction.md` is root markdown AND a site document; the claims
-    // layer excludes it by name so the site layer owns it alone.
-    const { overlapping: none } = coverage(["design-direction.md"]);
+    // `docs/design/design-direction.md` is under docs/ AND a site document; the
+    // claims layer excludes it by name so the site layer owns it alone.
+    const { overlapping: none } = coverage(["docs/design/design-direction.md"]);
     expect(none).toEqual([]);
   });
 

@@ -216,7 +216,7 @@ describe("AntigravityScraper", () => {
    * `/playground/<name>/` used to match anywhere on disk, which is a name
    * match wearing a path's clothes. A conversation in a different user
    * account's Antigravity, about a different project that merely shares a
-   * directory name, was filed under this one — the boundary PRODUCT.md
+   * directory name, was filed under this one — the boundary docs/PRODUCT.md
    * promises, broken for every common name: `api`, `core`, `docs`, `web`.
    */
   it("does not claim another install's playground project of the same name", async () => {
