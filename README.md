@@ -310,7 +310,8 @@ startup hooks; others receive MCP config plus managed instructions only.
 
 ## Limits
 
-- xtctx is local-only by default: it never uploads transcripts and runs no
+- xtctx is local-only by default: it uploads no transcripts unless a project
+  opts into cloud sync or an external embedding endpoint, and runs no
   telemetry. Cloud sync is optional and opt-in per project: it sends nothing
   until you log in (`xtctx login`) *and* opt a project in (`xtctx sync enable`),
   and then sends that project's transcript text, including whatever paths or
@@ -414,9 +415,11 @@ ownership, and scheduling state. See
 
 Nothing is released by merging. Cutting a release is one manual action: run the
 **release** workflow, choose `patch`/`minor`/`major`, and type `release` to
-confirm. It runs `verify:release` first, then bumps the version, writes the
-CHANGELOG entry from GitHub's generated notes, commits, tags, creates the
-GitHub release, and publishes to npm.
+confirm. It runs `verify:release` first, then bumps the version, moves the
+notes written under `[Unreleased]` in CHANGELOG.md to the new version's
+heading (GitHub's generated list of pull requests stands in only when that
+section is empty), commits, tags, creates the GitHub release, and publishes
+to npm.
 
 Untick `publish_npm` to cut a release without publishing. To publish a version
 that was tagged earlier, run the **publish** workflow on its own against that
