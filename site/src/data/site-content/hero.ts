@@ -68,9 +68,9 @@ export const hero: Hero = {
     },
   },
   sourceUrl: 'https://github.com/fstubner/xtctx',
-  // On, so the metrics line under the subhead is never empty: with no stars
-  // yet and the npm count still loading, it was the only thing there.
-  showSourceLink: true,
+  // Off: the metrics line's star item links to the repo already ("Star on
+  // GitHub" until there are stars), so View source pointed at the same page.
+  showSourceLink: false,
   // No desktop build; heroDownloads is empty, so neither is rendered.
   downloadLabel: '',
   downloadMenuLabel: '',
