@@ -21,7 +21,7 @@ transcript it was built from still exists, and they do not all survive:
   (<https://code.claude.com/docs/en/data-usage>).
 
 So after a month, the index is the only copy of older Claude Code sessions. Two
-things deleted it anyway, and both are fixed on `fix/cli-ux`:
+things deleted it anyway, and both are fixed:
 
 - `xtctx setup --repair` removed `.xtctx/state/`, and `xtctx status` told anyone
   with a drifted skill copy to run it. Repair now keeps the index; status points
@@ -49,7 +49,7 @@ that cannot be recomputed; they are about a fifth of the file.
 ## Options
 
 1. **`xtctx export` / `xtctx import`.** Export writes this project's `sessions`
-   and `messages` to one file (JSON Lines, gzipped). Import merges it into an
+   and `messages` to one file (plain JSON Lines). Import merges it into an
    index with `INSERT OR IGNORE`, so importing twice or into an index that
    already has some of the sessions is safe. Windows, FTS and vectors are rebuilt
    after import. Covers backup and moving machines; restore to a point in time is

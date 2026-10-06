@@ -3,7 +3,7 @@ title: Installation
 description: Install, set up, verify and remove xtctx, and enable semantic search.
 ---
 
-This page covers installing, setting up and removing xtctx, which requires Node.js 24 or later.
+xtctx requires Node.js 24 or later.
 
 ## Plugin and setup
 

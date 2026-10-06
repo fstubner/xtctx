@@ -47,8 +47,8 @@ Two cases, and the local one is the stronger of the two.
 `/v1/embeddings`, both keep everything on the machine, and both can use a GPU.
 That last point was the stronger half of this argument until 2026-09-21, when
 `xtctx calibrate` gave the in-process runtime the same GPU — so an endpoint is
-now a way to reach a *different* model, not the only way to reach the
-hardware. Measured on this
+now a way to reach a *different* model, since the in-process runtime reaches
+the GPU as well. Measured on this
 machine, DirectML embedded the same segments about six times faster than the
 CPU path and produced numerically identical vectors (mean cosine 1.000000
 against CPU, worst pair 0.999999). An endpoint is one way to reach that

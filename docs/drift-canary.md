@@ -66,9 +66,9 @@ dependencies must not gate PRs.
 | `ANTHROPIC_API_KEY` | claude-code job  |
 | `OPENAI_API_KEY`    | codex job        |
 
-On failure during a scheduled run the workflow opens (or comments on, if one
-is already open) a single issue per tool titled
-`drift: <tool> scraper may be broken` with the canary's stderr attached.
+The workflow runs only when dispatched, and files no issue on failure: the
+person who started it is watching the run. Issues come from `upstream-watch`
+instead.
 
 ## Interpreting failures
 

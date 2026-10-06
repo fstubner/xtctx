@@ -60,9 +60,9 @@ export const faq: FaqItem[] = [
   {
     group: 'Data',
     q: 'What are the limits?',
-    a: 'Agents change their transcript formats without notice, so xtctx reports records it does not recognise instead of guessing. Search is keyword-only until you add semantic search (xtctx embeddings enable, about 540 MB), and it falls back to keyword while vectors are missing.',
+    a: 'Agents can change their transcript formats without notice, so xtctx reports records it does not recognise instead of guessing. Search is keyword-only until you add semantic search (xtctx embeddings enable, about 540 MB), and it falls back to keyword while vectors are missing.',
     aHtml:
-      'Agents change their transcript formats without notice, so xtctx reports records it does not recognise instead of guessing. Search is keyword-only until you add semantic search (<code>xtctx embeddings enable</code>, about 540 MB), and it falls back to keyword while vectors are missing.',
+      'Agents can change their transcript formats without notice, so xtctx reports records it does not recognise instead of guessing. Search is keyword-only until you add semantic search (<code>xtctx embeddings enable</code>, about 540 MB), and it falls back to keyword while vectors are missing.',
   },
   {
     group: 'Data',

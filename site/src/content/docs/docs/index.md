@@ -3,8 +3,6 @@ title: Overview
 description: What xtctx does and does not do, which agents it supports, and where its files live.
 ---
 
-This page describes what xtctx does, what it does not do, which agents it supports, and which files it creates.
-
 xtctx indexes the transcripts that your coding agents write and serves them over MCP. An agent in a project can list recent sessions from every supported tool and read the raw messages of any of them.
 
 ## What xtctx does not do

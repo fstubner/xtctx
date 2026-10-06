@@ -103,7 +103,7 @@ Either route registers the same MCP server and the same handoff skill. The
 plugin runs `npx -y xtctx`; `setup` writes `npx -y xtctx@<version>`, pinned
 to the xtctx that ran it, and re-running setup is what moves the pin.
 
-One thing to know about the plugin specifically: it is installed from this
+The plugin is installed from this
 repository, so its skill text comes from `main`, while the server it launches
 is whatever `npx -y xtctx` resolves to on npm. Those are not the same commit
 whenever work has landed but not been released, which is the normal state
@@ -139,7 +139,7 @@ Pointing a project at an OpenAI-compatible endpoint (see
 [`docs/embedding-providers.md`](docs/embedding-providers.md)) needs none of
 this: nothing local is installed for it.
 
-One thing to expect in a project with a large transcript history: the first
+In a project with a large transcript history, the first
 scan builds the index from scratch and can run for minutes. The server starts
 it as soon as it starts, calls return within a refresh budget with whatever
 has landed so far, and each answer names the tools it has not read yet, so
@@ -310,7 +310,8 @@ startup hooks; others receive MCP config plus managed instructions only.
 
 ## Limits
 
-- xtctx is local-only by default: it never uploads transcripts and runs no
+- xtctx is local-only by default: it uploads no transcripts unless a project
+  opts into cloud sync or an external embedding endpoint, and runs no
   telemetry. Cloud sync is optional and opt-in per project: it sends nothing
   until you log in (`xtctx login`) *and* opt a project in (`xtctx sync enable`),
   and then sends that project's transcript text, including whatever paths or
@@ -404,7 +405,7 @@ handoff tools. It does not scan private local transcript directories. See
 
 ## Orchestrator Integration
 
-xtctx is supporting fabric, not an orchestrator. An external control plane can
+xtctx is not an orchestrator. An external control plane can
 call `xtctx_handoff_manifest` to obtain project-scoped handoff IDs and the
 corresponding `xtctx_session_detail` calls, then retain its own task, branch,
 ownership, and scheduling state. See
@@ -414,9 +415,11 @@ ownership, and scheduling state. See
 
 Nothing is released by merging. Cutting a release is one manual action: run the
 **release** workflow, choose `patch`/`minor`/`major`, and type `release` to
-confirm. It runs `verify:release` first, then bumps the version, writes the
-CHANGELOG entry from GitHub's generated notes, commits, tags, creates the
-GitHub release, and publishes to npm.
+confirm. It runs `verify:release` first, then bumps the version, moves the
+notes written under `[Unreleased]` in CHANGELOG.md to the new version's
+heading (GitHub's generated list of pull requests stands in only when that
+section is empty), commits, tags, creates the GitHub release, and publishes
+to npm.
 
 Untick `publish_npm` to cut a release without publishing. To publish a version
 that was tagged earlier, run the **publish** workflow on its own against that

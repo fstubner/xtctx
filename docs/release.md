@@ -47,8 +47,8 @@ when someone runs it.
 
 To publish a version that was tagged earlier but never reached npm, dispatch
 `publish` on its own against that tag, typing `publish` to confirm. That is
-not hypothetical: this repo is in that state now, and has been since 0.19.0 —
-fifteen tagged versions that npm has never served.
+not hypothetical: 0.20.0 to 0.21.8 were tagged and never reached npm, and the
+next version npm served was 0.22.0.
 
 A release is **not done** until `post-publish-smoke` is green.
 
