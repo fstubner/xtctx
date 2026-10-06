@@ -124,7 +124,7 @@ npx wrangler secret put GITHUB_CLIENT_SECRET --config wrangler.local.toml  # the
 - Without `GITHUB_CLIENT_SECRET` the CLI's device flow still works and `/authorize` answers 503.
 - Set `ALLOWED_GITHUB_IDS` in `wrangler.local.toml` `[vars]` to the comma-separated numeric GitHub ids allowed to sign in (yours is `"id"` in `https://api.github.com/users/<login>`). Left empty, it lets nobody in.
 - `PUBLIC_URL` (in `wrangler.local.toml`) is the origin MCP clients connect to; tokens are bound to `PUBLIC_URL/mcp`, so it must match the domain clients use. It is also the URL you give `xtctx login --sync-url`.
-- `ALLOWED_ORIGINS` (optional, comma-separated) is the only way a browser origin gets CORS headers, and the only foreign `Origin` `/mcp` accepts.
+- `ALLOWED_ORIGINS` (optional, comma-separated) lists the browser origins that get CORS headers and the foreign `Origin` values `/mcp` accepts; no other origin gets either.
 
 ### 7. Deploy
 

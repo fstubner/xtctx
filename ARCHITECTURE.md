@@ -68,7 +68,7 @@ them, the boundaries between them, and what each part is allowed to trust.
 
 ## Lifecycle
 
-The problem: you work in one tool, switch to another, and the second has no
+You work in one tool, switch to another, and the second has no
 idea what the first just did. The parts above exist to let the second read the
 first's transcripts.
 
@@ -143,9 +143,9 @@ is fast rather than blocked.
 **Cloud sync, when a project opts in.** The MCP server starts an upload loop
 next to its scan. Each tick reads the sessions this project's index
 attributes to this project, sends what changed under the index's own message
-ids, and compares the server's per-session count with the local one; on a
+ids, and compares the Worker's per-session count with the local one; on a
 mismatch (a re-read replaced rows under new ids, or deleted some) it sends the
-session whole with every id it holds, and the server deletes the rest, so the
+session whole with every id it holds, and the Worker deletes the rest, so the
 cloud copy ends equal to the index. (A session with more ids than fit in one
 request is resent but not pruned.) On shutdown the final upload runs
 alongside the index close, inside the same bounded grace window, so it never
