@@ -86,13 +86,13 @@ const LAYERS = [
       "Prose drifts silently and nothing compiles it. Measured figures are the worst case: they " +
       "read as evidence while being untraceable to anything in the repository.",
     match: [
-      // Root markdown, except the two that describe the site and are reviewed
-      // with it. An overlap means neither layer owns the file, which is the
-      // same blank region as no layer at all.
-      /^(?!design-direction\.md$|ux-walkthrough\.md$)[^/]+\.md$/,
-      // docs/design/xtctx-tokens.css is the site's palette source, so the site
-      // layer owns it alone.
-      /^docs\/(?!design\/xtctx-tokens\.css$)/,
+      // Root markdown.
+      /^[^/]+\.md$/,
+      // The design documents and palette sources under docs/design/ describe
+      // the site and are reviewed with it, so the site layer owns them alone.
+      // An overlap means neither layer owns the file, which is the same blank
+      // region as no layer at all.
+      /^docs\/(?!design\/(xtctx-tokens\.css|design-tokens\.json|design-direction\.md|ux-walkthrough\.md)$)/,
       // Community files live under `.github` so GitHub finds them there.
       /^\.github\/(CODE_OF_CONDUCT|CONTRIBUTING|SECURITY)\.md$/,
       /^cloud\/README\.md$/,
@@ -110,7 +110,10 @@ const LAYERS = [
     why:
       "The landing page's central pitch was false in four places, and its JSON-LD published one " +
       "of them to search engines as structured data.",
-    match: [/^site\//, /^docs\/design\/xtctx-tokens\.css$/, /^design-tokens\.json$/, /^design-direction\.md$/, /^ux-walkthrough\.md$/],
+    match: [
+      /^site\//,
+      /^docs\/design\/(xtctx-tokens\.css|design-tokens\.json|design-direction\.md|ux-walkthrough\.md)$/,
+    ],
   },
   {
     name: "build-config",

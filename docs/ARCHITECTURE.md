@@ -5,7 +5,7 @@ invoking process on the developer's machine. The one exception is optional and
 off by default: cloud sync, which uploads an opted-in project's sessions to a
 separate Worker (`cloud/`) that the user deploys themselves (there is no hosted
 service and no default server) so the same user's agents on other machines can read
-them. Handoff never depends on it. `docs/architecture.md` describes module
+them. Handoff never depends on it. `modules.md` describes module
 internals; this document fixes the parts, how a handoff actually flows through
 them, the boundaries between them, and what each part is allowed to trust.
 

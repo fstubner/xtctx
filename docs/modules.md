@@ -1,4 +1,4 @@
-# xtctx Architecture
+# xtctx modules
 
 xtctx has one job: reliable local handoff between AI coding tools.
 

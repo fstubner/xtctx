@@ -191,8 +191,8 @@ describe("disconnectProject", () => {
   it("preserves CRLF user content when removing managed blocks", async () => {
     // Setup preserves the file's line endings; removal rewrote the whole file
     // as LF, so a round trip through setup + disconnect silently reformatted
-    // a CRLF-authored file — against both PRODUCT.md's "byte-for-byte" claim
-    // and ARCHITECTURE.md's "preserve the file's line endings".
+    // a CRLF-authored file — against both docs/PRODUCT.md's "byte-for-byte" claim
+    // and docs/ARCHITECTURE.md's "preserve the file's line endings".
     await setupProject({ projectPath: projectRoot, homeDir, yes: true });
     const target = join(projectRoot, "CLAUDE.md");
     const existing = await readFile(target, "utf-8");
@@ -265,7 +265,7 @@ describe("disconnectProject", () => {
 });
 
 /**
- * PRODUCT.md promises user content survives setup+disconnect byte for byte
+ * docs/PRODUCT.md promises user content survives setup+disconnect byte for byte
  * outside the managed block. Trailing bytes were the exception: blank lines at
  * EOF were dropped, and a markdown hard break (two trailing spaces) on the
  * last line was destroyed — a silent edit to the user's own file.

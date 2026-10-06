@@ -14,7 +14,7 @@
  * served as this project's context. `cd` mid-session is all it takes, and it
  * leaks a further turn on each scan.
  *
- * `PRODUCT.md` promises content from other projects never crosses the
+ * `docs/PRODUCT.md` promises content from other projects never crosses the
  * boundary, so this is the contract, not a hardening nicety.
  */
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";

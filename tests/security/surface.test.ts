@@ -6,7 +6,7 @@ const CURRENT_SURFACE_FILES = [
   "README.md",
   "AGENTS.md",
   join(".github", "copilot-instructions.md"),
-  join("docs", "architecture.md"),
+  join("docs", "modules.md"),
   join("docs", "demo.md"),
   join("docs", "drift-canary.md"),
   join("docs", "security", "owasp-asvs-lite.md"),

@@ -357,7 +357,7 @@ export async function renderStatusBlock(
     );
   }
 
-  // Status always ends with one concrete next step, as ux-walkthrough.md
+  // Status always ends with one concrete next step, as docs/design/ux-walkthrough.md
   // promises. Repairing wiring outranks indexing advice: a drifted managed
   // file or missing skill target is why an agent would see nothing at all.
   // A project that was never set up has not "drifted" — there is nothing to
