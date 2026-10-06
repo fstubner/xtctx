@@ -52,7 +52,7 @@ team or shared component.
   map.
 - Only the current project's sessions are ever indexed or served — content
   from other projects on the machine never crosses the project boundary — with
-  one exception the product states rather than hides: a committable
+  one exception: a committable
   `.xtctx/config.yaml` can point a tool's `storePath` somewhere else, and that
   redirect is reported by `xtctx status` and `xtctx_continuity_status` rather
   than blocked. A cloned repository can carry one, which is why it is
