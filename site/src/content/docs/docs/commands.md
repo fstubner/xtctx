@@ -3,8 +3,6 @@ title: Commands
 description: Every xtctx command, option and MCP tool.
 ---
 
-This page lists every xtctx command, option and MCP tool.
-
 ## Commands
 
 | Command | Description |
