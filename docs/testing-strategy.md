@@ -142,8 +142,8 @@ build.
 ### The append-scraper sweep
 
 A third sweep on 2026-09-03 broke 45 load-bearing behaviours across the four
-append-style scrapers — `claude-code.ts`, `codex.ts`, `copilot-cli.ts`,
-`opencode.ts` — one line at a time, concentrating on the places where a defect
+append-style scrapers (`claude-code.ts`, `codex.ts`, `copilot-cli.ts`,
+`opencode.ts`), one line at a time, concentrating on the places where a defect
 reaches a user silently: project attribution, resume cursors, role mapping,
 message-index stability, timestamp handling, and the drift warnings that fire
 on an unrecognised shape. The existing suite killed 25 and 20 survived. Thirteen
@@ -197,9 +197,9 @@ an oversized `codex` line was dropped with no drift warning at all, and the
 code that was meant to warn could not run.
 `readJsonlLines` already caps lines at `MAX_LINE_BYTES` and delivers anything
 over it as `line: null`, discarding the bytes; `codex.ts` then `continue`s on
-that branch in silence. The `isWithinLineLimit(line)` check below it — the one
+that branch in silence. The `isWithinLineLimit(line)` check below it (the one
 that calls `isKnownBulkyRecord` so a benign `compacted` restatement is skipped
-quietly while anything else is reported — is unreachable, because a line that
+quietly while anything else is reported) is unreachable, because a line that
 survived the reader is always within the limit. Measured directly: a 9MB
 `response_item` between two ordinary records yields the ordinary records and
 zero warnings. `claude-code.ts` and `copilot-cli.ts` both warn on the same

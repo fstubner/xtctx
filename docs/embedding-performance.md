@@ -39,7 +39,7 @@ nothing here re-runs them and nobody should treat the absolute numbers as
 checkable. (The bge and gte rows said the same until 2026-09-21, when
 `scripts/embedding-bakeoff.ts` was written and reproduced them.)
 
-Stated plainly because the alternative is worse: a number that reads as
+A number that reads as
 evidence while being untraceable is how the "18ms per embed" figure below
 survived long enough to drive a model change that had to be reverted.
 
@@ -50,7 +50,7 @@ index — the unvectorized windows, split with `splitTextForEmbedding` and
 capped with `capSegments`, exactly as the indexer does it. Mean segment
 length 883 characters.
 
-That detail is the whole point. An earlier round of this work measured
+An earlier round of this work measured
 "18ms per embed" on strings like `warm query number 5`, concluded mpnet was
 affordable, and shipped a model change that had to be reverted the next day.
 A segment is ~1024 characters, and per-embed cost on short strings says
@@ -75,7 +75,7 @@ that reason. Ratios within a run are the durable part.
 
 **The vectors are identical.** Embedding the same 128 segments on CPU and on
 DirectML and comparing the pairs: mean cosine **1.000000**, worst pair
-**0.999999**. This is not "close enough to accept" — it is the same
+**0.999999**. It is the same
 computation on different silicon. No re-index, no threshold re-sweep, none of
 the vector-space mixing hazard that rules out quantization below.
 
@@ -153,7 +153,7 @@ already in use. There is some headroom to 24, but it costs a process pool,
 duplicated model memory and crash handling — against a 6x win from passing an
 option.
 
-Worth noting the GPU path uses **0.9 cores**. The second prize after speed is
+The GPU path uses **0.9 cores**. The second prize after speed is
 that indexing stops eating the machine.
 
 ## Batch size: 16 beats 32
@@ -189,8 +189,8 @@ longest member, so a wide batch of mixed lengths spends most of its work on
 padding. Uniform inputs hide the dominant cost of the real workload.
 
 That is the same failure as the "18ms per embed" figure at the top of this
-file. A benchmark that does not reproduce the shape of the real input is not
-weak evidence, it is evidence for the wrong question — and it reproduced
+file. A benchmark that does not reproduce the shape of the real input is
+evidence for the wrong question, and it reproduced
 cleanly three times while pointing the wrong way.
 
 ## Quantized weights: rejected
@@ -200,7 +200,7 @@ cleanly three times while pointing the wrong way.
 | fp32 | 100.5 |
 | q8 | 84.7 |
 
-**16% faster, not the ~2x that quantization is usually assumed to give.**
+**16% faster, well short of 2x.**
 
 And not free: comparing q8 vectors against fp32 vectors for the same 256
 segments gives mean cosine **0.9889**, worst pair **0.9789**. Every vector

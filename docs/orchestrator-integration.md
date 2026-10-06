@@ -1,6 +1,6 @@
 # Orchestrator integration
 
-xtctx provides local continuity fabric for an external orchestrator. It does
+xtctx provides local session continuity for an external orchestrator. It does
 not create tasks, schedule harnesses, lock work, or persist generated handoff
 summaries.
 
