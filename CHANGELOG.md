@@ -16,6 +16,8 @@ Each group lists the versions it covers and says which of them reached npm.
 
 ## [Unreleased]
 
+## [0.22.2](https://github.com/fstubner/xtctx/releases/tag/xtctx-v0.22.2) (2026-10-06)
+
 ### Fixed
 
 - **Tool calls no longer wait behind a scan.** A scan could still hold the
@@ -26,6 +28,10 @@ Each group lists the versions it covers and says which of them reached npm.
 - **A power cut during the one-time re-read after an upgrade no longer leaves
   old rows uncorrected for good.** The re-read could be marked done before
   what it wrote was safely on disk.
+
+**Pull requests:** [#412](https://github.com/fstubner/xtctx/pull/412), [#413](https://github.com/fstubner/xtctx/pull/413), [#420](https://github.com/fstubner/xtctx/pull/420), [#421](https://github.com/fstubner/xtctx/pull/421), [#419](https://github.com/fstubner/xtctx/pull/419), [#424](https://github.com/fstubner/xtctx/pull/424), [#427](https://github.com/fstubner/xtctx/pull/427), [#425](https://github.com/fstubner/xtctx/pull/425), [#422](https://github.com/fstubner/xtctx/pull/422), [#426](https://github.com/fstubner/xtctx/pull/426), [#430](https://github.com/fstubner/xtctx/pull/430), [#407](https://github.com/fstubner/xtctx/pull/407), [#415](https://github.com/fstubner/xtctx/pull/415), [#416](https://github.com/fstubner/xtctx/pull/416), [#417](https://github.com/fstubner/xtctx/pull/417), [#429](https://github.com/fstubner/xtctx/pull/429), [#418](https://github.com/fstubner/xtctx/pull/418), [#433](https://github.com/fstubner/xtctx/pull/433), [#432](https://github.com/fstubner/xtctx/pull/432), [#435](https://github.com/fstubner/xtctx/pull/435), [#434](https://github.com/fstubner/xtctx/pull/434), [#431](https://github.com/fstubner/xtctx/pull/431), [#319](https://github.com/fstubner/xtctx/pull/319), [#436](https://github.com/fstubner/xtctx/pull/436)
+
+**Full changelog:** https://github.com/fstubner/xtctx/compare/xtctx-v0.22.1...xtctx-v0.22.2
 
 ## [0.22.1](https://github.com/fstubner/xtctx/releases/tag/xtctx-v0.22.1) (2026-10-03)
 
