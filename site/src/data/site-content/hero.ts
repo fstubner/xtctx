@@ -68,9 +68,9 @@ export const hero: Hero = {
     },
   },
   sourceUrl: 'https://github.com/fstubner/xtctx',
-  // The nav already links GitHub; in the hero the link sat between the
-  // subhead and the command.
-  showSourceLink: false,
+  // On, so the metrics line under the subhead is never empty: with no stars
+  // yet and the npm count still loading, it was the only thing there.
+  showSourceLink: true,
   // No desktop build; heroDownloads is empty, so neither is rendered.
   downloadLabel: '',
   downloadMenuLabel: '',

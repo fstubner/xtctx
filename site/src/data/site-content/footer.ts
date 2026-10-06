@@ -10,7 +10,8 @@ export const builtWith: BuiltWithEntry[] = [
 
 // Star and download counts are fetched from this repo at runtime. A repo
 // that does not exist simply leaves the counters hidden.
-export const social: SocialProof = { repo: 'fstubner/xtctx' };
+// xtctx ships through npm, not release assets, so npm is the download count.
+export const social: SocialProof = { repo: 'fstubner/xtctx', npmPackage: 'xtctx' };
 
 // No analytics token: the beacon is left out of every build. Add
 // `cloudflareToken` to turn it on.
