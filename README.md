@@ -20,7 +20,8 @@ Documentation: [xtctx.com/docs](https://xtctx.com/docs/).
 
 ## Install
 
-Install xtctx as a plugin, set it up per project, or both.
+xtctx needs Node.js 24 or later. Install it as a plugin, set it up per
+project, or both.
 
 **The plugin** adds the MCP server and the handoff skill to your agent, once
 per machine. It writes nothing into your projects.
@@ -75,7 +76,7 @@ agent can offer to run it.
 | Most recent session shown at session start | no | Claude Code only |
 | Instruction files tell the agent about xtctx | no | yes |
 | Writes into your project | no | yes |
-| Agents covered | six | all seven |
+| Agents covered | six | seven (Copilot CLI with `--global-mcp`) |
 
 The plugin runs `npx -y xtctx`, the latest version on npm. Setup pins the
 version that ran it (`npx -y xtctx@<version>`), and running setup again moves
@@ -129,7 +130,7 @@ agent has added.
 | `xtctx disconnect <tool>` | Stops xtctx managing one agent in this project. `--all` does every agent. |
 | `xtctx embeddings enable` / `disable` | Adds or removes local semantic search. |
 | `xtctx calibrate` | Measures which device embeds fastest. |
-| `xtctx login`, `xtctx sync enable` | Cloud sync ([`docs/cloud-sync.md`](docs/cloud-sync.md)). |
+| `xtctx login --sync-url <url>`, `xtctx sync enable`, `xtctx logout` | Cloud sync ([`docs/cloud-sync.md`](docs/cloud-sync.md)). |
 
 Every option is listed at [xtctx.com/docs/commands](https://xtctx.com/docs/commands/).
 
@@ -167,9 +168,9 @@ to keep sessions whose transcripts are gone.
 
 ## Your index
 
-Each project's index lives in `.xtctx/state/xtctx.db`. Agents delete old
-transcripts (Claude Code after 30 days by default), but xtctx keeps what it
-indexed, so for older sessions the index can be the only copy left.
+Each project's index lives in `.xtctx/state/xtctx.db`. Claude Code deletes
+transcripts after 30 days by default, but xtctx keeps what it indexed, so for
+older sessions the index can be the only copy left.
 
 xtctx never deletes it. Upgrades migrate it in place, and a damaged one is set
 aside and rebuilt with its sessions copied back in. `xtctx status` tells you
@@ -200,7 +201,8 @@ matching message range.
 
 With both the plugin and `setup` in Claude Code, the same server shows up
 twice, as `xtctx` and `plugin:xtctx:xtctx`. Setup allows the tools under both
-names, so neither asks for permission.
+names in `.claude/settings.json`, which Claude Code applies once you trust the
+workspace.
 
 ## Supported agents
 
