@@ -60,8 +60,8 @@ npx -y xtctx setup
 It adds the MCP server to each agent's project config and adds a short xtctx
 section to the instruction files the agents read (`CLAUDE.md`, `AGENTS.md`,
 Cursor rules and so on), telling them which tools to use. In Claude Code it
-also installs a session-start hook that reminds the agent recent sessions are
-there to look up.
+also installs a session-start hook that shows the agent the most recent
+session and how to read it.
 
 Retrieval only works in a project that has been set up. Elsewhere the tools
 reply that the project isn't configured and give the setup command, so the
@@ -72,7 +72,7 @@ agent can offer to run it.
 | MCP tools and handoff skill | yes | yes |
 | Available in every project | yes | no |
 | Can read sessions in a project that hasn't run `setup` | no | no |
-| Reminder at session start | no | Claude Code only |
+| Most recent session shown at session start | no | Claude Code only |
 | Instruction files tell the agent about xtctx | no | yes |
 | Writes into your project | no | yes |
 | Agents covered | six | all seven |
