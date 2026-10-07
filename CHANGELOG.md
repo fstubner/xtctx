@@ -16,6 +16,8 @@ Each group lists the versions it covers and says which of them reached npm.
 
 ## [Unreleased]
 
+## [0.22.3](https://github.com/fstubner/xtctx/releases/tag/xtctx-v0.22.3) (2026-10-07)
+
 0.22.2 was tagged but never reached npm, so this is the first npm release with
 its fixes: tool calls no longer wait behind a scan, and a power cut during the
 re-read after an upgrade no longer leaves old rows uncorrected. See 0.22.2
@@ -27,6 +29,10 @@ below.
   (GHSA-jqcg-44mw-7w3h, critical) comes in through the MCP SDK's HTTP server,
   which xtctx does not use: its MCP server speaks stdio. The other two,
   smol-toml and source-map-js, are in the website's build only.
+
+**Pull requests:** [#440](https://github.com/fstubner/xtctx/pull/440), [#441](https://github.com/fstubner/xtctx/pull/441), [#442](https://github.com/fstubner/xtctx/pull/442), [#444](https://github.com/fstubner/xtctx/pull/444), [#445](https://github.com/fstubner/xtctx/pull/445), [#446](https://github.com/fstubner/xtctx/pull/446)
+
+**Full changelog:** https://github.com/fstubner/xtctx/compare/xtctx-v0.22.2...xtctx-v0.22.3
 
 ## [0.22.2](https://github.com/fstubner/xtctx/releases/tag/xtctx-v0.22.2) (2026-10-06)
 
