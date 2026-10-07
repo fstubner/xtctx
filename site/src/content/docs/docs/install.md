@@ -44,7 +44,7 @@ Setup writes:
 
 - An xtctx section in each agent's instruction file, telling the agent which xtctx tools to use.
 - An MCP config entry for each agent, pinned to the xtctx version you ran. Run setup again to update it.
-- For Claude Code, a `SessionStart` hook that reminds the agent recent sessions are there to look up.
+- For Claude Code, a `SessionStart` hook that shows the agent the most recent session and the command to read it.
 - The handoff skill, in each agent's own format.
 - `.xtctx/config.yaml`, and a `.gitignore` that keeps the index out of git.
 
