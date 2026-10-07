@@ -7,7 +7,7 @@ xtctx needs Node.js 24 or later.
 
 ## Plugin and setup
 
-There are two parts. The plugin is installed once per agent and makes the xtctx tools and the handoff skill available in every project. Setup is run once per project and connects that project; it writes the files listed under [Set up a project](#set-up-a-project).
+The plugin is installed once per agent and makes the xtctx tools and the handoff skill available in every project. Setup is run once per project and writes the files listed under [Set up a project](#set-up-a-project).
 
 In a project that hasn't been set up, the tools don't read anything. They reply that the project isn't configured and give the setup command, so the agent can offer to run it.
 
@@ -63,7 +63,7 @@ Run `npx -y xtctx status`. It shows which agents are set up, how many sessions a
 
 ## Turn on semantic search
 
-Out of the box, search matches keywords, and the install is about 55 MB. Semantic search also matches by meaning, using a model that runs on your machine.
+Search matches keywords by default, and the install is about 55 MB. Semantic search also matches by meaning, using a model that runs on your machine.
 
 It's set per machine, so it works the same for plugin and setup installs. Run `npx -y xtctx embeddings enable` and confirm (`--yes` skips the question). The model and its runtime go into `~/.xtctx/embeddings`, about 540 MB, and the MCP server then builds vectors in the background; see [Semantic search](/docs/commands/#semantic-search). `npx -y xtctx embeddings disable` turns it off again.
 

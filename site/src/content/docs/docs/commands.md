@@ -48,15 +48,15 @@ Search is keyword only until you run `xtctx embeddings enable`. After that, the 
 
 ## Cloud sync
 
-Cloud sync is optional and off by default, and there's no hosted xtctx server: you deploy the Worker in [`cloud/`](https://github.com/fstubner/xtctx/tree/main/cloud) to your own Cloudflare account first. A project only uploads after both of these:
+Cloud sync is optional and off by default. There is no hosted xtctx server, so first deploy the Worker in [`cloud/`](https://github.com/fstubner/xtctx/tree/main/cloud) to your own Cloudflare account. A project only uploads after both of these steps:
 
 1. Run `xtctx login --sync-url <your server>`.
 2. In each project you want to upload, run `xtctx sync enable`.
 
-From then on, the project's transcript text goes to your server, where agents on your other machines can read it over MCP. While an agent has the MCP server running in the project, it uploads every 10 seconds.
+After that, the project's transcript text is uploaded to your server, where agents on your other machines can read it over MCP. While an agent has the MCP server running in the project, it uploads every 10 seconds.
 
 :::caution
-Messages are uploaded exactly as written, so they can include file paths, command output and secrets. Only turn on sync for projects whose transcripts you're happy to upload.
+Messages are uploaded as written, so they can include file paths, command output and secrets. Only turn on sync for projects whose transcripts you are willing to upload.
 :::
 
 `xtctx sync disable` stops uploading and keeps what's already there. `xtctx logout --delete-data` deletes it. `xtctx sync token` prints a read-only token for an MCP client that can't sign in itself.

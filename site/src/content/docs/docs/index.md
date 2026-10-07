@@ -3,7 +3,7 @@ title: Overview
 description: What xtctx does and does not do, which agents it supports, and where its files live.
 ---
 
-xtctx lets one coding agent pick up where another left off. It indexes the transcripts your agents already write and serves them over MCP, so an agent can list recent sessions from any supported tool and read their messages.
+xtctx indexes the transcripts that AI coding agents write on your machine and serves them over MCP. An agent in a project can list recent sessions from every supported agent and read their messages.
 
 ## What xtctx does not do
 
@@ -34,7 +34,7 @@ In each project:
 | `.xtctx/state/xtctx.db` | The index. Setup keeps it out of git with `.xtctx/.gitignore`. |
 | `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.cursor/rules/xtctx.mdc`, `.github/copilot-instructions.md` | An xtctx section in each agent's instruction file. |
 
-xtctx only edits between `<!-- xtctx:begin -->` and `<!-- xtctx:end -->` in an instruction file. The rest of the file is yours.
+xtctx only edits between `<!-- xtctx:begin -->` and `<!-- xtctx:end -->` in an instruction file, and leaves the rest of the file unchanged.
 
 On the machine, in `~/.xtctx/`:
 
