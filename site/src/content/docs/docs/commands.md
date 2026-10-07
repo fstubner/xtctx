@@ -68,7 +68,7 @@ Messages are uploaded as written, so they can include file paths, command output
 | Tool | What it does |
 | --- | --- |
 | `xtctx_recent_sessions` | Lists recent sessions from every indexed agent. |
-| `xtctx_session_detail` | Returns one session's raw messages by `session_ref`, or the newest session's. |
+| `xtctx_session_detail` | Returns one session's raw messages by `session_ref`, the newest messages by default. |
 | `xtctx_search_sessions` | Searches across sessions and returns the ones that match. |
 | `xtctx_continuity_status` | Shows setup and index diagnostics. |
 | `xtctx_handoff_manifest` | Returns stable session references and detail pointers for an orchestrator. |
