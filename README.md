@@ -8,23 +8,19 @@
 [![License](https://img.shields.io/github/license/fstubner/xtctx)](LICENSE)
 [![Node >=24](https://img.shields.io/badge/node-%3E%3D24-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 
-xtctx lets one AI coding agent pick up where another left off.
+xtctx indexes the transcripts that AI coding agents write on your machine and
+serves them over MCP. An agent in a project can list recent sessions from
+every supported agent and read their messages.
 
-Claude Code, Codex, Cursor and the rest each keep their own transcripts on
-your machine. xtctx indexes them per project and serves them over MCP, so when
-you switch agents, the new one can look up what the last one did and read the
-actual conversation. There are no summaries, no memory layer and no
-background service. It reads the files your agents already write.
-
-Everything stays on your machine. The one exception is cloud sync, which is
-off by default and only talks to a server you deploy yourself
-([`docs/cloud-sync.md`](docs/cloud-sync.md)).
+xtctx doesn't write summaries or run a background service. Transcripts stay on
+your machine unless a project turns on cloud sync or a remote embedding
+endpoint (see [Privacy](#privacy)).
 
 Documentation: [xtctx.com/docs](https://xtctx.com/docs/).
 
 ## Install
 
-There are two ways in, and most people end up using both.
+Install xtctx as a plugin, set it up per project, or both.
 
 **The plugin** adds the MCP server and the handoff skill to your agent, once
 per machine. It writes nothing into your projects.
@@ -88,9 +84,8 @@ so it can mention features that haven't reached npm yet.
 
 ### Semantic search (optional)
 
-xtctx searches by keyword out of the box. The base install is about 55 MB
-with nothing extra to download. To also search by meaning, install the local
-embedding model once per machine:
+Search matches keywords by default, and the base install is about 55 MB. To
+also match by meaning, install the local embedding model once per machine:
 
 ```bash
 npx -y xtctx embeddings enable
@@ -98,9 +93,7 @@ npx -y xtctx embeddings enable
 
 It asks before downloading about 540 MB into `~/.xtctx/embeddings`; pass
 `--yes` in scripts. `xtctx embeddings disable` removes it again and leaves
-your index, vectors included, as it is. The model isn't bundled because it
-pushed the first start past two minutes, which is longer than some MCP clients
-wait.
+your index, vectors included, as it is.
 
 Once it's installed, the MCP server builds vectors in the background when
 the remaining work fits in about fifteen minutes. For a bigger backlog,
@@ -119,8 +112,8 @@ no local model.
 ### The first scan
 
 In a project with a long history, the first scan builds the index from
-scratch and can take minutes. The server starts it straight away and answers
-while it runs: each reply uses what has been indexed so far and says which
+scratch and can take minutes. The MCP server starts the scan when it starts and
+answers while it runs: each reply uses what has been indexed so far and says which
 agents' transcripts it hasn't read yet. After that, scans only read what each
 agent has added.
 
@@ -162,7 +155,8 @@ hooks and generated skill files for that agent, and marks it disabled in
 `--all` also deletes `.xtctx/skills`, apart from skills you wrote yourself.
 
 Antigravity and Copilot CLI each keep one MCP config for all projects. Setup
-always writes Antigravity's, because it has nowhere else to go, and writes
+always writes Antigravity's, because Antigravity has no project-level MCP
+config, and writes
 Copilot CLI's only with `--global-mcp`. Disconnecting a project leaves both
 files alone. Pass `--global-mcp` to remove xtctx from them, which removes it
 for every project on the machine.
@@ -194,15 +188,15 @@ The index and its exports hold your raw conversations. Don't commit them.
 - `xtctx_session_detail`: the raw messages of one session.
 - `xtctx_search_sessions`: searches across sessions, by keyword and, once it's
   enabled, by meaning. `mode: "literal"` searches the transcript files
-  directly, so it finds exact text before the index has caught up. It says
-  when it stopped early instead of reporting fewer results as all there is.
+  directly, so it finds exact text before the index has caught up. It reports
+  when it stops at its result limit or time budget.
 - `xtctx_continuity_status`: setup and index diagnostics.
 - `xtctx_handoff_manifest`: stable session IDs and detail pointers for an
   external orchestrator. xtctx keeps no task state of its own
   ([`docs/orchestrator-integration.md`](docs/orchestrator-integration.md)).
 
-Search works on overlapping windows of the raw conversation, never on
-summaries, and points back to the matching messages.
+Search runs over overlapping windows of the raw messages and returns the
+matching message range.
 
 With both the plugin and `setup` in Claude Code, the same server shows up
 twice, as `xtctx` and `plugin:xtctx:xtctx`. Setup allows the tools under both
@@ -218,16 +212,16 @@ names, so neither asks for permission.
 - Google Antigravity
 - opencode
 
-Agents differ in what can be set up for them: some get hooks, some only an
-instruction section. `xtctx status` shows what each one has.
+Some agents get a startup hook and others only an instruction section.
+`xtctx status` shows which.
 
 xtctx reads Antigravity's conversations from its running language server when
 it can, and otherwise from its readable `brain` files. Its encrypted `.pb`
 files aren't read.
 
-Transcript formats belong to each agent and change without notice. xtctx
-reports records it doesn't recognise instead of guessing, and `xtctx status`
-is where to check.
+Each agent controls its own transcript format, and formats can change between
+versions. xtctx reports records it doesn't recognise instead of guessing, and
+`xtctx status` reports them.
 
 ## Skills
 
@@ -236,7 +230,7 @@ with the built-in `xtctx-handoff` skill. Interactive setup lets you pick other
 skills from your agents to keep in sync. `setup --yes` syncs only the
 built-in skill and ones you picked before.
 
-Each agent gets them where it looks for them:
+Setup writes them to:
 
 - Claude Code: `.claude/skills/`
 - Cursor: `.cursor/rules/xtctx-skills/`
@@ -280,7 +274,7 @@ npm --prefix site ci
 npm run verify:release
 ```
 
-Day to day:
+Individual checks:
 
 ```bash
 npm test
@@ -294,9 +288,8 @@ npm run demo:public
 processes and load a real embedding model. What each suite covers and what it
 can't catch is in [`docs/testing-strategy.md`](docs/testing-strategy.md).
 
-Before working on indexing speed, read
-[`docs/embedding-performance.md`](docs/embedding-performance.md). Several of
-the obvious ideas have already been measured and lost.
+Indexing speed measurements, including approaches that were tried and
+rejected, are in [`docs/embedding-performance.md`](docs/embedding-performance.md).
 
 `npm run demo:public` builds fake Claude Code and Codex transcripts in a
 temporary project, starts the MCP server and calls the tools, without
@@ -304,12 +297,11 @@ touching your real transcripts ([`docs/demo.md`](docs/demo.md)).
 
 ## Releasing
 
-Merging releases nothing. To release, run the **release** workflow, pick
+Releases are manual. To release, run the **release** workflow, pick
 `patch`, `minor` or `major`, and type `release`. It runs `verify:release`,
 bumps the version, moves the notes under `[Unreleased]` in `CHANGELOG.md` to
 the new version, tags, creates the GitHub release and publishes to npm.
 
 Untick `publish_npm` to skip npm. The **publish** workflow publishes an
 existing tag later, and checks the commit really carries that tag first.
-[`docs/release.md`](docs/release.md) has the details and the history behind
-them.
+Details are in [`docs/release.md`](docs/release.md).
