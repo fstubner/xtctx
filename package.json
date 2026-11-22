@@ -51,7 +51,7 @@
     "@modelcontextprotocol/sdk": "^1.30.0",
     "better-sqlite3": "^13.0.3",
     "commander": "^15.0.0",
-    "glob": "^13.0.6",
+    "glob": "^14.0.2",
     "yaml": "^2.9.0"
   },
   "devDependencies": {
