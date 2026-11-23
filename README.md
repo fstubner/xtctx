@@ -18,6 +18,10 @@ endpoint (see [Privacy](#privacy)).
 
 Documentation: [xtctx.com/docs](https://xtctx.com/docs/).
 
+## Self-hosted remote MCP
+
+A unified Node 24 + PostgreSQL 17 (`pgvector`) deployment is available for self-hosting or managed Postgres, without vendor lock-in. See [cloud/README.md](cloud/README.md) for Docker Compose, scoped tokens, RLS persistence, and deployment details.
+
 ## Install
 
 xtctx needs Node.js 24 or later. Install it as a plugin, set it up per
@@ -258,10 +262,12 @@ xtctx sends no telemetry. Transcripts leave your machine only if a project
 turns on one of these:
 
 - **Cloud sync.** Nothing is sent until you log in (`xtctx login`) and enable
-  it for the project (`xtctx sync enable`). Then that project's transcript
-  text goes to your own sync server, including any paths or output the agents
-  wrote into it, and your other machines' agents can read it over MCP. There
-  is no hosted xtctx service and no default server.
+  it for the project (`xtctx sync enable`). Sync talks only to the server URL
+  you explicitly configure (`--sync-url` or `XTCTX_SYNC_URL`), such as your
+  own self-hosted [`cloud/`](cloud/README.md) server or an
+  optional early-access Hosted Sync workspace (`sync.xtctx.com`). High-confidence
+  secrets are redacted on your device (best-effort) before upload, with optional
+  PII scrubbing in `.xtctx/config.yaml`.
 - **An external embedding endpoint**, written into `.xtctx/config.yaml`.
   Search windows are sent there to be embedded. xtctx never picks one up
   from an environment variable.

@@ -11,6 +11,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # Everything whose behaviour depends on the host OS: path handling and
   # store-directory encoding (Claude Code encodes a POSIX root with a leading
@@ -21,6 +25,7 @@ jobs:
   test:
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -29,6 +34,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -60,33 +67,14 @@ jobs:
           path: node_modules/@huggingface/transformers/.cache
           key: hf-model-${{ runner.os }}-${{ hashFiles('src/handoff/embeddings.ts') }}
 
-      - name: Unit and integration tests
-        run: |
-          npm test
-          npm run test:integration
-
-      - name: Drift canary
-        run: npm run test:drift
-
-      # Seeds every tool's native store at the path the product computes for
-      # this platform, so a scraper that silently matches nothing on macOS or
-      # Windows fails here instead of in someone's install.
-      - name: Cross-tool pickup smoke
-        run: npm run test:smoke
-
-      - name: Build package
-        run: npm run build
-
-      - name: CLI smoke check
-        run: npm run smoke:cli
-
-      - name: Public demo smoke
-        run: npm run demo:public
+      - name: Local CI portable lane
+        run: npm run ci:local -- --lane portable
 
   # OS-independent gates: linting, security, dependency audits, the site, and
   # packaging. Running these once keeps the matrix cheap.
   checks:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -96,6 +84,7 @@ jobs:
           # version is tagged, and fails rather than skipping when it can see
           # no tags; the default shallow clone has none.
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -136,52 +125,43 @@ jobs:
           path: node_modules/@huggingface/transformers/.cache
           key: hf-model-${{ runner.os }}-${{ hashFiles('src/handoff/embeddings.ts') }}
 
-      - name: Lint
-        run: npm run lint
+      - name: Local CI checks lane
+        run: npm run ci:local -- --lane checks
 
-      - name: Typecheck (including the test tree)
-        run: npm run typecheck
-
-      - name: Cloud Worker typecheck and tests
-        run: npm run test:cloud
-
-      - name: Root security tests and checklist
-        run: |
-          npm run test:security
-          npm run security:checklist
-          npm run audit:production
-
-      # Both used to run only inside `verify:release`, which only the release
-      # workflow invokes — so a broken workflow file or an unmapped file was
-      # found at release time, if at all. An invalid release.yml sat on a
-      # branch for two days with this job green.
-      - name: Workflow files and review coverage
-        run: |
-          npm run check:workflows
-          npm run check:review-coverage
-
-      - name: Site dependency audit
-        # The whole tree, not --omit=dev: the site is static files, so Astro
-        # and Starlight only ever run at build time, and the browser-check
-        # tooling in devDependencies runs on developers' machines.
-        run: npm run audit:site
-
-      # Ranking quality gate. Single platform on purpose: the baseline is
-      # derived from float embeddings, so its portability across runners is
-      # unproven — running it in one place keeps the signal honest until that
-      # is established.
-      - name: Retrieval ranking eval
-        run: npm run test:eval
-
-      # Build, types, and the template's static gates: sample content left
-      # behind, dead CSS, docs style regions, the wordmark inset, changelog
-      # dates against tags, and the file-size guard. The rendered contrast and
-      # a11y sweeps drive a browser and are run locally for now.
-      - name: Site build and checks
-        run: npm run site:check
-
-      - name: Package dry run
-        run: npm pack --dry-run
+  semantic-search:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: xtctx
+          POSTGRES_PASSWORD: xtctx
+          POSTGRES_DB: xtctx
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U xtctx -d xtctx"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: cloud/package-lock.json
+      - name: Install cloud dependencies
+        run: npm --prefix cloud ci
+      - name: Local CI semantic & Postgres lane
+        env:
+          TEST_DATABASE_URL: postgresql://xtctx:xtctx@127.0.0.1:5432/xtctx
+        run: npm run ci:local -- --lane semantic
 
   # Aggregate gate. Branch protection on `main` requires a check named
   # `test-and-build`, so that name has to keep reporting — splitting the old
@@ -191,13 +171,13 @@ jobs:
   # required, without editing repository settings to do it.
   test-and-build:
     if: always()
-    needs: [test, checks]
+    needs: [test, checks, semantic-search]
     runs-on: ubuntu-latest
     steps:
       - name: Verify every job succeeded
         run: |
-          echo "test=${{ needs.test.result }} checks=${{ needs.checks.result }}"
-          if [ "${{ needs.test.result }}" != "success" ] || [ "${{ needs.checks.result }}" != "success" ]; then
+          echo "test=${{ needs.test.result }} checks=${{ needs.checks.result }} semantic=${{ needs.semantic-search.result }}"
+          if [ "${{ needs.test.result }}" != "success" ] || [ "${{ needs.checks.result }}" != "success" ] || [ "${{ needs.semantic-search.result }}" != "success" ]; then
             echo "One or more required jobs did not succeed." >&2
             exit 1
           fi
