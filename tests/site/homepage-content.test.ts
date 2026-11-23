@@ -49,7 +49,7 @@ async function homepageSources(): Promise<string> {
 }
 
 describe("the homepage visitors are sent to", () => {
-  it("names the five MCP tools the product actually exposes", async () => {
+  it("names the six MCP tools the product actually exposes", async () => {
     const page = await homepageSources();
 
     for (const tool of [
@@ -58,6 +58,7 @@ describe("the homepage visitors are sent to", () => {
       "xtctx_search_sessions",
       "xtctx_continuity_status",
       "xtctx_handoff_manifest",
+      "xtctx_skill_usage",
     ]) {
       expect(page, `homepage should name ${tool}`).toContain(tool);
     }

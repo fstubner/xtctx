@@ -8,8 +8,8 @@ xtctx indexes the transcripts that AI coding agents write on your machine and se
 ## What xtctx does not do
 
 - **Summaries or memory.** xtctx writes no summaries and keeps no memory of its own. The index stores the raw messages in order, and the transcripts stay the source of truth.
-- **Background services.** There is no daemon, API server, dashboard or watcher. Each agent starts the MCP server when it needs it, and the server stops when the agent does.
-- **Uploads.** Search runs on your machine. Transcript text only leaves it if a project turns on a remote embedding endpoint or [cloud sync](/docs/commands/#cloud-sync), which goes to a server you deploy yourself.
+- **Background services.** There is no daemon or watcher for local handoff. Each agent starts the stdio MCP server when it needs it, and the server stops when the agent does. Optional self-hosted [cloud sync](/docs/commands/#cloud-sync) runs separately only if you deploy it.
+- **Uploads.** Search runs on your machine. Transcript text only leaves it if a project turns on a remote embedding endpoint or [cloud sync](/docs/commands/#cloud-sync), which talks only to the sync server URL you configure. High-confidence secrets are redacted on your device (best-effort) before upload.
 
 ## Supported agents
 
@@ -21,7 +21,7 @@ xtctx indexes the transcripts that AI coding agents write on your machine and se
 - Google Antigravity
 - opencode
 
-`xtctx status` shows how each agent is connected: with a startup hook (`executable`, Claude Code only), through its instruction file (`instruction-only`), or through MCP alone (`mcp-only`).
+`xtctx status` shows how each agent is connected: with a startup hook (`executable`, Claude Code and Cursor), through its instruction file (`instruction-only`), or through MCP alone (`mcp-only`).
 
 ## Files
 

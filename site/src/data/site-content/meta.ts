@@ -12,7 +12,7 @@ export const meta: Meta = {
     'xtctx indexes the transcripts your AI coding agents already write and serves them over MCP, so the next agent you open can pick up where the last one stopped.',
   // Shown when the page is shared, where there is a little more room.
   ogDescription:
-    'Local transcript retrieval over MCP for Claude Code, Codex, Cursor, Copilot, Antigravity and opencode.',
+    'Local transcript retrieval over MCP for Claude Code, Codex, Cursor, Copilot, Copilot CLI, Antigravity and opencode.',
   siteName: 'xtctx',
   author: { name: 'Felix Stubner', url: 'https://github.com/fstubner' },
   ogImage: 'https://xtctx.com/assets/hero.png',
