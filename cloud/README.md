@@ -1,157 +1,89 @@
 # xtctx-cloud
 
-The optional, self-hosted server behind [xtctx cloud sync](../docs/cloud-sync.md): a Cloudflare Worker that stores what opted-in projects upload (D1) and serves it back over MCP. xtctx runs no hosted instance and the CLI has no default server: you deploy this Worker to your own Cloudflare account and point `xtctx login --sync-url` at it. Nothing reaches it unless a user logs in **and** opts a project in.
+The optional sync server behind [xtctx cloud sync](../docs/cloud-sync.md): a unified **Node 24 + PostgreSQL 17 (`pgvector >= 0.8`)** service that stores redacted transcripts uploaded by opted-in projects, serves them back over Streamable HTTP MCP and the web dashboard, and computes async embeddings via a built-in Postgres job worker.
+
+Run the same container image via `docker compose up -d` for self-hosting or deploy `api` + `worker` against Managed PostgreSQL with `DATABASE_URL`. Nothing leaves your machine unless you log in (`xtctx login --sync-url <url>`) **and** opt a project in (`xtctx sync enable`).
+
+## Quick start (Docker Compose)
+
+```bash
+cd cloud
+export JWT_SECRET="$(openssl rand -base64 48)"
+export ALLOWED_GITHUB_IDS="<your numeric github id>"
+docker compose up -d
+```
+
+To also run the background embedding worker container:
+
+```bash
+docker compose --profile worker up -d
+```
+
+The compose stack boots:
+- `postgres`: `pgvector/pgvector:pg17` with the `xtctx_app` (`NOBYPASSRLS`) role initialized by `docker/init-app-role.sql`.
+- `api`: Node 24 HTTP server (`dist/server.mjs`) running migrations on startup, serving MCP, `/api/*`, OAuth 2.1, `/dashboard`, and Stripe billing webhooks.
+- `worker` (`--profile worker`): async embedding queue consumer (`dist/worker.mjs`) using PostgreSQL `FOR UPDATE SKIP LOCKED`.
 
 ## What it serves
 
 | Route | Who calls it | Auth |
 |---|---|---|
-| `POST /mcp` | MCP clients (Streamable HTTP; 2026-07-28 per-request, and 2025-11-25 / 2025-06-18 with `initialize`) | OAuth token with `read`, or one of this server's own tokens with `read` |
-| `GET /sse`, `POST /message` | MCP clients on the deprecated 2024-11-05 SSE transport | this server's own token with `read` |
-| `/.well-known/oauth-protected-resource/mcp` and `/.well-known/oauth-protected-resource` | MCP clients, discovery | none |
-| `/.well-known/oauth-authorization-server`, `/oauth/register`, `/oauth/token`, `/authorize`, `/oauth/github/callback` | MCP clients signing in | see below |
-| `POST /auth/device/code`, `POST /auth/device/poll` | `xtctx login` (GitHub device flow) | none |
-| `POST /api/stream` | uploads from `xtctx` | CLI token, `sync:write` |
-| `POST /api/tokens` | `xtctx sync token` | CLI token, `sync:write` |
-| `POST /auth/logout`, `DELETE /api/me` | `xtctx logout [--delete-data]` | CLI token (`account:delete` for the delete) |
-| `GET /health` | anyone | none; reports the version, also sent as `X-Xtctx-Server-Version` on every response |
+| `POST /mcp` | MCP clients (Streamable HTTP; `2026-07-28`, `2025-11-25`, `2025-06-18`) | OAuth access token (`read`) or scoped bearer token (`read`) |
+| `/.well-known/oauth-protected-resource`, `/.well-known/oauth-protected-resource/mcp` | MCP OAuth 2.1 resource metadata | none |
+| `/.well-known/oauth-authorization-server`, `/oauth/register`, `/oauth/token`, `/authorize`, `/oauth/github/callback` | MCP OAuth 2.1 authorization server + dashboard login | PKCE S256 required |
+| `GET /dashboard`, `/dashboard/api/*` | Archive browser, connect tokens, billing | GitHub OAuth cookie (`SameSite=Strict`) |
+| `POST /auth/device/code`, `POST /auth/device/poll` | `xtctx login` (GitHub Device Flow) | none |
+| `POST /api/stream`, `GET /api/sync-capabilities` | `xtctx sync` & browser extension | CLI/sync token (`sync:write`) |
+| `POST /api/coverage` | v1/v2 source coverage receipts | Sync token (`sync:write`) with device id |
+| `POST /api/tokens` | `xtctx sync token` | Sync token (`sync:write`) -> `read`-only token |
+| `POST /auth/logout`, `DELETE /api/me` | `xtctx logout [--delete-data]` | CLI token (`account:delete` for deletion) |
+| `POST /api/stripe/webhook` | Stripe webhooks | `Stripe-Signature` HMAC-SHA256 |
+| `GET /health` | Health check | none (`X-Xtctx-Server-Version` header on all responses) |
 
-### Sign-in
+## Authentication, RLS & Durability
 
-The Worker is an OAuth 2.1 authorization server for its own MCP resource, `${PUBLIC_URL}/mcp`, built on Cloudflare's [`@cloudflare/workers-oauth-provider`](https://github.com/cloudflare/workers-oauth-provider). GitHub is only the identity step.
+- **PostgreSQL Row-Level Security:** Every tenant table enables RLS (`user_id = current_setting('app.user_id', true)`). Authenticated user queries run inside `withUserDb` using `SET LOCAL ROLE ${DATABASE_APP_ROLE}` (e.g. `xtctx_app`, `NOBYPASSRLS`) and transaction-local `set_config('app.user_id', ...)`.
+- **Durable `token_epochs`:** `POST /auth/logout` and `DELETE /api/me` increment the account's epoch without cascading on `users` deletion, so prior JWTs and refresh tokens remain revoked even if the same GitHub account returns later.
+- **Account deletion & Stripe fail-closed:** `DELETE /api/me` and `DELETE /dashboard/api/account` cancel any active Stripe subscription before deleting user data and fail with `502` if Stripe cannot be reached.
+- **Lossless message storage:** Raw UTF-8 message payloads are stored in `messages.content_bytes` (`BYTEA`) alongside `content_chars` for surrogate-pair paging and embedded `\0` preservation, while `search_tsv` and GIN-indexed `metadata` (`JSONB`) are scrubbed of NULs.
 
-- **MCP clients** find it from the `401` on `/mcp` (whose `WWW-Authenticate` names the protected-resource metadata), register through a Client ID Metadata Document (MCP 2026-07-28) or dynamic registration (older clients), and send the user to `/authorize`. That page names the client and where the access goes, then hands off to GitHub's web flow; the callback checks the allowlist and finishes the grant. PKCE with S256 is required of every client. Tokens are bound to the `/mcp` resource, carry only `read`, last an hour, and refresh for 30 days.
-- **The CLI** uses GitHub's device flow (`/auth/device/*`) and gets this server's own token (HS256, 30 days) with `read sync:write account:delete`, valid at `/mcp` and `/api/*`.
-- **Pasted tokens** (`xtctx sync token`, `POST /api/tokens`) are this server's own tokens with `read` only, valid 90 days at `/mcp` and `/sse`, for clients that cannot sign in by themselves.
+## Hybrid Search & Embeddings
 
-Only GitHub accounts listed in `ALLOWED_GITHUB_IDS` can sign in, by either route. An empty list lets nobody in. Taking someone off the list ends their access at their next request; they can still log out and delete their data.
+`EMBEDDING_PROVIDER` selects the embedding backend:
+- `local` (default): `Xenova/bge-small-en-v1.5` (384-dim `halfvec(384)`, FP32 via `@huggingface/transformers`). Runs locally in Node with zero external AI API calls.
+- `openai`: calls an OpenAI-compatible embeddings endpoint (`EMBEDDING_API_URL`, optional `EMBEDDING_API_KEY`, `EMBEDDING_MODEL`) returning 384-dim vectors.
+- `none`: disables embeddings cleanly; lexical (`to_tsvector('simple')`) search stays active and `hybrid` reports explicit lexical fallback.
 
-`POST /auth/logout` and `DELETE /api/me` move the account's token epoch, which every token carries and every request checks, and revoke its OAuth grants. The epoch is kept when the account's data is deleted, so a token from before a deletion stays dead after the same GitHub account signs in again.
+Vector search queries `message_chunks` (`halfvec(384)`) with `pgvector >= 0.8` HNSW (`halfvec_cosine_ops`) using `SET LOCAL hnsw.iterative_scan = relaxed_order` and `ef_search = 80`, then fuses lexical + dense rankings with Reciprocal Rank Fusion (`k = 60`).
 
-### Uploads
+## Environment Variables
 
-`POST /api/stream` takes `{ device, project, sessions: [{ ..., messages, keepIds? }] }` and writes it as **one D1 batch**: all of it or none. Messages are keyed by the client's own ids, so a replay rewrites the same rows; `message_count` is recounted from the rows; `keepIds`, when sent, deletes every other stored message of that session. Limits, each answered with a JSON error the client acts on:
-
-| Limit | Value | Over it |
+| Variable | Description | Default |
 |---|---|---|
-| body | 1 MiB | `413 body_too_large` |
-| one message's text | 64 KiB (UTF-8) | `413 message_too_large` naming the session and message; the client skips that message |
-| one message's metadata | 4 KiB | the same |
-| sessions per request | 10 | `400` |
-| messages per request | 500 | `400` |
-| the pre-0.2 upload format | | `426 client_outdated` |
+| `DATABASE_URL` / `DATABASE_URL_FILE` | PostgreSQL 17 connection string (required) | — |
+| `DATABASE_APP_ROLE` | Non-owner `NOBYPASSRLS` role for `withUserDb` | unset (`xtctx_app` in compose) |
+| `PUBLIC_URL` | Canonical origin (`https://...` outside localhost) | `http://localhost:8788` |
+| `JWT_SECRET` / `JWT_SECRET_FILE` | HS256 signing secret (>= 32 chars, required) | — |
+| `ALLOWED_GITHUB_IDS` | Comma-separated numeric GitHub IDs (required unless `STRIPE_SECRET_KEY` set) | unset |
+| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | GitHub OAuth App credentials (Device Flow + `/authorize` / `/dashboard`) | unset |
+| `ALLOWED_ORIGINS` | Comma-separated browser origins allowed for CORS (e.g. Chrome extension) | unset |
+| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_ID` | Optional Stripe checkout, portal & webhook gating | unset |
+| `HOSTED_MESSAGE_QUOTA` | Per-account message quota for non-allowlisted paid users | `100000` |
+| `MAX_UPLOAD_BODY_BYTES` / `MAX_UPLOAD_MESSAGE_BYTES` | Override `/api/stream` body/message byte caps | `8 MiB` / `4 MiB` |
+| `EMBEDDING_PROVIDER` | `local`, `openai`, or `none` | `local` |
+| `HOST` / `PORT` | Bind address and HTTP port | `127.0.0.1` (`0.0.0.0` in Docker) / `8788` |
 
-These keep a request inside D1's limits: messages go in as one JSON parameter per session, and a request makes at most 4 statements per session plus 2 in its batch, and 2 reads around it: 44 queries for 10 sessions, under the free plan's 50 per invocation. A failed write is logged as `{"event":"ingest_failed","userId",...,"bytes","sessions","messages","error"}`, never with content.
-
-## Deploying
-
-In this order. Nothing here is run by the tests or by CI.
-
-### 0. Your own config
-
-The committed `wrangler.toml` deploys to no domain: it has no routes and its `PUBLIC_URL` is a placeholder, and while `PUBLIC_URL` is still that placeholder the Worker answers every route except `/health` with `500 server_misconfigured`. Make your own, untracked copy and use it for every wrangler command below:
-
-```bash
-cp wrangler.local.example.toml wrangler.local.toml    # git-ignored
-```
-Fill in what it marks `REPLACE`: your domain (the `routes` entry, on a zone in your Cloudflare account), `PUBLIC_URL` (that domain as `https://...`, no path), the D1 and KV ids (steps 2 and 3), your GitHub OAuth app's client id (step 5) and `ALLOWED_GITHUB_IDS` (step 6). Add `--config wrangler.local.toml` to each `wrangler` command, so the migration and deploy commands are:
-
-```bash
-npx wrangler d1 migrations apply xtctx-db --remote --config wrangler.local.toml
-npx wrangler deploy --config wrangler.local.toml
-```
-The `npm run deploy` and `npm run d1:migrate:remote` scripts use the committed `wrangler.toml`, which is not meant to be deployed as it stands.
-
-### 1. Install
+## Build, CLI & Tests
 
 ```bash
 cd cloud
-npm install
+npm ci
+npm run build         # bundles dist/server.mjs, dist/worker.mjs, migrations/, dashboard/
+npm run typecheck
+npm test              # unit tests (no DB required)
+
+# Real-Postgres integration tests (requires pgvector/pgvector:pg17)
+TEST_DATABASE_URL=postgresql://xtctx:xtctx@127.0.0.1:5432/xtctx npm run test:integration
 ```
 
-### 2. D1 database
-
-`npx wrangler d1 create xtctx-db`, then put the printed `database_id` in `wrangler.local.toml`.
-
-### 3. KV namespace for OAuth
-
-```bash
-npx wrangler kv namespace create OAUTH_KV
-```
-
-Put the printed id in `wrangler.local.toml` under `[[kv_namespaces]]`, replacing `REPLACE_WITH_OAUTH_KV_NAMESPACE_ID`, which is not a namespace.
-
-### 4. Schema
-
-```bash
-npx wrangler d1 migrations apply xtctx-db --remote --config wrangler.local.toml
-```
-
-Migrations live in `migrations/` and `wrangler` records which ran in the database's `d1_migrations` table. Apply them **before** deploying code that needs them. `0000_baseline.sql` is the schema as it was when tracking started; `0001_sync_v2.sql` adds the token epochs and the upload status table, and drops the columns that held absolute paths.
-
-#### A database created before tracked migrations
-
-A database made from the old `schema.sql` (with or without the old `0001_token_version.sql`) is brought onto the tracked path without losing data:
-
-1. Check that `users` has the `token_version` column:
-   ```bash
-   npx wrangler d1 execute xtctx-db --remote --command "SELECT name FROM pragma_table_info('users') WHERE name = 'token_version'"
-   ```
-   If that returns no row, add it first (this was the old `0001_token_version.sql`):
-   ```bash
-   npx wrangler d1 execute xtctx-db --remote --command "ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0"
-   ```
-2. Run the migrations command above. It applies `0000_baseline.sql`, which is all `CREATE ... IF NOT EXISTS` and so changes nothing on this database, then `0001_sync_v2.sql`, which copies each user's `token_version` into `token_epochs` (nobody is signed out by the copy) and drops `users.token_version`, `sessions.status`, `sessions.source_path` and `messages.source_pointer`.
-
-Existing rows stay. Messages uploaded by clients before 0.2 have ids in the old scheme; the first sync from each device after it updates replaces them, because the session counts differ and the client then sends the session whole with its ids.
-
-### 5. GitHub OAuth app
-
-At [GitHub Developer Settings](https://github.com/settings/developers) → OAuth Apps, Create your own OAuth app (the client id in the committed `wrangler.toml` is not yours) and put its client id in `GITHUB_CLIENT_ID` in `wrangler.local.toml`. On that app:
-
-1. Enable **Device Flow** (for `xtctx login`).
-2. Set the **Authorization callback URL** to `https://xtctx-sync.example.com/oauth/github/callback` (with your own domain), that is `PUBLIC_URL` + `/oauth/github/callback`.
-3. Generate a client secret for the next step.
-
-### 6. Secrets and variables
-
-```bash
-npx wrangler secret put JWT_SECRET --config wrangler.local.toml            # required; e.g. openssl rand -base64 48
-npx wrangler secret put GITHUB_CLIENT_SECRET --config wrangler.local.toml  # the OAuth app's secret, for browser sign-in
-```
-
-- Until `JWT_SECRET` is set every route except `/health` answers 500. Changing it later invalidates every CLI and pasted token.
-- Without `GITHUB_CLIENT_SECRET` the CLI's device flow still works and `/authorize` answers 503.
-- Set `ALLOWED_GITHUB_IDS` in `wrangler.local.toml` `[vars]` to the comma-separated numeric GitHub ids allowed to sign in (yours is `"id"` in `https://api.github.com/users/<login>`). Left empty, it lets nobody in.
-- `PUBLIC_URL` (in `wrangler.local.toml`) is the origin MCP clients connect to; tokens are bound to `PUBLIC_URL/mcp`, so it must match the domain clients use. It is also the URL you give `xtctx login --sync-url`.
-- `ALLOWED_ORIGINS` (optional, comma-separated) lists the browser origins that get CORS headers and the foreign `Origin` values `/mcp` accepts; no other origin gets either.
-
-### 7. Deploy
-
-```bash
-npx wrangler deploy --config wrangler.local.toml
-```
-
-The Worker is served only on the custom domain in your `routes` (`workers_dev = false`), for MCP clients and the CLI alike. Then run `xtctx login --sync-url https://<your domain>` on each machine. Logs and traces go to Workers Observability (`[observability]`).
-
-After a deploy, CLI users of a version before 0.2 get `426` on upload and must update xtctx, and tokens from before this version (they carry no scopes) are refused, so everyone runs `xtctx login` once.
-
-## Running it locally
-
-```bash
-cd cloud
-node node_modules/wrangler/bin/wrangler.js d1 migrations apply xtctx-db --local --persist-to <short dir>
-node node_modules/wrangler/bin/wrangler.js dev --local --port 8787 \
-  --local-upstream localhost:8787 --upstream-protocol http --persist-to <short dir> \
-  --var PUBLIC_URL:http://localhost:8787 --var JWT_SECRET:<anything> \
-  --var GITHUB_CLIENT_SECRET:<a local OAuth app's secret> --var ALLOWED_GITHUB_IDS:<your id>
-```
-
-- `--local-upstream` and `--upstream-protocol`: without them `wrangler dev` presents requests as `https://<your domain>/...` (the first route of a config that has one), so the resource metadata and challenge do not match `http://localhost:8787` and MCP clients cannot discover the sign-in.
-- On Windows keep `--persist-to` short (`C:\tmp\xw`, say); a long path runs past `MAX_PATH` and D1 commands fail.
-- The browser sign-in needs a GitHub OAuth app whose callback is `http://localhost:8787/oauth/github/callback`; a GitHub OAuth app has one callback URL, so use a separate app for local work.
-- Point the CLI at it with `xtctx login --sync-url http://localhost:8787` (plain `http` is accepted only for `localhost`).
-
-## Tests
-
-`npm test` runs the Worker in Node against an in-memory SQLite D1 (built from `migrations/`, in order) and an in-memory KV, with GitHub stubbed: uploads, revocation, tenant isolation, the MCP protocol for both eras, and the whole OAuth flow from registration to a token used at `/mcp`. `npm run typecheck` checks the Worker's sources.
+Server CLI commands (`node dist/server.mjs <command>`): `serve` (default), `worker`, `migrate`, `token`, `revoke`.
