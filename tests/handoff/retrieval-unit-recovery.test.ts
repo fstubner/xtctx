@@ -308,7 +308,7 @@ describe("retrieval unit recovery after an interrupted scan", () => {
       await scanTool(new CursoredScraper(changed), {
         db,
         stmts: prepareStatements(db),
-        scopedRoot: normalizeRootForCompare(realpathSync(tempDir)),
+        scopedRoot: normalizeRootForCompare(realpathSync.native(tempDir)),
       });
     } finally {
       db.close();

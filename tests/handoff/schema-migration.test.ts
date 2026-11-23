@@ -98,7 +98,7 @@ describe("opening an index from an older schema", () => {
       expect(db.pragma("user_version", { simple: true })).toBe(3);
       // Rows written raw are stored the way version 3 stores them.
       const roots = db.prepare("SELECT DISTINCT project_root FROM sessions").pluck().all();
-      expect(roots).toEqual([normalizeRootForCompare(realpathSync(dir))]);
+      expect(roots).toEqual([normalizeRootForCompare(realpathSync.native(dir))]);
       // The re-read the migration forces fills what the old shape lacked for
       // the session still on disk; the aged one keeps what it had.
       const branches = db

@@ -108,7 +108,7 @@ interface Part {
 
 function canonicalRoot(projectDir: string): string {
   try {
-    return realpathSync(projectDir);
+    return realpathSync.native(projectDir);
   } catch {
     return projectDir;
   }

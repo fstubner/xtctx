@@ -415,7 +415,7 @@ describe("one uploader per project", () => {
     const { join: j } = await import("node:path");
     const { createHash } = await import("node:crypto");
     const { realpathSync } = await import("node:fs");
-    const key = process.platform === "win32" ? realpathSync(box.project).toLowerCase() : realpathSync(box.project);
+    const key = process.platform === "win32" ? realpathSync.native(box.project).toLowerCase() : realpathSync.native(box.project);
     const lockPath = j(box.home, ".xtctx", "sync", `${createHash("sha256").update(key).digest("hex").slice(0, 24)}.lock`);
     mkdirSync(j(box.home, ".xtctx", "sync"), { recursive: true });
     writeFileSync(lockPath, JSON.stringify({ pid: 2 ** 22 + 12345, token: "dead" }));
