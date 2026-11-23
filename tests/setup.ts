@@ -1,3 +1,11 @@
+import { isMainThread } from "node:worker_threads";
+
+// The sync fixtures redirect HOME/USERPROFILE. Worker-thread process.env is
+// thread-local, but os.homedir() reads the native process environment: those
+// fixtures can therefore overwrite the real user's credentials under threads.
+// Fail before test modules can run; forked workers isolate the native env.
+if (!isMainThread) throw new Error("xtctx tests require --pool forks: worker threads do not isolate os.homedir()");
+
 /**
  * Budgets that describe production latency, not correctness, turned down for
  * the suite.

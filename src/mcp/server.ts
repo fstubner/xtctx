@@ -7,6 +7,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { createContinuityStatusHandler } from "./tools/continuity.js";
 import { createHandoffManifestHandler } from "./tools/manifest.js";
+import { createSkillUsageHandler } from "./tools/skills.js";
 import {
   createRecentSessionsHandler,
   createSearchSessionsHandler,
@@ -214,6 +215,34 @@ export function buildToolDefinitions(): Tool[] {
         },
       },
     },
+    {
+      name: "xtctx_skill_usage",
+      description:
+        "Aggregate skill invocations across recorded agent transcripts in this project, with per-agent breakdowns and recency.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          days: {
+            type: "number",
+            description: "Optional number of days of history to include (e.g. 7, 30).",
+          },
+          tool: {
+            type: "string",
+            enum: TOOL_IDS,
+            description: `Optional tool id to filter by. One of: ${TOOL_IDS.join(", ")}`,
+          },
+          skill: {
+            type: "string",
+            description: "Optional skill name to filter by.",
+          },
+          format: {
+            type: "string",
+            enum: ["markdown", "json"],
+            description: "Response format. Default: markdown",
+          },
+        },
+      },
+    },
   ];
 }
 
@@ -255,6 +284,7 @@ export function createToolHandlers(
     handlers.set("xtctx_search_sessions", createSearchSessionsHandler(dependencies.sessions));
     handlers.set("xtctx_continuity_status", createContinuityStatusHandler(dependencies.sessions));
     handlers.set("xtctx_handoff_manifest", createHandoffManifestHandler(dependencies.sessions));
+    handlers.set("xtctx_skill_usage", createSkillUsageHandler(dependencies.sessions));
   } else {
     const missing = missingDependency("session service");
     handlers.set("xtctx_recent_sessions", missing);
@@ -262,6 +292,7 @@ export function createToolHandlers(
     handlers.set("xtctx_search_sessions", missing);
     handlers.set("xtctx_continuity_status", missing);
     handlers.set("xtctx_handoff_manifest", missing);
+    handlers.set("xtctx_skill_usage", missing);
   }
 
   return handlers;
@@ -346,6 +377,7 @@ const TOOL_NAMES = [
   "xtctx_search_sessions",
   "xtctx_continuity_status",
   "xtctx_handoff_manifest",
+  "xtctx_skill_usage",
 ] as const;
 
 /**

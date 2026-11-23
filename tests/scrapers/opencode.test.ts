@@ -123,6 +123,24 @@ describe("OpenCodeScraper", () => {
     await rm(stateDir, { recursive: true, force: true });
   });
 
+  it("inventories empty and populated source sessions independently with project scoping", async () => {
+    buildOpenCodeDb(dbPath, [
+      {id:"empty",directory:"/work/project",time_created:1,messages:[]},
+      {id:"other",directory:"/work/other",time_created:1,messages:[]},
+    ]);
+    expect(await new OpenCodeScraper(dbPath,stateDir).listSessionIds()).toEqual(new Set(["empty","other"]));
+    expect(await new OpenCodeScraper(dbPath,stateDir,"/work/project").listSessionIds()).toEqual(new Set(["empty"]));
+    const db=new Database(dbPath);db.prepare("DELETE FROM session WHERE id=?").run("empty");db.close();
+    expect(await new OpenCodeScraper(dbPath,stateDir).listSessionIds()).toEqual(new Set(["other"]));
+  });
+  it("does not mistake missing, corrupt or unsupported source stores for empty inventories", async () => {
+    expect(await new OpenCodeScraper(dbPath,stateDir).listSessionIds()).toBeNull();
+    await writeFile(dbPath,"not sqlite");
+    await expect(new OpenCodeScraper(dbPath,stateDir).listSessionIds()).rejects.toThrow();
+    await rm(dbPath);const db=new Database(dbPath);db.exec("CREATE TABLE unrelated (id TEXT)");db.close();
+    await expect(new OpenCodeScraper(dbPath,stateDir).listSessionIds()).rejects.toThrow("schema");
+  });
+
   it("scopes sessions to the project root when provided", async () => {
     buildOpenCodeDb(dbPath, [
       {

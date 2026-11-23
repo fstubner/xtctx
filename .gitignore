@@ -62,3 +62,11 @@ cloud/wrangler.local.toml
 # machine's project root), so they are not committed.
 CLAUDE.md
 GEMINI.md
+
+# Optional local CI Python environment
+.venv-ci/
+
+# Python caches and build/pack target outputs
+**/__pycache__/
+*.pyc
+target/

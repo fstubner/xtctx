@@ -7,6 +7,7 @@ import type { CursorChunk } from "../types/scraper.js";
 import { AbstractScraper, describeType, driftWarner, estimateTokens, isRecord, toDate } from "./base.js";
 import { pathMatchesProject } from "../utils/project-scope.js";
 import { withDriftReport } from "./drift-log.js";
+import { extractSkillsFromText } from "./skills.js";
 
 // Bubble type constants from Cursor's internal format.
 const BUBBLE_TYPE_USER = 1;
@@ -118,6 +119,7 @@ export class CursorScraper extends AbstractScraper<CursorChunk> {
     private readonly cursorStorePath: string,
     stateDir: string,
     private readonly projectRoot?: string,
+    private readonly includeUnassigned = false,
   ) {
     super(stateDir);
   }
@@ -173,6 +175,56 @@ export class CursorScraper extends AbstractScraper<CursorChunk> {
 
   getStorePaths(): string[] {
     return [this.cursorStorePath];
+  }
+
+  /** Physical composer-record identities only. Header/workspace references
+   * whose payloads were pruned cannot hide archive-only copies from status.
+   * This is not evidence of readable text, bubbles or original attachments.
+   */
+  async listSessionIds(): Promise<Set<string> | null> {
+    return (await this.listComposerRecords(false))?.ids ?? null;
+  }
+
+  async listCoverageSessions(): Promise<{ ids: Set<string>; emptyIds: Set<string> } | null> {
+    return this.listComposerRecords(true);
+  }
+
+  private async listComposerRecords(classifyEmpty: boolean) {
+    const workspaceRoot = workspaceStorageDirForStore(this.cursorStorePath);
+    const normalize = (value: string) => value.replace(/\\/g, "/").replace(/\/+$/, "");
+    if (this.projectRoot || !workspaceRoot || normalize(workspaceRoot) !== normalize(this.cursorStorePath)) return null;
+    // Verify the configured store as well as the separately stored payload DB.
+    if (!(await stat(this.cursorStorePath)).isDirectory()) return null;
+    const globalPath = globalStoragePathForStore(this.cursorStorePath);
+    if (!globalPath) return null;
+    const DatabaseCtor = (await import("better-sqlite3")).default;
+    const ids = new Set<string>();
+    const emptyIds = new Set<string>();
+    let rows = 0;
+    const db = new DatabaseCtor(globalPath, { readonly: true, fileMustExist: true });
+    try {
+      if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='cursorDiskKV'").get()) return null;
+      // Bound in SQLite before a key can materialize in JavaScript. Blob length
+      // includes embedded NUL bytes; valid IDs are returned intact, not truncated.
+      const emptyColumn = classifyEmpty
+        ? `CASE WHEN length(CAST(value AS BLOB)) <= 1048576 AND typeof(value) = 'text'
+            THEN CASE WHEN json_valid(value)
+              THEN json_type(value, '$.fullConversationHeadersOnly') = 'array'
+                AND json_array_length(value, '$.fullConversationHeadersOnly') = 0
+              ELSE 0 END ELSE 0 END`
+        : "0";
+      const records = db.prepare(`SELECT CASE WHEN length(CAST(key AS BLOB)) <= 2061 THEN key END key,
+        ${emptyColumn} AS empty FROM cursorDiskKV WHERE key GLOB 'composerData:*' LIMIT 100001`);
+      for (const row of records.iterate() as Iterable<{ key: string | null; empty: number | null }>) {
+        if (row.key === null || ++rows > 100_000) return null;
+        const id = row.key.slice("composerData:".length);
+        if (!id || id.length > 512) return null;
+        if (classifyEmpty && ids.has(id)) return null;
+        ids.add(id);
+        if (row.empty === 1) emptyIds.add(id);
+      }
+      return { ids, emptyIds };
+    } finally { db.close(); }
   }
 
   async *scrape(since?: Date): AsyncIterable<CursorChunk> {
@@ -414,7 +466,7 @@ export class CursorScraper extends AbstractScraper<CursorChunk> {
     // Reading them unscoped would mean every conversation on the machine,
     // which is the opposite of what an unscoped reader should do with
     // unattributable data.
-    if (!globalPath || !this.projectRoot) {
+    if (!globalPath || (!this.projectRoot && !this.includeUnassigned)) {
       return;
     }
 
@@ -441,7 +493,7 @@ export class CursorScraper extends AbstractScraper<CursorChunk> {
           continue;
         }
         const verdict = attribution.get(composerId);
-        if (verdict === "other") {
+        if (verdict === "other" && !(this.includeUnassigned && !this.projectRoot)) {
           continue;
         }
 
@@ -478,9 +530,9 @@ export class CursorScraper extends AbstractScraper<CursorChunk> {
         }
 
         const ref = { composerId, unifiedMode: composer.unifiedMode };
-        if (verdict === "ours") {
+        if (verdict === "ours" || (this.includeUnassigned && !this.projectRoot)) {
           attributed.push(ref);
-        } else if (composerMentionsProject(composer, this.projectRoot)) {
+        } else if (this.projectRoot && composerMentionsProject(composer, this.projectRoot)) {
           guessed.push(ref);
         }
       }
@@ -533,6 +585,11 @@ export class CursorScraper extends AbstractScraper<CursorChunk> {
     headers: Map<string, ComposerHeader> | null,
     attribution: Map<string, Attribution>,
   ): Iterable<{ composerId: string; value?: string }> {
+    if (this.includeUnassigned && !this.projectRoot) {
+      const rows = globalDb.prepare("SELECT key FROM cursorDiskKV WHERE key >= 'composerData:' AND key < 'composerData;'").all() as Array<{ key: string }>;
+      for (const row of rows) yield { composerId: row.key.slice("composerData:".length) };
+      return;
+    }
     if (!headers) {
       const rows = globalDb
         .prepare("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%' AND value LIKE ?")
@@ -774,6 +831,7 @@ export class CursorScraper extends AbstractScraper<CursorChunk> {
             messageIndex,
             tokenEstimate: estimateTokens(content),
             referencedFiles: [],
+            skills: extractSkillsFromText(content),
             model: bubble.modelInfo?.modelName ?? model,
             composerMode,
             ...(subagent ? { subagent: true, subagentType: composerHeader?.subagentType } : {}),

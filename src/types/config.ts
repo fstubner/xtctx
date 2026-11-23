@@ -18,6 +18,9 @@ export interface XtctxConfig {
   };
   tools?: Record<string, ToolConfig>;
   embedding?: EmbeddingConfig;
+  sync?: {
+    redactPii?: boolean;
+  };
 }
 
 export interface ToolConfig {

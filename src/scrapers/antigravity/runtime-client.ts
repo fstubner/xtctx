@@ -342,7 +342,8 @@ async function discoverWindowsLanguageServerProcesses(): Promise<AntigravityProc
       "Select-Object ProcessId, CommandLine",
       "ConvertTo-Json -Compress",
     ].join(" | ");
-    const { stdout } = await execFileAsync("powershell", ["-NoProfile", "-Command", script], {
+    const { stdout } = await execFileAsync("powershell", ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", script], {
+      windowsHide: true,
       timeout: 15_000,
     });
     return parseProcessJson(String(stdout));
@@ -475,7 +476,7 @@ export function parsePosixListeningPorts(lsofOutput: string): number[] {
 
 async function findWindowsListeningPorts(pid: number): Promise<number[]> {
   try {
-    const { stdout } = await execFileAsync("netstat", ["-ano"], { timeout: 10_000 });
+    const { stdout } = await execFileAsync("netstat", ["-ano"], { timeout: 10_000, windowsHide: true });
     return parseWindowsListeningPorts(String(stdout), pid);
   } catch {
     return [];

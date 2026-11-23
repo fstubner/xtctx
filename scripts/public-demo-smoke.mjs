@@ -66,6 +66,7 @@ try {
       "xtctx_recent_sessions",
       "xtctx_search_sessions",
       "xtctx_session_detail",
+      "xtctx_skill_usage",
     ]);
 
     const recent = await callJson(client, "xtctx_recent_sessions", {
@@ -170,7 +171,7 @@ async function writeSyntheticTranscripts() {
           content: [
             {
               type: "text",
-              text: "The public surface should mention setup, status, disconnect, and five MCP tools.",
+              text: "The public surface should mention setup, status, disconnect, and six MCP tools.",
             },
           ],
         },

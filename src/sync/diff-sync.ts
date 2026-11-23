@@ -1,9 +1,12 @@
 import Database, { type Database as DatabaseHandle } from "better-sqlite3";
 import { existsSync, realpathSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
+import { parse as parseYaml } from "yaml";
 import { assertSecureSyncUrl, callCloud, loadCredentials, resolveUploadCredentials, type SyncCredentials } from "./client.js";
 import { isOptedIn } from "./consent.js";
 import { getCanonicalRepoId } from "./normalizer.js";
+import { redactText, type RedactOptions } from "./redact.js";
 import {
   accountKey,
   acquireUploadLock,
@@ -43,7 +46,9 @@ export interface DiffSyncResult {
   syncedCount: number;
   /** Sessions sent this run. */
   sessionCount: number;
-  /** Messages the server refused as too large this run; they are skipped from now on. */
+  /** Secret/PII matches redacted before sending (unique per sent message/preview). */
+  redactedCount: number;
+  /** Legacy skipped-message status; new size refusals fail the run without advancing. */
   skipped: SkippedMessage[];
   upToDate: boolean;
   /** Another process was uploading this project; nothing was done. */
@@ -112,15 +117,33 @@ function canonicalRoot(projectDir: string): string {
 const skipKey = (sessionRef: string, messageId: string) => `${sessionRef}\u0000${messageId}`;
 const sessionKey = (tool: string, sourceSessionId: string) => `${tool}:${sourceSessionId}`;
 
-function toUpload(row: MessageRow): UploadMessage {
+async function readSyncRedactOptions(projectDir: string): Promise<RedactOptions> {
+  try {
+    const raw = await readFile(join(projectDir, ".xtctx", "config.yaml"), "utf-8");
+    const parsed = parseYaml(raw) as { sync?: { redactPii?: unknown } } | null;
+    return { pii: parsed?.sync?.redactPii === true };
+  } catch {
+    return { pii: false };
+  }
+}
+
+function toUpload(
+  row: MessageRow,
+  maximum: number,
+  redactOptions: RedactOptions,
+): { message: UploadMessage; redactedCount: number } {
+  const redacted = redactText(row.content, redactOptions);
   return {
-    id: row.id,
-    timestamp: row.timestamp,
-    role: row.role,
-    content: fitContent(row.content),
-    messageIndex: row.message_index,
-    contentHash: row.content_hash,
-    metadataJson: sanitizeMetadata(row.metadata_json),
+    message: {
+      id: row.id,
+      timestamp: row.timestamp,
+      role: row.role,
+      content: fitContent(redacted.text, maximum),
+      messageIndex: row.message_index,
+      contentHash: row.content_hash,
+      metadataJson: sanitizeMetadata(row.metadata_json),
+    },
+    redactedCount: redacted.totalRedacted,
   };
 }
 
@@ -197,7 +220,7 @@ function packRequests(parts: Part[]): Part[][] {
  * finds it busy and does nothing. The position only moves after a run that
  * sent everything, so a failure resends rather than skips.
  */
-export async function runDiffSync(options: { projectDir: string }): Promise<DiffSyncResult> {
+export async function runDiffSync(options: { projectDir: string; replayAll?: boolean }): Promise<DiffSyncResult> {
   const { projectDir } = options;
   if (!(await loadCredentials())) throw new NotLoggedInError();
   if (!(await isOptedIn(projectDir))) throw new NotOptedInError();
@@ -207,16 +230,18 @@ export async function runDiffSync(options: { projectDir: string }): Promise<Diff
 
   const account = accountKey(credentials.user.id, credentials.syncUrl);
   const lock = await acquireUploadLock(projectDir);
-  if (!lock) return { syncedCount: 0, sessionCount: 0, skipped: [], upToDate: false, busy: true };
+  if (!lock) return { syncedCount: 0, sessionCount: 0, redactedCount: 0, skipped: [], upToDate: false, busy: true };
 
   const attemptAt = new Date().toISOString();
   try {
-    const outcome = await upload(projectDir, credentials, account, lock);
+    const outcome = await upload(projectDir, credentials, account, lock, options.replayAll === true);
     await updateAccountState(projectDir, account, (s) => ({
       ...s,
       cursor: outcome.cursor,
       lastAttemptAt: attemptAt,
       lastSuccessAt: new Date().toISOString(),
+      lastRedactedCount: outcome.result.syncedCount > 0 ? outcome.result.redactedCount : s.lastRedactedCount,
+      skipped: options.replayAll ? [] : s.skipped,
       lastError: undefined,
       lastErrorAt: undefined,
       lastReportedAt: outcome.reported ? new Date().toISOString() : s.lastReportedAt,
@@ -241,16 +266,21 @@ async function upload(
   credentials: SyncCredentials,
   account: string,
   lock: UploadLock,
+  replayAll = false,
 ): Promise<{ result: DiffSyncResult; cursor: string; reported: boolean }> {
-  const result: DiffSyncResult = { syncedCount: 0, sessionCount: 0, skipped: [], upToDate: true, busy: false };
+  const result: DiffSyncResult = { syncedCount: 0, sessionCount: 0, redactedCount: 0, skipped: [], upToDate: true, busy: false };
+  const redactOptions = await readSyncRedactOptions(projectDir);
+  const confirmedRedactions = new Map<string, number>();
+  const messageRedactions = new WeakMap<UploadMessage, number>();
   const state = await readAccountState(projectDir, account);
-  const cursor = state.cursor ?? "";
+  // Explicit metadata migrations replay rows without rewinding the durable cursor.
+  const cursor = replayAll ? "" : state.cursor ?? "";
   const nextCursor = new Date(Date.now() - CURSOR_LAG_MS).toISOString();
 
   const dbPath = join(projectDir, ".xtctx", "state", "xtctx.db");
   if (!existsSync(dbPath)) return { result, cursor: nextCursor, reported: false };
 
-  const skipped = new Set(state.skipped.map((s) => skipKey(s.sessionRef, s.messageId)));
+  const skipped = new Set((replayAll ? [] : state.skipped).map((s) => skipKey(s.sessionRef, s.messageId)));
   const { repoId } = await getCanonicalRepoId(projectDir);
   const envelope = {
     device: { id: credentials.deviceId, name: credentials.deviceName },
@@ -260,6 +290,19 @@ async function upload(
   const db: DatabaseHandle = new Database(dbPath, { readonly: true, fileMustExist: true });
   try {
     const scopedRoot = normalizeRootForCompare(canonicalRoot(projectDir));
+    let maximumMessage: number = UPLOAD_LIMITS.maxMessageBytes;
+    let maximumBody: number = UPLOAD_LIMITS.maxBodyBytes;
+    const large = db.prepare(`SELECT 1 FROM messages m JOIN sessions s ON s.session_ref=m.session_ref WHERE ${PROJECT_ROOT_SQL.replace("project_root", "s.project_root")} = ? AND length(CAST(m.content AS BLOB)) > ? LIMIT 1`).get(scopedRoot,maximumMessage);
+    if(large) {
+      const response=await callCloud(credentials,"GET","/api/sync-capabilities");
+      if(response.status===401||response.status===403)throw new CloudAuthError(response.status);
+      if(response.ok){
+        const capabilities=await response.json() as {protocol?:number;limits?:{maxMessageBytes?:number;maxBodyBytes?:number}};
+        const limits=capabilities.limits;
+        if(capabilities.protocol===1&&Number.isInteger(limits?.maxMessageBytes)&&Number.isInteger(limits?.maxBodyBytes)&&limits!.maxMessageBytes!>=UPLOAD_LIMITS.maxMessageBytes&&limits!.maxMessageBytes!<=64*1024*1024&&limits!.maxBodyBytes!>=UPLOAD_LIMITS.maxBodyBytes&&limits!.maxBodyBytes!<=128*1024*1024){maximumMessage=limits!.maxMessageBytes!;maximumBody=limits!.maxBodyBytes!;}
+      }
+    }
+
     const changed = db
       .prepare(
         `SELECT s.session_ref, s.tool, s.source_session_id, s.git_branch, s.git_commit,
@@ -282,7 +325,13 @@ async function upload(
         .map((r) => r.id)
         .filter((id) => !skipped.has(skipKey(sessionRef, id)));
     const unskipped = (sessionRef: string, rows: MessageRow[]) =>
-      rows.filter((r) => !skipped.has(skipKey(sessionRef, r.id))).map(toUpload);
+      rows
+        .filter((r) => !skipped.has(skipKey(sessionRef, r.id)))
+        .map((row) => {
+          const uploaded = toUpload(row, maximumMessage, redactOptions);
+          if (uploaded.redactedCount > 0) messageRedactions.set(uploaded.message, uploaded.redactedCount);
+          return uploaded.message;
+        });
 
     let reported = false;
     const send = async (parts: Part[]): Promise<Map<string, number>> => {
@@ -302,28 +351,46 @@ async function upload(
      */
     const sendRequest = async (parts: Part[], counts: Map<string, number>): Promise<void> => {
       for (;;) {
-        const res = await callCloud(credentials, "POST", "/api/stream", {
+        const previewCounts = new Map<string, number>();
+        const payload = {
           ...envelope,
-          sessions: parts.map((p) => ({
-            tool: p.session.tool,
-            sourceSessionId: p.session.source_session_id,
-            gitBranch: p.session.git_branch,
-            gitCommit: p.session.git_commit,
-            startedAt: p.session.started_at,
-            lastActivityAt: p.session.last_activity_at,
-            // What the server keeps; no more is sent than it stores.
-            preview: p.session.preview?.slice(0, 160) ?? null,
-            messages: p.messages,
-            ...(p.keepIds ? { keepIds: p.keepIds } : {}),
-          })),
-        });
+          sessions: parts.map((p) => {
+            const rawPreview = p.session.preview ?? "";
+            const redactedPreview = rawPreview ? redactText(rawPreview, redactOptions) : null;
+            if (redactedPreview && redactedPreview.totalRedacted > 0) {
+              previewCounts.set(p.session.session_ref, redactedPreview.totalRedacted);
+            }
+            return {
+              tool: p.session.tool,
+              sourceSessionId: p.session.source_session_id,
+              gitBranch: p.session.git_branch || null,
+              gitCommit: p.session.git_commit || null,
+              startedAt: p.session.started_at,
+              lastActivityAt: p.session.last_activity_at,
+              // What the server keeps; no more is sent than it stores.
+              preview: redactedPreview ? redactedPreview.text.slice(0, 160) || null : null,
+              messages: p.messages,
+              ...(p.keepIds ? { keepIds: p.keepIds } : {}),
+            };
+          }),
+        };
+        if(Buffer.byteLength(JSON.stringify(payload))>maximumBody)throw new Error("Upload exceeds negotiated remote body limit; original retained locally and sync checkpoint unchanged");
+        const res=await callCloud(credentials,"POST","/api/stream",payload);
 
         if (res.ok) {
           const body = (await res.json().catch(() => ({}))) as {
             sessions?: Array<{ tool: string; sourceSessionId: string; messageCount: number }>;
           };
           for (const s of body.sessions ?? []) counts.set(sessionKey(s.tool, s.sourceSessionId), s.messageCount);
-          for (const p of parts) result.syncedCount += p.messages.length;
+          for (const p of parts) {
+            result.syncedCount += p.messages.length;
+            const pCount = previewCounts.get(p.session.session_ref);
+            if (pCount) confirmedRedactions.set(`preview:${p.session.session_ref}`, pCount);
+            for (const m of p.messages) {
+              const mCount = messageRedactions.get(m);
+              if (mCount) confirmedRedactions.set(skipKey(p.session.session_ref, m.id), mCount);
+            }
+          }
           return;
         }
 
@@ -340,8 +407,7 @@ async function upload(
               p.messages.some((m) => m.id === detail.messageId),
           );
           if (part) {
-            await skip(part, detail.messageId, `larger than the server accepts (${String(detail.limit)} bytes)`);
-            continue;
+            throw new Error("Server refused message size; original retained locally and sync checkpoint unchanged");
           }
         }
         if (res.status === 413) {
@@ -359,26 +425,12 @@ async function upload(
             return;
           }
           if (only.messages.length === 1) {
-            await skip(only, only.messages[0].id, "the request carrying it alone was larger than the server accepts");
-            continue;
+            throw new Error("Server refused upload size; original retained locally and sync checkpoint unchanged");
           }
         }
-        throw new Error(`Upload failed (${res.status}): ${String(detail.error ?? res.statusText)}`);
+        const field = typeof detail.detail === "string" && /^[a-z ]{1,80}$/.test(detail.detail) ? ` (${detail.detail})` : "";
+        throw new Error(`Upload failed (${res.status}): ${String(detail.error ?? res.statusText)}${field}`);
       }
-    };
-
-    const skip = async (part: Part, messageId: string, reason: string) => {
-      const entry: SkippedMessage = {
-        sessionRef: part.session.session_ref,
-        messageId,
-        reason,
-        at: new Date().toISOString(),
-      };
-      part.messages = part.messages.filter((m) => m.id !== messageId);
-      if (part.keepIds) part.keepIds = part.keepIds.filter((id) => id !== messageId);
-      skipped.add(skipKey(entry.sessionRef, messageId));
-      result.skipped.push(entry);
-      await updateAccountState(projectDir, account, (s) => ({ ...s, skipped: [...s.skipped, entry] }));
     };
 
     // Pass 1: what changed, per session.
@@ -414,6 +466,7 @@ async function upload(
     }
 
     result.sessionCount = changed.length;
+    result.redactedCount = [...confirmedRedactions.values()].reduce((sum, n) => sum + n, 0);
     result.upToDate = result.syncedCount === 0 && result.skipped.length === 0;
     return { result, cursor: nextCursor, reported };
   } finally {

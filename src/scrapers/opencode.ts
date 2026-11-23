@@ -113,6 +113,34 @@ export class OpenCodeScraper extends AbstractScraper<OpenCodeChunk> {
     return [this.opencodeDbPath];
   }
 
+  /** Independent read-only source inventory, including empty sessions. */
+  async listSessionIds(): Promise<Set<string> | null> {
+    try {
+      if (!(await stat(this.opencodeDbPath)).isFile()) throw new Error("OpenCode store is not a file");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    }
+    const { default: Database } = await import("better-sqlite3");
+    const db = new Database(this.opencodeDbPath, { readonly: true, fileMustExist: true });
+    try {
+      const columns = tableColumns(db, "session");
+      if (!columns.has("id") || (this.projectRoot && !columns.has("directory"))) {
+        throw new Error("OpenCode session inventory schema is unsupported");
+      }
+      const rows = db.prepare(`SELECT id${this.projectRoot ? ", directory" : ""} FROM session`).all() as {id:unknown;directory?:unknown}[];
+      const ids = new Set<string>();
+      for (const row of rows) {
+        if (typeof row.id !== "string" || !row.id) throw new Error("Invalid OpenCode session identity");
+        if (this.projectRoot && (typeof row.directory !== "string" || !pathMatchesProject(row.directory, this.projectRoot))) continue;
+        ids.add(row.id);
+      }
+      return ids;
+    } finally {
+      db.close();
+    }
+  }
+
   async *scrape(since?: Date): AsyncIterable<OpenCodeChunk> {
     const state = await this.getLastScrapedPosition();
     const outdated = since === undefined && (state.scraperVersion ?? 1) < OPENCODE_SCRAPER_VERSION;

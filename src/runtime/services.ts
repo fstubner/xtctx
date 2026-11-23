@@ -1,5 +1,5 @@
-import { readFile, realpath } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { mkdir, readFile, realpath, stat } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import {
   createEmbeddingProvider,
@@ -67,6 +67,8 @@ async function canonicalProjectRoot(projectPath: string): Promise<string> {
 }
 
 interface ProjectServicesOptions {
+  /** Explicit CLI opt-in only; never read from a repository config. */
+  allLocalSessions?: boolean;
   /** Diagnostics pass false so inspecting a project does not create one. */
   createIfMissing?: boolean;
   /**
@@ -84,11 +86,39 @@ export async function createProjectServices(
   options: ProjectServicesOptions = {},
 ): Promise<ProjectServices> {
   const projectRoot = await canonicalProjectRoot(projectPath ?? process.cwd());
+  if (options.allLocalSessions) {
+    // A machine archive must never contaminate an ordinary repository index.
+    for (let directory = projectRoot; ; directory = dirname(directory)) {
+      try {
+        await stat(join(directory, ".git"));
+        throw new Error("--all-local requires a dedicated archive outside Git repositories");
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+      if (dirname(directory) === directory) break;
+    }
+  }
   const xtctxDir = join(projectRoot, ".xtctx");
   const stateDir = join(xtctxDir, "state");
   const dbPath = join(stateDir, "xtctx.db");
   const configPath = join(xtctxDir, "config.yaml");
   const config = await loadProjectConfig(configPath, projectRoot);
+  // Project-filtered cursors may point past ignored personal sessions. Never
+  // reuse them when an explicit machine-wide collection is requested.
+  if (!options.allLocalSessions) {
+    // Never reopen a machine archive with project-filtered scrapers: their
+    // reconciliation would apply a different scope to the same index.
+    try {
+      await stat(join(stateDir, "all-local"));
+      throw new Error("This is an all-local archive. Use scan --all-local with this explicit archive; ordinary project scanning is refused.");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+  const scraperStateDir = options.allLocalSessions ? join(stateDir, "all-local") : stateDir;
+  if (options.allLocalSessions && config.present && !config.error) {
+    await mkdir(scraperStateDir, { recursive: true });
+  }
   const overrides = Object.fromEntries(
     Object.entries(config.tools)
       .filter(([, value]) => value.enabled !== false)
@@ -100,13 +130,14 @@ export async function createProjectServices(
   const scrapers = config.error
     ? []
     : createDefaultScrapers(
-        stateDir,
+        scraperStateDir,
         overrides,
-        projectRoot,
+        options.allLocalSessions ? undefined : projectRoot,
         // Recorded by the session-start hook from the `transcript_path` the
         // host tool passes it. The hook cannot use it itself — it reads the
         // existing index without scraping — so this is where it lands.
-        { ...(await readRecordedStoreDirs(stateDir)), ...(options.storeDirs ?? {}) },
+        options.allLocalSessions ? {} : { ...(await readRecordedStoreDirs(stateDir)), ...(options.storeDirs ?? {}) },
+        options.allLocalSessions,
       ).filter((scraper) => {
         const toolConfig = config.tools[scraper.tool];
         return toolConfig?.enabled !== false;

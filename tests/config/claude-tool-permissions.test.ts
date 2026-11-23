@@ -39,6 +39,7 @@ const EXPECTED = [
   "xtctx_search_sessions",
   "xtctx_continuity_status",
   "xtctx_handoff_manifest",
+  "xtctx_skill_usage",
 ].flatMap((tool) => [`mcp__xtctx__${tool}`, `mcp__plugin_xtctx_xtctx__${tool}`]);
 
 interface ClaudeSettings {

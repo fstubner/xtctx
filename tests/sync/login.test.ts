@@ -112,6 +112,17 @@ describe("login and logout", () => {
     expect(existsSync(getCredentialsPath())).toBe(false);
   });
 
+  it("surfaces server-provided detail when login is denied for missing subscription", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) =>
+      String(url).endsWith("/code")
+        ? Response.json(code)
+        : Response.json({ error: "not_allowed", detail: "No active subscription for this GitHub account." }, { status: 403 }),
+    ));
+    const { wait } = clock();
+    await expect(runLogin({ syncUrl: "https://sync.test", wait })).rejects.toThrow(/No active subscription/);
+    expect(existsSync(getCredentialsPath())).toBe(false);
+  });
+
   it("delete-data with a login the server no longer accepts deletes nothing, says so, and keeps the login", async () => {
     await saveCredentials({ token: "tok", user, deviceId: "d", deviceName: "n", syncUrl: "https://sync.test" });
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "unauthorized" }, { status: 401 })));

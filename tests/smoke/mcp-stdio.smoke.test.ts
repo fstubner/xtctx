@@ -187,7 +187,7 @@ describe("MCP server over stdio", () => {
     await rm(sandboxRoot, { recursive: true, force: true });
   }, 30_000);
 
-  it("advertises exactly the five read-only tools", async () => {
+  it("advertises exactly the six read-only tools", async () => {
     const response = (await request(2, "tools/list", {})) as {
       result?: { tools?: Array<{ name: string }> };
     };
@@ -199,6 +199,7 @@ describe("MCP server over stdio", () => {
       "xtctx_recent_sessions",
       "xtctx_search_sessions",
       "xtctx_session_detail",
+      "xtctx_skill_usage",
     ]);
   }, 60_000);
 

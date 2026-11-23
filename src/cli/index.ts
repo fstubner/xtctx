@@ -1,12 +1,18 @@
 #!/usr/bin/env node
+import { runCoverage } from "./coverage.js";
+import { runHermesImport } from "./hermes-history.js";
 import { Command, Option } from "commander";
 import { runExport, runImport } from "./backup.js";
+import { runGithubImport } from "./github-history.js";
+import { runWebImport } from "./web-history.js";
+import { runWebNative } from "../web/native.js";
 import { runCalibrate } from "./calibrate.js";
 import { runDisconnect } from "./disconnect.js";
 import { runHook } from "./hook.js";
 import { runScan } from "./scan.js";
 import { runSetup } from "./setup.js";
 import { runStatus } from "./status.js";
+import { runSkills } from "./skills.js";
 import { runLogin, runLogout } from "./login.js";
 import { runSync, runSyncSetting } from "./sync.js";
 import { startAutoSync, type AutoSync } from "../sync/auto-sync.js";
@@ -21,7 +27,8 @@ const { version: CLI_VERSION } = readXtctxPackage(import.meta.url);
 
 export async function main(argv = process.argv): Promise<void> {
   if (shouldStartMcp(argv)) {
-    const services = await createProjectServices(process.cwd());
+    const projectRoot = process.env.XTCTX_PROJECT_ROOT || process.env.XTCTX_PROJECT_DIR || process.cwd();
+    const services = await createProjectServices(projectRoot);
     // Nobody opted this directory in. Say so instead of scanning every
     // transcript store on the machine to return an empty result that reads
     // like a configured project with no history.
@@ -185,6 +192,33 @@ export async function main(argv = process.argv): Promise<void> {
     });
 
   program
+    .command("skills")
+    .option("-p, --project <path>", "Project root (defaults to cwd)")
+    .option("--agent <agent>", "Filter by agent tool (e.g. claude-code, antigravity, codex, cursor)")
+    .option("--days <days>", "Only include skills used in the last N days", (val) => parseInt(val, 10))
+    .option("--skill <name>", "Filter to a specific skill name")
+    .option("--json", "Output as JSON", false)
+    .description("Show skill usage telemetry across agent transcripts in this project")
+    .action(
+      async (options: {
+        project?: string;
+        agent?: string;
+        days?: number;
+        skill?: string;
+        json?: boolean;
+      }) => {
+        const globalOptions = program.opts<{ project?: string }>();
+        await runSkills({
+          projectPath: options.project ?? globalOptions.project,
+          agent: options.agent,
+          days: options.days,
+          skill: options.skill,
+          json: options.json,
+        });
+      },
+    );
+
+  program
     .command("login")
     .option("--sync-url <url>", "URL of your own sync server (or set XTCTX_SYNC_URL); see docs/cloud-sync.md")
     .option("--device <name>", "Name this device shows as in the cloud (default: a random label)")
@@ -218,8 +252,15 @@ export async function main(argv = process.argv): Promise<void> {
       }
     });
 
+  program.command("coverage").description("Measure source inventory without rewriting transcripts; upload only with --upload")
+    .option("-p, --project <path>","Explicit opted-in archive")
+    .option("--spec <path>","Administrator source/archive specification")
+    .option("--upload","Upload evidence using existing collector credentials",false)
+    .action(async(options:{project?:string;spec?:string;upload?:boolean})=>{await runCoverage({...options,project:options.project??program.opts<{project?:string}>().project});});
+
   program
     .command("scan")
+    .option("--all-local", "Collect enabled local sources including projectless chats into the explicit archive", false)
     .option("-p, --project <path>", "Project root (defaults to cwd)")
     .option(
       "--embed",
@@ -231,10 +272,11 @@ export async function main(argv = process.argv): Promise<void> {
       "With --embed, skip measuring which device embeds fastest on this machine",
     )
     .description("Index this project's transcripts now instead of waiting for an agent to ask")
-    .action(async (options: { project?: string; embed?: boolean; calibrate?: boolean }) => {
+    .action(async (options: { project?: string; embed?: boolean; calibrate?: boolean; allLocal?: boolean }) => {
       const globalOptions = program.opts<{ project?: string }>();
       await runScan({
         projectPath: options.project ?? globalOptions.project,
+        allLocal: options.allLocal,
         embed: options.embed,
         calibrate: options.calibrate,
       });
@@ -263,6 +305,56 @@ export async function main(argv = process.argv): Promise<void> {
     .action(async (file: string, options: { project?: string }) => {
       const globalOptions = program.opts<{ project?: string }>();
       await runImport({ projectPath: options.project ?? globalOptions.project, file });
+    });
+
+  program
+    .command("web-native-host")
+    .requiredOption("--account <namespace>", "Fixed account namespace from the native host launcher")
+    .requiredOption("--archive <path>", "Fixed local archive project from the native host launcher")
+    .option("--sync", "Use existing project opt-in and upload credentials", false)
+    .description("Browser native-messaging host; stdin/stdout are framed JSON")
+    .action((options: { account: string; archive: string; sync?: boolean }) => runWebNative({ ...options, project: options.archive }));
+
+  program
+    .command("import-hermes")
+    .argument("<database>", "Explicit Hermes SQLite state database; opened read-only")
+    .requiredOption("--namespace <name>", "Stable device/profile label preventing cross-profile identity collisions")
+    .requiredOption("--archive <path>", "Configured private archive directory")
+    .option("--dry-run", "Validate source and report counts without writes", false)
+    .option("--sync", "Upload with existing archive consent and credentials", false)
+    .description("Merge Hermes history idempotently, retaining source identity and edited revisions")
+    .action(runHermesImport);
+
+  program
+    .command("import-web")
+    .argument("<file>", "Extracted ChatGPT or Claude conversations.json")
+    .requiredOption("--provider <provider>", "chatgpt or claude")
+    .requiredOption("--account <namespace>", "Stable local account label; use the same label for browser capture")
+    .requiredOption("--archive <path>", "Explicit archive project; never inferred from chat titles")
+    .option("--dry-run", "Validate and report counts without writing or uploading", false)
+    .option("--sync", "Upload after import using this project's existing sync consent", false)
+    .description("Import user-owned web history, retaining branches and edited-message revisions")
+    .action((file: string, options: { provider: string; account: string; archive: string; dryRun?: boolean; sync?: boolean }) => runWebImport(file, { ...options, project: options.archive }));
+
+  program
+    .command("import-github")
+    .option("-p, --project <path>", "Project root (defaults to cwd)")
+    .option("--repo <owner/repo>", "GitHub repository (defaults to origin remote)")
+    .option("--limit <n>", "Max recent issues/PRs to fetch (default 50)", (v) => Number(v), 50)
+    .option("--full", "Ignore incremental cursor and re-read from the start", false)
+    .option("--dry-run", "Fetch and count issues/PRs without writing to the index", false)
+    .option("--sync", "Upload after import using this project's existing sync consent", false)
+    .description("Index GitHub Issues, PRs, and comments into this project for keyword/semantic search and sync")
+    .action(async (options: { project?: string; repo?: string; limit?: number; full?: boolean; dryRun?: boolean; sync?: boolean }) => {
+      const globalOptions = program.opts<{ project?: string }>();
+      await runGithubImport({
+        projectPath: options.project ?? globalOptions.project,
+        repo: options.repo,
+        limit: options.limit,
+        full: options.full,
+        dryRun: options.dryRun,
+        sync: options.sync,
+      });
     });
 
   program

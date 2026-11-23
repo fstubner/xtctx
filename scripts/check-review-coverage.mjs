@@ -46,7 +46,11 @@ const LAYERS = [
     name: "product-source",
     question: "Is it correct? What input makes it do the wrong thing?",
     why: "The ordinary review. It is listed first so it is visibly not the only one.",
-    match: [/^src\//, /^cloud\/src\//],
+    match: [
+      /^src\//,
+      /^cloud\/src\//,
+      /^browser-extension\/(?!manifest\.json$|install-native-windows\.ps1$)/,
+    ],
   },
   {
     name: "test-suite",
@@ -55,7 +59,12 @@ const LAYERS = [
     why:
       "Reading tests does not find this. Two were found only by hardcoding a value in the source " +
       "and seeing the suite stay green — one of them covering a feature that was broken at the time.",
-    match: [/^tests\//, /^cloud\/test\//, /^vitest\.config\.ts$/, /^cloud\/vitest\.config\.ts$/],
+    match: [
+      /^tests\//,
+      /^cloud\/test\//,
+      /^vitest\.config\.ts$/,
+      /^cloud\/vitest\.config\.ts$/,
+    ],
   },
   {
     name: "gates",
@@ -77,7 +86,13 @@ const LAYERS = [
     why:
       "The plugin's skill file is instructions to an agent. It promised retrieval without setup " +
       "while the server refuses every tool in an unconfigured project.",
-    match: [/^plugin\//, /^\.claude-plugin\//, /^package\.json$/, /^package-lock\.json$/],
+    match: [
+      /^plugin\//,
+      /^\.claude-plugin\//,
+      /^browser-extension\/(manifest\.json|install-native-windows\.ps1)$/,
+      /^package\.json$/,
+      /^package-lock\.json$/,
+    ],
   },
   {
     name: "claims",
@@ -127,9 +142,10 @@ const LAYERS = [
       /^\.npmrc$/,
       /^\.gitignore$/,
       /^\.gitattributes$/,
+      /^\.dockerignore$/,
       /^\.github\/dependabot\.yml$/,
-      // The Worker's deploy surface: what it binds, what its database looks like.
-      /^cloud\/(wrangler\.toml|wrangler\.local\.example\.toml|package(-lock)?\.json|tsconfig\.json|schema\.sql|migrations\/.*)$/,
+      // Cloud deploy surface: Docker build, compose topology, Postgres schema and package config.
+      /^cloud\/(Dockerfile|docker-compose\.yml|docker\/.*|build\.mjs|package(-lock)?\.json|tsconfig\.json|migrations\/.*)$/,
       // What `xtctx embeddings enable` installs. If `files` stops shipping it,
       // enable fails for every user, and nothing else notices.
       /^embeddings-runtime\//,

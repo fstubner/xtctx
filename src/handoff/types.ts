@@ -213,6 +213,28 @@ export interface SessionService {
    * measured the device is the one that uses it.
    */
   deferEmbeddingDeviceUntil?(device: Promise<string | undefined>): void;
+  /**
+   * Aggregate skill invocations recorded in message metadata across sessions
+   * in this project.
+   */
+  getSkillUsage?(options?: SkillUsageQueryOptions): Promise<SkillUsageStat[]>;
+}
+
+export interface SkillUsageStat {
+  skill: string;
+  total_count: number;
+  last_used_at: string;
+  by_tool: Record<string, number>;
+  session_count: number;
+}
+
+export interface SkillUsageQueryOptions {
+  since?: string | Date;
+  days?: number;
+  agent?: string;
+  tool?: string;
+  skill?: string;
+  refresh?: boolean;
 }
 
 export interface ExportSummary {

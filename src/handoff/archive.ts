@@ -114,6 +114,8 @@ export interface MergeResult {
   created: boolean;
   /** Messages the index did not already hold, by id. */
   messagesAdded: number;
+  /** Partial web captures enriched by a later official export. */
+  messagesUpdated?: number;
 }
 
 /**
@@ -155,6 +157,9 @@ export function createSessionMerger(
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
 
+  const findMessage = db.prepare("SELECT metadata_json FROM messages WHERE id = ? AND session_ref = ?");
+  const enrichMessage = db.prepare("UPDATE messages SET timestamp = ?, message_index = ?, metadata_json = ?, indexed_at = ? WHERE id = ? AND session_ref = ?");
+
   return db.transaction((session: ArchivedSession, projectRoot: string): MergeResult => {
     const created = exists.get(session.session_ref) === undefined;
     const now = new Date().toISOString();
@@ -172,8 +177,9 @@ export function createSessionMerger(
       now,
     );
     let messagesAdded = 0;
+    let messagesUpdated = 0;
     for (const message of session.messages) {
-      messagesAdded += insertMessage.run(
+      const added = insertMessage.run(
         message.id,
         session.session_ref,
         session.tool,
@@ -187,8 +193,23 @@ export function createSessionMerger(
         message.source_pointer,
         now,
       ).changes;
+      messagesAdded += added;
+      if (!added && (session.tool === "chatgpt-web" || session.tool === "claude-web" || session.tool === "gemini-web")) {
+        const old = findMessage.get(message.id, session.session_ref) as { metadata_json: string } | undefined;
+        try {
+          const prior = JSON.parse(old?.metadata_json ?? "{}");
+          const incoming = JSON.parse(message.metadata_json);
+          // A partial DOM snapshot cannot overwrite fuller export provenance.
+          const richerContent = incoming.content_capture_version === 2 && (prior.content_capture_version ?? 0) < 2;
+          if (prior.provider_message_id === incoming.provider_message_id &&
+              ((prior.source_complete === false && incoming.source_complete === true) ||
+               (richerContent && !(prior.source_complete === true && incoming.source_complete !== true)))) {
+            messagesUpdated += enrichMessage.run(message.timestamp,message.message_index,message.metadata_json,now,message.id,session.session_ref).changes;
+          }
+        } catch { /* Invalid old metadata is retained, never interpreted as authority. */ }
+      }
     }
-    return { created, messagesAdded };
+    return { created, messagesAdded, ...(messagesUpdated ? { messagesUpdated } : {}) };
   });
 }
 

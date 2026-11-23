@@ -5,6 +5,7 @@ import type { SessionService } from "../handoff/types.js";
 import { formatDuration } from "../utils/duration.js";
 
 interface ScanOptions {
+  allLocal?: boolean;
   projectPath?: string;
   /**
    * Also embed every window the scan leaves without a vector.
@@ -94,10 +95,13 @@ async function calibrateIfNeeded(): Promise<void> {
  * internal flag: "warm the index" is a reasonable thing to want to do.
  */
 export async function runScan(options: ScanOptions = {}): Promise<void> {
+  if (options.allLocal && !options.projectPath) {
+    throw new Error("--all-local requires an explicit --project archive directory");
+  }
   if (options.embed && options.calibrate !== false) {
     await calibrateIfNeeded();
   }
-  const services = await createProjectServices(options.projectPath);
+  const services = await createProjectServices(options.projectPath, { allLocalSessions: options.allLocal });
   const startedAt = Date.now();
 
   try {

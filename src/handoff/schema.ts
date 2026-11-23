@@ -397,10 +397,14 @@ export function prepareStatements(db: DatabaseHandle): PreparedStatements {
        updated_at = excluded.updated_at`,
   );
   const insertMessage = db.prepare(
-    `INSERT OR IGNORE INTO messages
+    `INSERT INTO messages
      (id, session_ref, tool, source_session_id, timestamp, role, content,
       message_index, content_hash, metadata_json, source_pointer, indexed_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       metadata_json = excluded.metadata_json,
+       source_pointer = COALESCE(excluded.source_pointer, messages.source_pointer),
+       indexed_at = excluded.indexed_at`,
   );
 
   const selectPrunableMessageIds = db.prepare(

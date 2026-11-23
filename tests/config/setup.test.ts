@@ -198,6 +198,9 @@ describe("setupProject", () => {
     expect(planned.get("hook:claude-code")).toBe(
       join(projectRoot, ".claude", "settings.json"),
     );
+    expect(planned.get("hook:cursor")).toBe(
+      join(projectRoot, ".cursor", "hooks.json"),
+    );
   });
 
   it("plans every file setup actually writes", async () => {

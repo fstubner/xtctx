@@ -1,8 +1,10 @@
+import { createHash } from "node:crypto";
 import { stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import type { AntigravityChunk } from "../../types/scraper.js";
 import { AbstractScraper, estimateTokens, toDate, toMessageIndex } from "../base.js";
 import { withDriftReport } from "../drift-log.js";
+import { extractSkillsFromText } from "../skills.js";
 import { formatArtifactContent, isReadableArtifactName } from "./artifacts.js";
 import { artifactMatchesProject, runtimeConversationMatchesProject } from "./project-match.js";
 import { AntigravityLanguageServerClient } from "./runtime-client.js";
@@ -27,6 +29,8 @@ import {
   toStringArray,
   toStringValue,
 } from "./values.js";
+
+export const ANTIGRAVITY_SCRAPER_VERSION = 2;
 
 export class AntigravityScraper extends AbstractScraper<AntigravityChunk> {
   readonly tool = SCRAPER_NAME;
@@ -76,6 +80,10 @@ export class AntigravityScraper extends AbstractScraper<AntigravityChunk> {
   parseRaw(raw: unknown): AntigravityChunk {
     const value = raw as Record<string, unknown>;
     const content = toStringValue(value.content) ?? "";
+    const sourcePath = toStringValue(value.sourcePath) ?? "";
+    const referencedFiles = toStringArray(value.referencedFiles);
+    const textToScan = [content, sourcePath, ...referencedFiles].join(" ");
+    const skills = extractSkillsFromText(textToScan);
     return {
       tool: "antigravity",
       sessionId: toStringValue(value.sessionId) ?? "unknown",
@@ -86,6 +94,7 @@ export class AntigravityScraper extends AbstractScraper<AntigravityChunk> {
         messageIndex: toMessageIndex(value.messageIndex),
         tokenEstimate: estimateTokens(content),
         referencedFiles: toStringArray(value.referencedFiles),
+        skills: skills?.length ? skills : undefined,
         artifactType: toStringValue(value.artifactType),
         artifactName: toStringValue(value.artifactName),
         summary: toStringValue(value.summary),
@@ -97,15 +106,17 @@ export class AntigravityScraper extends AbstractScraper<AntigravityChunk> {
   }
 
   private async *readArtifacts(since: Date): AsyncIterable<AntigravityChunk> {
-    const { chunks: runtimeChunks, degradation } = await this.readRuntimeChunks(since);
+    const { chunks: runtimeChunks, degradation, fingerprints, matchedRuntime } = await this.readRuntimeChunks(since);
     if (degradation) {
       warnDrift(`antigravity-ls:${this.antigravityRoot}`, degradation);
     }
-    if (runtimeChunks.length > 0) {
+    if (matchedRuntime > 0) {
       for (const chunk of runtimeChunks) {
         yield chunk;
       }
       failIfDegraded(degradation);
+      // Held by the index until its writes/prune succeed; never checkpoint a degraded listing.
+      await this.saveScrapedPosition({antigravityRuntimeFingerprints:fingerprints, scraperVersion: ANTIGRAVITY_SCRAPER_VERSION});
       return;
     }
 
@@ -219,9 +230,13 @@ export class AntigravityScraper extends AbstractScraper<AntigravityChunk> {
 
   private async readRuntimeChunks(
     since: Date,
-  ): Promise<{ chunks: AntigravityChunk[]; degradation?: string }> {
+  ): Promise<{ chunks: AntigravityChunk[]; degradation?: string; fingerprints:Record<string,string>; matchedRuntime:number }> {
     const { conversations, degradation } = await this.safeListRuntimeConversations();
     const chunks: AntigravityChunk[] = [];
+    const state = await this.getLastScrapedPosition();
+    const outdated = (state.scraperVersion ?? 1) < ANTIGRAVITY_SCRAPER_VERSION;
+    const previous = outdated ? {} : (state.antigravityRuntimeFingerprints ?? {});
+    const fingerprints={...previous};let matchedRuntime=0;
 
     for (const conversation of conversations) {
       if (this.projectRoot && !runtimeConversationMatchesProject(conversation, this.projectRoot, this.antigravityRoot)) {
@@ -235,13 +250,19 @@ export class AntigravityScraper extends AbstractScraper<AntigravityChunk> {
           return time === 0 ? left.content.localeCompare(right.content) : time;
         });
 
+      matchedRuntime++;
+      const hash=createHash("sha256");hash.update(JSON.stringify([conversation.title,conversation.workspaces])+"\n");
+      for(const message of sortedMessages)hash.update(JSON.stringify([message.role,message.timestamp.toISOString(),message.content,message.referencedFiles,message.sourcePath,message.stepType,message.toolName,message.model])+"\n");
+      const fingerprint=hash.digest("hex");
+      fingerprints[conversation.sessionId]=fingerprint;
+      if(since.getTime()>0&&previous[conversation.sessionId]===fingerprint)continue;
+
       for (const [messageIndex, message] of sortedMessages.entries()) {
         // See the fallback loop above: `steps.ts` falls back to `new Date(0)`
         // when neither the step metadata nor the summary carries a parseable
         // time, and a full sync must still emit those.
-        if (since.getTime() > 0 && message.timestamp <= since) {
-          continue;
-        }
+        // A changed/new session replays fully: global timestamps cannot establish
+        // that its older messages were ever indexed (artifact fallback is partial).
 
         chunks.push(this.parseRaw({
           sessionId: conversation.sessionId,
@@ -260,7 +281,7 @@ export class AntigravityScraper extends AbstractScraper<AntigravityChunk> {
       }
     }
 
-    return degradation ? { chunks, degradation } : { chunks };
+    return {chunks,degradation,fingerprints,matchedRuntime};
   }
 
   private async safeListRuntimeConversations(): Promise<AntigravityRuntimeListing> {

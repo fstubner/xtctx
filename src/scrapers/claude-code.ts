@@ -14,6 +14,7 @@ import { recordDrift, withDriftReport } from "./drift-log.js";
 import { MAX_LINE_BYTES } from "./limits.js";
 import { fileHeadHash, fileTailHash, resumeOffset } from "./base.js";
 import { readJsonlLines } from "./jsonl-reader.js";
+import { extractSkillsFromText, extractSkillsFromToolCalls, type ToolCallPayload } from "./skills.js";
 import type { EmittedPosition, FileCursor } from "../types/scraper.js";
 
 const SCRAPER_NAME = "claude-code";
@@ -48,7 +49,7 @@ const SCRAPER_NAME = "claude-code";
  * keep the old roles. They are the only copy of those sessions, which is why
  * this corrects in place instead of rebuilding the index.
  */
-export const CLAUDE_CODE_SCRAPER_VERSION = 2;
+export const CLAUDE_CODE_SCRAPER_VERSION = 4;
 
 /**
  * How many cwd-less records to hold while waiting for one that names a
@@ -174,6 +175,20 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
     const content = extractContent(obj);
     const type = (obj.type as string) || "unknown";
     const role = extractRole(obj, type);
+    const toolCallList: ToolCallPayload[] = [];
+    if (type === "tool_use") {
+      toolCallList.push({ name: obj.name as string, input: obj.input, args: obj.args });
+    }
+    const msg = isRecord(obj.message) ? obj.message : undefined;
+    if (msg && Array.isArray(msg.content)) {
+      for (const b of msg.content) {
+        if (isRecord(b) && b.type === "tool_use") {
+          toolCallList.push({ name: b.name as string, input: b.input, args: b.args });
+        }
+      }
+    }
+    const skills = extractSkillsFromToolCalls(toolCallList) ?? extractSkillsFromText(content);
+    const toolNames = toolCallList.map((t) => t.name).filter((n): n is string => Boolean(n));
 
     return {
       tool: "claude-code",
@@ -185,7 +200,8 @@ export class ClaudeCodeScraper extends AbstractScraper<ClaudeCodeChunk> {
         messageIndex: (obj.messageIndex as number) || 0,
         tokenEstimate: estimateTokens(content),
         referencedFiles: [],
-        toolCalls: type === "tool_use" ? [(obj.name as string) || ""] : undefined,
+        toolCalls: toolNames.length > 0 ? toolNames : type === "tool_use" ? [(obj.name as string) || ""] : undefined,
+        skills: skills?.length ? skills : undefined,
         costUsd: obj.costUsd as number | undefined,
         // Recorded per record by Claude Code itself, so it is the branch the
         // work actually happened on rather than whatever is checked out now.

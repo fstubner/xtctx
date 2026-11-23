@@ -67,6 +67,14 @@ describe("diff sync", () => {
     expect(cloud.requests).toEqual([]);
   });
 
+  it("normalizes empty optional session fields to null for server validation", async () => {
+    await optedIn();
+    seedIndex(box.project, 1);
+    editIndex(box.project, db => db.prepare("UPDATE sessions SET preview = '', git_branch = '', git_commit = ''").run());
+    expect((await runDiffSync({projectDir:box.project})).syncedCount).toBe(1);
+    expect(cloud.uploads()[0].body.sessions[0]).toMatchObject({preview:null,gitBranch:null,gitCommit:null});
+  });
+
   it("uploads an opted-in project, and only what is new on the next run", async () => {
     await optedIn();
     seedIndex(box.project, 3);
@@ -79,6 +87,19 @@ describe("diff sync", () => {
     expect((await runDiffSync({ projectDir: box.project })).syncedCount).toBe(2);
     expect(cloud.stored()).toHaveLength(5);
     expect(cloud.uploads()[0].headers.get("X-Xtctx-Client")).toMatch(/^xtctx\/\d/);
+  });
+
+  it("explicit replay migrates old metadata without duplicating messages or rewinding the cursor", async () => {
+    await optedIn();
+    seedIndex(box.project, 3);
+    await runDiffSync({ projectDir: box.project });
+    const before = await state();
+    editIndex(box.project, db => db.prepare("UPDATE messages SET metadata_json = ?").run(JSON.stringify({provider_message_id:"synthetic-source"})));
+    expect((await runDiffSync({ projectDir: box.project })).syncedCount).toBe(0);
+    expect((await runDiffSync({ projectDir: box.project, replayAll:true })).syncedCount).toBe(3);
+    expect(cloud.stored()).toHaveLength(3);
+    expect(JSON.parse(cloud.uploads().at(-1)!.body.sessions[0].messages[0].metadataJson)).toMatchObject({provider_message_id:"synthetic-source"});
+    expect((await state()).cursor! >= before.cursor!).toBe(true);
   });
 
   it("does not advance past a failed upload: the next run sends it all", async () => {
@@ -179,31 +200,31 @@ describe("diff sync", () => {
     expect(JSON.parse(cloud.stored()[0].metadataJson)).toEqual({ messageIndex: 0, subagent: true, subagentType: "explore" });
   });
 
-  it("truncates a message over the server's limit, with a marker", async () => {
-    await optedIn();
-    seedIndex(box.project, 1, { content: () => "x".repeat(UPLOAD_LIMITS.maxMessageBytes * 2) });
-    await runDiffSync({ projectDir: box.project });
-    const content = cloud.stored()[0].content;
-    expect(Buffer.byteLength(content)).toBeLessThanOrEqual(UPLOAD_LIMITS.maxMessageBytes);
-    expect(content).toContain("[xtctx: truncated for upload");
+  it("refuses unsupported large messages without truncation or advancing the cursor", async () => {
+    await optedIn();seedIndex(box.project,1,{content:()=>"x".repeat(128*1024)});
+    await expect(runDiffSync({projectDir:box.project})).rejects.toThrow("negotiated remote limit");
+    expect(cloud.stored()).toHaveLength(0);expect((await state()).cursor).toBeUndefined();
+  });
+  it("negotiates and retries large Unicode content with unchanged source identity",async()=>{
+    await optedIn();const content="猫😀".repeat(600000);seedIndex(box.project,1,{content:()=>content});
+    vi.stubGlobal("fetch",async(url:string,init:RequestInit)=>url.endsWith("/api/sync-capabilities")?Response.json({protocol:1,limits:{maxMessageBytes:64*1024*1024,maxBodyBytes:128*1024*1024}}):cloud.fetch(url,init));
+    expect((await runDiffSync({projectDir:box.project})).syncedCount).toBe(1);
+    expect(cloud.stored()[0].content).toBe(content);
+    await runDiffSync({projectDir:box.project,replayAll:true});expect(cloud.stored()).toHaveLength(1);expect(cloud.stored()[0].content).toBe(content);
+  });
+  it("explicit replay recovers legacy skipped messages only after success",async()=>{
+    await optedIn();seedIndex(box.project,1);
+    await updateAccountState(box.project,accountKey("github:1","https://sync.test"),s=>({...s,skipped:[{sessionRef:"claude-code:s1",messageId:localId(0),reason:"legacy size refusal",at:new Date().toISOString()}]}));
+    cloud.state.failStatus=500;
+    await expect(runDiffSync({projectDir:box.project,replayAll:true})).rejects.toThrow();expect((await state()).skipped).toHaveLength(1);
+    cloud.state.failStatus=undefined;await runDiffSync({projectDir:box.project,replayAll:true});expect(cloud.stored()).toHaveLength(1);expect((await state()).skipped).toHaveLength(0);
   });
 
-  it("skips and records a message the server refuses as too large, and the rest still uploads", async () => {
-    await optedIn();
-    seedIndex(box.project, 3);
-    cloud.state.tooLarge.add(localId(1));
-
-    const result = await runDiffSync({ projectDir: box.project });
-
-    expect(result.skipped.map((s) => s.messageId)).toEqual([localId(1)]);
-    expect(cloud.stored().map((m) => m.id).sort()).toEqual([localId(0), localId(2)]);
-    expect((await state()).skipped).toEqual([expect.objectContaining({ messageId: localId(1), sessionRef: "claude-code:s1" })]);
-
-    // Not offered again, and not counted against the session.
-    const before = cloud.sentMessages().length;
-    editIndex(box.project, (db) => db.prepare("UPDATE sessions SET updated_at = ?").run(new Date().toISOString()));
-    await runDiffSync({ projectDir: box.project });
-    expect(cloud.sentMessages().slice(before).map((m) => m.id)).not.toContain(localId(1));
+  it("server size rejection retains the checkpoint and retries the same message",async()=>{
+    await optedIn();seedIndex(box.project,3);cloud.state.tooLarge.add(localId(1));
+    await expect(runDiffSync({projectDir:box.project})).rejects.toThrow("checkpoint unchanged");
+    expect((await state()).skipped).toEqual([]);expect((await state()).cursor).toBeUndefined();
+    cloud.state.tooLarge.clear();await runDiffSync({projectDir:box.project});expect(cloud.stored()).toHaveLength(3);
   });
 
   it("splits a large backlog across requests that stay inside the limits", async () => {
@@ -277,6 +298,48 @@ describe("diff sync", () => {
     await setOptedIn(other, true);
     seedIndex(box.project, 1);
     await expect(runDiffSync({ projectDir: box.project })).rejects.toBeInstanceOf(NotOptedInError);
+  });
+
+  it("redacts secrets before upload while leaving the local index intact", async () => {
+    const { openDatabase } = await import("@xtctx/handoff/schema");
+    const { describeCloudSync } = await import("@xtctx/sync/report");
+    await optedIn();
+    const fakeGh = "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6";
+    seedIndex(box.project, 1, {
+      content: () => `token ${fakeGh} and alice@company.com`,
+    });
+    editIndex(box.project, (db) => {
+      db.prepare("UPDATE sessions SET preview = ?").run(`session with ${fakeGh}`);
+    });
+
+    const result = await runDiffSync({ projectDir: box.project });
+    expect(result.syncedCount).toBe(1);
+    expect(result.redactedCount).toBe(2);
+    expect(cloud.stored()[0].content).toBe("token [REDACTED:github_token] and alice@company.com");
+    expect(cloud.uploads()[0].body.sessions[0]).toMatchObject({ preview: "session with [REDACTED:github_token]" });
+
+    const localDb = openDatabase(join(box.project, ".xtctx", "state", "xtctx.db"));
+    try {
+      const row = localDb.prepare("SELECT content FROM messages").get() as { content: string };
+      expect(row.content).toContain(fakeGh);
+    } finally {
+      localDb.close();
+    }
+
+    const statusLines = (await describeCloudSync(box.project)).join("\n");
+    expect(statusLines).toContain("redacted 2 secret/PII");
+    expect(statusLines).not.toContain(fakeGh);
+  });
+
+  it("enables PII redaction when sync.redactPii is true in .xtctx/config.yaml", async () => {
+    await optedIn();
+    mkdirSync(join(box.project, ".xtctx"), { recursive: true });
+    writeFileSync(join(box.project, ".xtctx", "config.yaml"), "sync:\n  redactPii: true\n");
+    seedIndex(box.project, 1, { content: () => "contact alice@company.com about SSN 123-45-6789" });
+
+    const result = await runDiffSync({ projectDir: box.project });
+    expect(result.redactedCount).toBe(2);
+    expect(cloud.stored()[0].content).toBe("contact [REDACTED:email] about SSN [REDACTED:ssn]");
   });
 });
 
