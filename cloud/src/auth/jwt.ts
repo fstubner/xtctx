@@ -93,9 +93,9 @@ export async function verifyJwt(token: string, secret: string): Promise<Verified
     const header = JSON.parse(Buffer.from(headerB64, "base64url").toString("utf8")) as { alg?: unknown };
     if (header.alg !== "HS256") return null;
 
-    const expectedSig = signHmac(`${headerB64}.${bodyB64}`, secret);
-    const actualSig = Buffer.from(sigB64, "base64url");
-    if (actualSig.length !== expectedSig.length || !timingSafeEqual(actualSig, expectedSig)) {
+    const expectedB64 = Buffer.from(signHmac(`${headerB64}.${bodyB64}`, secret).toString("base64url"), "utf8");
+    const actualB64 = Buffer.from(sigB64, "utf8");
+    if (actualB64.length !== expectedB64.length || !timingSafeEqual(actualB64, expectedB64)) {
       return null;
     }
 

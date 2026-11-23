@@ -48,8 +48,12 @@ describe("JWT minting and verification", () => {
       3600,
     );
     const [h, b, s] = valid.split(".");
-    const tamperedSig = `${h}.${b}.${s.slice(0, -1)}${s.endsWith("A") ? "B" : "A"}`;
+    const b64url = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    const tamperedSig = `${h}.${b}.${s.startsWith("A") ? "B" : "A"}${s.slice(1)}`;
+    const malleatedLast = b64url[b64url.indexOf(s.at(-1)!) ^ 1];
+    const malleatedSig = `${h}.${b}.${s.slice(0, -1)}${malleatedLast}`;
     expect(await verifyJwt(tamperedSig, SECRET)).toBeNull();
+    expect(await verifyJwt(malleatedSig, SECRET)).toBeNull();
     expect(await verifyJwt(valid, "different-secret-at-least-32-characters")).toBeNull();
 
     const noneAlg = `${Buffer.from(JSON.stringify({ alg: "none", typ: "JWT" })).toString("base64url")}.${b}.`;
