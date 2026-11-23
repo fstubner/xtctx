@@ -31,7 +31,9 @@ site/CHANGELOG.md
 # matched tests/drift/fingerprints/opencode.json, which silently stayed untracked.
 /opencode.json
 *.tsbuildinfo
-coverage/
+# Anchored: test coverage output lives at the repo root. Unanchored it also
+# matched src/coverage/, silently leaving source modules untracked.
+/coverage/
 .env
 .env.local
 .artifacts/
