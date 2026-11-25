@@ -29,6 +29,7 @@ import { ingestUpload, parseUpload } from "./db/ingest.js";
 import { bumpTokenEpoch, deleteUserData, getUserMessageCount } from "./db/queries.js";
 import { LEGACY_VERSIONS, MODERN_VERSIONS, handleMcpPost } from "./mcp.js";
 import { SERVER_VERSION } from "./version.js";
+import { drainEmbeddingQueue } from "./worker-loop.js";
 
 export const MAX_MCP_BODY_BYTES = 256 * 1024;
 const uploadingUsers = new Set<string>();
@@ -297,7 +298,27 @@ async function routeCloudRequest(request: Request, ctx: CloudContext): Promise<R
       }
 
       try {
-        return json(await ingestUpload(ctx, asUser(auth), parsed.body, request.headers.get("X-Xtctx-Client")));
+        const ingested = await ingestUpload(ctx, asUser(auth), parsed.body, request.headers.get("X-Xtctx-Client"));
+        if (ctx.embedOnUpload && ctx.embedder && incoming > 0) {
+          try {
+            await drainEmbeddingQueue({
+              pool: ctx.pool,
+              embedder: ctx.embedder,
+              batchSize: 16,
+              maxJobs: ctx.embedOnUploadMaxJobs ?? 32,
+              maxMs: ctx.embedOnUploadBudgetMs ?? 8_000,
+            });
+          } catch (err) {
+            console.error(
+              JSON.stringify({
+                event: "inline_embed_failed",
+                userId: auth.userId,
+                error: err instanceof Error ? err.message : String(err),
+              }),
+            );
+          }
+        }
+        return json(ingested);
       } catch (err) {
         console.error(
           JSON.stringify({

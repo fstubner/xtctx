@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createPool, runMigrations } from "./db/pool.js";
 import { createEmbedderFromEnv } from "./embedder.js";
-import { runWorkerLoop } from "./worker-loop.js";
+import { drainEmbeddingQueue, runWorkerLoop } from "./worker-loop.js";
 
 function resolveMigrationsDir(): string {
   for (const candidate of ["./migrations/", "../migrations/"]) {
@@ -29,11 +29,16 @@ async function main(): Promise<void> {
     process.once(sig, () => ac.abort());
   }
 
-  const pollMsRaw = Number(process.env.EMBEDDING_POLL_MS ?? "2000");
-  const pollMs = Number.isFinite(pollMsRaw) && pollMsRaw > 0 ? pollMsRaw : 2000;
-  console.log(JSON.stringify({ event: "worker_started", provider: embedder.provider, model: embedder.model }));
-
   try {
+    if (process.argv.slice(2).includes("--once")) {
+      const processed = await drainEmbeddingQueue({ pool, embedder, signal: ac.signal });
+      console.log(JSON.stringify({ event: "worker_once_complete", provider: embedder.provider, model: embedder.model, processed }));
+      return;
+    }
+    const pollMsRaw = Number(process.env.EMBEDDING_POLL_MS ?? "2000");
+    const pollMs = Number.isFinite(pollMsRaw) && pollMsRaw > 0 ? pollMsRaw : 2000;
+    console.log(JSON.stringify({ event: "worker_started", provider: embedder.provider, model: embedder.model }));
+
     await runWorkerLoop({ pool, embedder, pollMs, signal: ac.signal });
   } finally {
     await pool.end();

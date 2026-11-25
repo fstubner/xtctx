@@ -25,6 +25,9 @@ export interface CloudContext {
   pool: Pool;
   appRole?: string;
   embedder: Embedder | null;
+  embedOnUpload?: boolean;
+  embedOnUploadMaxJobs?: number;
+  embedOnUploadBudgetMs?: number;
   publicUrl: string;
   jwtSecret?: string;
   githubClientId: string;

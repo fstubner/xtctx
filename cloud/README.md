@@ -71,7 +71,28 @@ Vector search queries `message_chunks` (`halfvec(384)`) with `pgvector >= 0.8` H
 | `HOSTED_MESSAGE_QUOTA` | Per-account message quota for non-allowlisted paid users | `100000` |
 | `MAX_UPLOAD_BODY_BYTES` / `MAX_UPLOAD_MESSAGE_BYTES` | Override `/api/stream` body/message byte caps | `8 MiB` / `4 MiB` |
 | `EMBEDDING_PROVIDER` | `local`, `openai`, or `none` | `local` |
+| `EMBEDDING_MODEL` | Model name for `local` or `openai` | `Xenova/bge-small-en-v1.5` / `text-embedding-3-small` |
+| `EMBEDDING_API_URL` | Base URL or full `/embeddings` URL for `openai` provider | unset |
+| `EMBEDDING_API_KEY` | Bearer token for `openai` provider | unset |
+| `EMBEDDING_SEND_DIMENSIONS` | Include OpenAI `dimensions: 384` body parameter (`false` for fixed-dim Workers AI) | `true` |
+| `EMBED_ON_UPLOAD` | Drain up to 32 queued embedding jobs inline after `/api/stream` (for scale-to-zero deployments) | `false` |
 | `HOST` / `PORT` | Bind address and HTTP port | `127.0.0.1` (`0.0.0.0` in Docker) / `8788` |
+
+## Serverless Scale-to-Zero (Cloud Run + Neon + Workers AI)
+
+To run semantically indexed search without keeping a polling worker awake 24/7 (which burns Neon's free compute hours):
+
+1. Create a non-superuser role in Neon (`CREATE ROLE xtctx_app NOINHERIT LOGIN PASSWORD '...';`) and grant database usage, or set `DATABASE_APP_ROLE=xtctx_app` so `withUserDb` enforces PostgreSQL RLS cleanly.
+2. Deploy `cloud/Dockerfile` on Google Cloud Run (2M req/mo free) with:
+   - `DATABASE_URL=<neon-pooled-or-direct-url>`
+   - `DATABASE_APP_ROLE=xtctx_app`
+   - `EMBEDDING_PROVIDER=openai`
+   - `EMBEDDING_API_URL=https://api.cloudflare.com/client/v4/accounts/<account_id>/ai/v1`
+   - `EMBEDDING_API_KEY=<workers-ai-token>`
+   - `EMBEDDING_MODEL=@cf/baai/bge-small-en-v1.5`
+   - `EMBEDDING_SEND_DIMENSIONS=false`
+   - `EMBED_ON_UPLOAD=true`
+3. Optionally schedule a periodic Cloud Run Job running `node dist/worker.mjs --once` to finish any large backlogs beyond the 32-job / 8s inline budget.
 
 ## Build, CLI & Tests
 

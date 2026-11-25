@@ -65,6 +65,11 @@ describe("createEmbedderFromEnv", () => {
       vi.fn(async (url: string | URL, init?: RequestInit) => {
         expect(String(url)).toBe("https://embed.example.test/v1/embeddings");
         expect(init?.headers).toMatchObject({ Authorization: "Bearer key-1" });
+        expect(JSON.parse(String(init?.body))).toMatchObject({
+          model: "custom-model",
+          input: ["first", "second"],
+          dimensions: 384,
+        });
         return Response.json({
           data: [
             { index: 1, embedding: vec2 },
@@ -81,6 +86,27 @@ describe("createEmbedderFromEnv", () => {
       EMBEDDING_MODEL: "custom-model",
     })!;
     expect(await openai.embed(["first", "second"])).toEqual([vec, vec2]);
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string | URL, init?: RequestInit) => {
+        expect(String(url)).toBe("https://api.cloudflare.com/client/v4/accounts/acct/ai/v1/embeddings");
+        const parsed = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        expect(parsed).toEqual({
+          model: "@cf/baai/bge-small-en-v1.5",
+          input: ["cloudflare"],
+        });
+        return Response.json({ data: [{ index: 0, embedding: vec }] });
+      }),
+    );
+    const workersAi = createEmbedderFromEnv({
+      EMBEDDING_PROVIDER: "openai",
+      EMBEDDING_API_URL: "https://api.cloudflare.com/client/v4/accounts/acct/ai/v1/",
+      EMBEDDING_API_KEY: "cf-key",
+      EMBEDDING_MODEL: "@cf/baai/bge-small-en-v1.5",
+      EMBEDDING_SEND_DIMENSIONS: "false",
+    })!;
+    expect(await workersAi.embed(["cloudflare"])).toEqual([vec]);
 
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ data: [{ index: 0, embedding: [1, 2, 3] }] })));
     await expect(openai.embed(["wrong-dim"])).rejects.toThrow("384-dim");

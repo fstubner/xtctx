@@ -175,3 +175,32 @@ export async function runWorkerLoop(options: {
     });
   }
 }
+
+/**
+ * Drain queued embedding jobs until the queue is empty or optional `maxJobs`/`maxMs`
+ * budgets are reached, enabling scale-to-zero workers and inline post-upload embedding.
+ */
+export async function drainEmbeddingQueue(options: {
+  pool: Pool;
+  embedder: Embedder;
+  batchSize?: number;
+  maxJobs?: number;
+  maxMs?: number;
+  signal?: AbortSignal;
+}): Promise<number> {
+  const batchSize = Math.max(1, options.batchSize ?? 16);
+  const maxJobs = options.maxJobs !== undefined ? Math.max(1, options.maxJobs) : undefined;
+  const deadline = options.maxMs !== undefined ? Date.now() + Math.max(1, options.maxMs) : undefined;
+  let total = 0;
+
+  while (!options.signal?.aborted) {
+    if (maxJobs !== undefined && total >= maxJobs) break;
+    if (deadline !== undefined && Date.now() >= deadline) break;
+    const limit = maxJobs !== undefined ? Math.min(batchSize, maxJobs - total) : batchSize;
+    const processed = await processEmbeddingBatch(options.pool, options.embedder, { batchSize: limit });
+    if (processed === 0) break;
+    total += processed;
+  }
+
+  return total;
+}

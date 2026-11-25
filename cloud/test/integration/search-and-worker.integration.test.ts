@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Pool } from "pg";
 import { searchMessages } from "../../src/db/search.js";
-import { processEmbeddingBatch } from "../../src/worker-loop.js";
+import { drainEmbeddingQueue, processEmbeddingBatch } from "../../src/worker-loop.js";
 import {
   createPgTestHarness,
   createTestContext,
@@ -174,5 +174,69 @@ describe("PostgreSQL FTS, pgvector 0.8 halfvec HNSW, and SKIP LOCKED worker", ()
     await expect(searchMessages(ctx, "github:1", { query: "orchid", mode: "semantic", limit: 5 })).rejects.toThrow(
       "Semantic search unavailable",
     );
+  });
+
+  it("drains queue via drainEmbeddingQueue with maxJobs cap and embeds inline when embedOnUpload is enabled", async () => {
+    const embedder = deterministicEmbedder();
+    const ctxQueued = createTestContext(pool, { embedder });
+    const token = await mintFixtureToken(ctxQueued, "1");
+
+    await post(
+      ctxQueued,
+      token,
+      upload([
+        session({ sourceSessionId: "s-1" }, [message(0, { content: "orchid batch one" })]),
+        session({ sourceSessionId: "s-2" }, [message(0, { content: "orchid batch two" })]),
+        session({ sourceSessionId: "s-3" }, [message(0, { content: "orchid batch three" })]),
+      ]),
+    );
+    expect(await drainEmbeddingQueue({ pool, embedder, batchSize: 1, maxJobs: 2 })).toBe(2);
+    expect((await pool.query("SELECT COUNT(*)::int AS n FROM embedding_jobs")).rows[0].n).toBe(1);
+    expect(await drainEmbeddingQueue({ pool, embedder, batchSize: 1 })).toBe(1);
+    expect(await drainEmbeddingQueue({ pool, embedder, batchSize: 1 })).toBe(0);
+
+    const ctxInline = createTestContext(pool, { embedder, embedOnUpload: true });
+    const res = await post(
+      ctxInline,
+      token,
+      upload([
+        session({ sourceSessionId: "s-inline" }, [
+          message(0, { content: "Configured oauth bearer inline serverless embed" }),
+        ]),
+      ]),
+    );
+    expect(res.status).toBe(200);
+    expect((await pool.query("SELECT COUNT(*)::int AS n FROM embedding_jobs")).rows[0].n).toBe(0);
+
+    const hit = await searchMessages(ctxInline, "github:1", {
+      query: "jwt session",
+      mode: "semantic",
+      limit: 5,
+    });
+    expect(hit.matches.some((m) => m.session_ref === "github:1:claude-code:s-inline")).toBe(true);
+  });
+
+  it("keeps POST /api/stream 200 and preserves failed job backoff when embedOnUpload throws", async () => {
+    const failingEmbedder = {
+      provider: "test",
+      model: "broken-model",
+      dimensions: 384,
+      async embed() {
+        throw new Error("workers ai quota exceeded");
+      },
+    };
+    const ctx = createTestContext(pool, { embedder: failingEmbedder, embedOnUpload: true });
+    const token = await mintFixtureToken(ctx, "1");
+
+    const res = await post(
+      ctx,
+      token,
+      upload([session({ sourceSessionId: "s-fail" }, [message(0, { content: "retained upload payload" })])]),
+    );
+    expect(res.status).toBe(200);
+    expect((await pool.query("SELECT COUNT(*)::int AS n FROM messages WHERE session_ref = 'github:1:claude-code:s-fail'")).rows[0].n).toBe(1);
+    const job = (await pool.query("SELECT attempts, last_error FROM embedding_jobs")).rows[0];
+    expect(job.attempts).toBe(1);
+    expect(job.last_error).toContain("workers ai quota exceeded");
   });
 });

@@ -97,16 +97,22 @@ export class OpenAICompatibleEmbedder implements Embedder {
   readonly dimensions = CLOUD_EMBEDDING_DIMENSIONS;
   private readonly endpoint: string;
   private readonly apiKey?: string;
+  private readonly sendDimensions: boolean;
 
-  constructor(options: { apiUrl: string; apiKey?: string; model?: string }) {
+  constructor(options: { apiUrl: string; apiKey?: string; model?: string; sendDimensions?: boolean }) {
     const url = new URL(options.apiUrl);
     if (url.protocol !== "https:" && url.protocol !== "http:") {
       throw new Error("EMBEDDING_API_URL must use http or https");
     }
     const base = url.toString().replace(/\/+$/, "");
-    this.endpoint = base.endsWith("/embeddings") ? base : `${base}/v1/embeddings`;
+    this.endpoint = base.endsWith("/embeddings")
+      ? base
+      : base.endsWith("/v1")
+        ? `${base}/embeddings`
+        : `${base}/v1/embeddings`;
     this.apiKey = options.apiKey;
     this.model = options.model?.trim() || "text-embedding-3-small";
+    this.sendDimensions = options.sendDimensions ?? true;
   }
 
   async embed(texts: string[]): Promise<number[][]> {
@@ -121,7 +127,7 @@ export class OpenAICompatibleEmbedder implements Embedder {
       body: JSON.stringify({
         model: this.model,
         input: texts,
-        dimensions: this.dimensions,
+        ...(this.sendDimensions ? { dimensions: this.dimensions } : {}),
       }),
     });
     if (!res.ok) {
@@ -159,10 +165,13 @@ export function createEmbedderFromEnv(env: Record<string, string | undefined>): 
     if (!apiUrl) {
       throw new Error("EMBEDDING_API_URL is required when EMBEDDING_PROVIDER=openai");
     }
+    const rawSendDims = (env.EMBEDDING_SEND_DIMENSIONS ?? "true").trim().toLowerCase();
+    const sendDimensions = !["0", "false", "no"].includes(rawSendDims);
     return new OpenAICompatibleEmbedder({
       apiUrl,
       apiKey: env.EMBEDDING_API_KEY?.trim() || undefined,
       model: env.EMBEDDING_MODEL?.trim() || undefined,
+      sendDimensions,
     });
   }
   if (provider === "local") {
