@@ -1,10 +1,10 @@
 {
   "_comment": "Last upstream release verified against xtctx's scrapers. The weekly upstream-watch workflow compares npm against this file and opens or updates a single rolling draft PR bumping moved versions when a tracked tool publishes a new release: a free signal for when a format *could* have changed, without spending API credit invoking the tools. Verify formats locally with `npm run capture:formats` (or dispatch drift-canary) before marking the PR ready to merge.",
   "packages": {
-    "@anthropic-ai/claude-code": "2.1.238",
-    "@openai/codex": "0.149.0",
-    "opencode-ai": "1.18.21",
-    "@github/copilot": "1.0.80"
+    "@anthropic-ai/claude-code": "2.1.332",
+    "@openai/codex": "0.172.0",
+    "opencode-ai": "1.19.6",
+    "@github/copilot": "1.0.116"
   },
   "_untracked": {
     "cursor": "not distributed on npm — format changes ship with the Cursor app",
