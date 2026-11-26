@@ -50,10 +50,11 @@ The workflow `.github/workflows/drift-canary.yml` runs on manual
 
 **Manual, not nightly, because every run spends real API credits.** It used to
 run at 03:00 UTC whether or not anything upstream had changed, which paid for a
-signal that only matters after a tool ships a release. The nightly watching is
-now done for free by `upstream-watch` (see `release.md`), which files an issue
-when a tracked tool releases; this canary is the stronger check a human reaches
-for once that issue exists.
+signal that only matters after a tool ships a release. The weekly watching is
+now done for free by `upstream-watch` (see `release.md`), which opens or updates
+one rolling draft PR bumping `.github/upstream-versions.json` when a tracked tool
+releases; this canary is the stronger check a human reaches for before merging
+that PR.
 
 It's a matrix with one job per tool (`fail-fast: false`) so one broken scraper
 doesn't mask the others. Deliberately **not** part of `ci.yml` — real-API
@@ -67,8 +68,8 @@ dependencies must not gate PRs.
 | `OPENAI_API_KEY`    | codex job        |
 
 The workflow runs only when dispatched, and files no issue on failure: the
-person who started it is watching the run. Issues come from `upstream-watch`
-instead.
+person who started it is watching the run. Release tracking happens via the
+rolling `upstream-watch` draft PR instead.
 
 ## Interpreting failures
 

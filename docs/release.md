@@ -119,11 +119,10 @@ xtctx reads transcript files that seven other tools write, so the risk that
 matters between releases is one of those tools changing its on-disk shape.
 Three signals cover it, cheapest first:
 
-**Nightly, free — `upstream-watch`.** Checks npm for releases of the tracked
-tools against `.github/upstream-versions.json` and opens one issue when a
-version moves. It never claims anything is broken; it marks the moment a
-format *could* have changed, which is the only time checking is worth doing.
-Deduped across all issue states, so a release is reported once.
+**Weekly, free — `upstream-watch`.** Checks npm for releases of the tracked
+tools against `.github/upstream-versions.json` and opens or updates a single
+rolling draft PR bumping the moved versions. It never claims anything is broken;
+it marks the moment a format *could* have changed so you can check before merging.
 
 **On demand, free — `npm run capture:formats`.** Fingerprints the real stores
 on your machine and diffs them against `tests/drift/fingerprints/`. Records
@@ -142,5 +141,5 @@ Dispatch it manually when `upstream-watch` fires; it is one short prompt per
 tool. Without `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` configured it exits 78
 and reports that it was skipped rather than filing a false drift issue.
 
-After confirming a new version is fine, record it in
-`.github/upstream-versions.json` so the watch stops reporting it.
+After confirming a new version is fine, merge the rolling
+`.github/upstream-versions.json` PR so the watch stops reporting it.

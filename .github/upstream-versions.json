@@ -1,5 +1,5 @@
 {
-  "_comment": "Last upstream release the watcher has been told about — not a claim that xtctx has been tested against it. The nightly upstream-watch workflow compares npm against this file and opens an issue when a tracked tool publishes a new release: a free signal for when a format *could* have changed, without spending API credit invoking the tools. Bump these once the release has been looked at. What actually verifies a format is `npm run capture:formats`, which reads the transcript stores on the machine it runs on — so it only proves anything about the tool versions installed there, which are often older than these.",
+  "_comment": "Last upstream release verified against xtctx's scrapers. The weekly upstream-watch workflow compares npm against this file and opens or updates a single rolling draft PR bumping moved versions when a tracked tool publishes a new release: a free signal for when a format *could* have changed, without spending API credit invoking the tools. Verify formats locally with `npm run capture:formats` (or dispatch drift-canary) before marking the PR ready to merge.",
   "packages": {
     "@anthropic-ai/claude-code": "2.1.238",
     "@openai/codex": "0.149.0",
