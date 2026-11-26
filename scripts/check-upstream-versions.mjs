@@ -11,12 +11,13 @@
  * worth looking, which is the part that was missing for free.
  *
  *   node scripts/check-upstream-versions.mjs            human-readable report
+ *   node scripts/check-upstream-versions.mjs --write    update .github/upstream-versions.json in place
  *   node scripts/check-upstream-versions.mjs --json     machine-readable
  *
  * Exit codes: 0 = everything current, 10 = at least one tool moved,
  * 1 = the check itself failed (network, bad registry response).
  */
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -26,6 +27,7 @@ const REGISTRY = "https://registry.npmjs.org";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const manifestPath = join(repoRoot, ".github", "upstream-versions.json");
 const asJson = process.argv.includes("--json");
+const shouldWrite = process.argv.includes("--write");
 
 async function latestVersion(pkg) {
   // No custom accept header: the abbreviated-metadata type is only valid on
@@ -67,6 +69,13 @@ for (const [pkg, known] of tracked) {
 }
 
 const moved = results.filter((r) => r.moved);
+
+if (shouldWrite && moved.length > 0) {
+  for (const entry of moved) {
+    manifest.packages[entry.package] = entry.latest;
+  }
+  await writeFile(manifestPath, JSON.stringify(manifest, null, 2) + "\n", "utf-8");
+}
 
 if (asJson) {
   process.stdout.write(JSON.stringify({ moved: moved.length > 0, results }, null, 2) + "\n");
