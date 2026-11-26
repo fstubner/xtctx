@@ -11,6 +11,8 @@ Guidance for coding agents working in this repository.
 - `tests/`: scraper, setup, MCP, status, and drift tests
 - `docs/`: design notes and security documentation
 
+Hosted deployment infrastructure (Terraform for Cloud Run, Neon, and Cloudflare) lives in the separate private `xtctx-infra` repository and must not be committed here.
+
 xtctx is CLI/MCP-first. Humans run `xtctx setup` and `xtctx status`; AI
 assistants use MCP tools to retrieve recent transcript sessions on demand.
 The optional `cloud/` package provides authenticated remote sync and MCP
@@ -62,8 +64,10 @@ npx -y xtctx status
 
 ## Release Notes
 
-- Releases are cut by one manually dispatched workflow; nothing is released by
-  merging. See docs/release.md.
+- npm, GitHub, and other distribution releases (Chrome Web Store submissions,
+  container release/`:latest` tags) are never cut automatically and are
+  dispatched manually. Pushes to `main` touching `cloud/` only publish immutable
+  `:sha-<commit>` container builds. See docs/release.md.
 - Commit prefixes are for readers, not for tooling: release notes come from
   GitHub's own generator over the commit range.
 
