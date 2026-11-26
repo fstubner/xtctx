@@ -1,26 +1,32 @@
 {
   "name": "xtctx-cloud",
-  "version": "0.2.0",
-  "description": "Optional xtctx cloud: an MCP server over transcripts uploaded from opted-in projects",
+  "version": "0.3.0",
+  "description": "Unified Node + PostgreSQL cloud server and worker for xtctx",
   "type": "module",
   "private": true,
-  "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "d1:create": "wrangler d1 create xtctx-db",
-    "d1:migrate:local": "wrangler d1 migrations apply xtctx-db --local",
-    "d1:migrate:remote": "wrangler d1 migrations apply xtctx-db --remote",
-    "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+  "engines": {
+    "node": ">=24.0.0"
   },
-  "devDependencies": {
-    "@cloudflare/workers-types": "^5.20261002.1",
-    "@types/node": "^26.6.4",
-    "typescript": "^6.0.3",
-    "vitest": "^5.0.3",
-    "wrangler": "^4.147.0"
+  "scripts": {
+    "build": "node build.mjs",
+    "start": "node dist/server.mjs serve",
+    "worker": "node dist/worker.mjs",
+    "migrate": "node dist/server.mjs migrate",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run test/unit",
+    "test:semantic": "vitest run test/unit/search-and-worker.test.ts",
+    "test:integration": "vitest run test/integration",
+    "test:all": "vitest run"
   },
   "dependencies": {
-    "@cloudflare/workers-oauth-provider": "1.2.1"
+    "@huggingface/transformers": "^4.2.0",
+    "pg": "^8.16.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "@types/pg": "^8.15.6",
+    "esbuild": "^0.28.1",
+    "typescript": "^6.0.3",
+    "vitest": "^5.0.3"
   }
 }

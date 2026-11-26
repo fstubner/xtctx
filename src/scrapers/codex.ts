@@ -1,5 +1,5 @@
-import { stat } from "node:fs/promises";
-import { basename } from "node:path";
+import { open, readdir, stat } from "node:fs/promises";
+import { basename, join } from "node:path";
 import { glob } from "glob";
 import type { CodexChunk } from "../types/scraper.js";
 import {
@@ -18,9 +18,11 @@ import { withDriftReport } from "./drift-log.js";
 import { MAX_LINE_BYTES } from "./limits.js";
 import { fileHeadHash, fileTailHash, resumeOffset } from "./base.js";
 import { readJsonlLines } from "./jsonl-reader.js";
+import { extractSkillsFromText } from "./skills.js";
 import type { EmittedPosition, FileCursor } from "../types/scraper.js";
 
 const SCRAPER_NAME = "codex";
+export const CODEX_SCRAPER_VERSION = 3;
 
 /**
  * Mutation shapes the codex scraper tolerates silently. Anything outside
@@ -87,6 +89,51 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
     return [this.codexSessionsPath];
   }
 
+  /** Inventory only canonical first-record IDs; ambiguous headers stay unknown.
+   * This establishes source identity, not text parity or attachment completeness.
+   * Metadata-only sessions remain discovered sources; exclusion is not inferred.
+   */
+  async listSessionIds(): Promise<Set<string> | null> {
+    if (this.projectRoot) return null;
+    const ids = new Set<string>();
+    // Scraping tolerates discovery failures; coverage must not turn them into
+    // an authoritative empty inventory. Traverse explicitly and propagate IO.
+    const target = await stat(this.codexSessionsPath);
+    const files: string[] = [];
+    if (target.isFile()) {
+      if (!this.codexSessionsPath.endsWith(".jsonl")) return null;
+      files.push(this.codexSessionsPath);
+    } else if (target.isDirectory()) {
+      const pending = [this.codexSessionsPath];
+      while (pending.length) {
+        const directory = pending.pop()!;
+        for (const entry of await readdir(directory, { withFileTypes: true })) {
+          if (entry.isSymbolicLink()) return null;
+          const path = join(directory, entry.name);
+          if (entry.isDirectory()) pending.push(path);
+          else if (entry.isFile() && entry.name.endsWith(".jsonl")) files.push(path);
+        }
+      }
+    } else return null;
+    for (const file of files) {
+      const handle = await open(file, "r");
+      try {
+        const buffer = Buffer.alloc(64 * 1024);
+        const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+        const newline = buffer.subarray(0, bytesRead).indexOf(10);
+        if (newline < 0) return null;
+        let row: unknown;
+        try { row = JSON.parse(buffer.subarray(0, newline).toString("utf8").replace(/^\uFEFF/, "")); }
+        catch { return null; }
+        if (!isRecord(row) || row.type !== "session_meta" || !isRecord(row.payload)
+          || typeof row.payload.id !== "string" || row.payload.id.length === 0) return null;
+        ids.add(row.payload.id);
+      } finally { await handle.close(); }
+    }
+    return ids;
+  }
+
+
   /**
    * Everything after each file's byte cursor, with no timestamp cutoff unless
    * one is passed.
@@ -114,6 +161,7 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
     const value = raw as Record<string, unknown>;
     const content = toStringValue(value.content) ?? "";
     const role = normalizeRole(toStringValue(value.role) ?? toStringValue(value.type));
+    const skills = extractSkillsFromText(content);
 
     return {
       tool: "codex",
@@ -125,6 +173,7 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
         messageIndex: toMessageIndex(value.messageIndex),
         tokenEstimate: estimateTokens(content),
         referencedFiles: [],
+        skills: skills?.length ? skills : undefined,
         approvalMode: normalizeApprovalMode(toStringValue(value.approvalMode)) ?? "suggest",
         gitBranch: toStringValue(value.gitBranch),
         gitCommit: toStringValue(value.gitCommit),
@@ -154,7 +203,8 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
    */
   private async *readAllSessions(since: Date, resume = false): AsyncIterable<CodexChunk> {
     const files = await this.resolveJsonlFiles();
-    const fileCursors = resume ? ((await this.getLastScrapedPosition()).files ?? {}) : {};
+    const savedState = resume ? await this.getLastScrapedPosition() : undefined;
+    const fileCursors = (savedState?.scraperVersion ?? 1) >= CODEX_SCRAPER_VERSION ? (savedState?.files ?? {}) : {};
     const updated: Record<string, FileCursor> = {};
 
     for (const filePath of files) {
@@ -177,13 +227,15 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
         resume && cursor ? await fileHeadHash(filePath, cursor.offset) : null;
       const checkTail =
         resume && cursor ? await fileTailHash(filePath, cursor.offset) : null;
-      const startAt =
+      let startAt =
         size === null ? 0 : resumeOffset(cursor, size, checkHash ?? undefined, checkTail ?? undefined);
       if (size !== null && startAt > 0 && startAt >= size) {
         continue;
       }
 
-      const resumed = startAt > 0 ? cursor?.context : undefined;
+      let resumed = startAt > 0 ? cursor?.context : undefined;
+      const responseUserFallback = await desktopResponseUserFallback(filePath);
+      if (resumed && resumed.responseUserFallback !== responseUserFallback) {startAt=0;resumed=undefined;}
 
       // Session-level state, updated as we encounter meta/context events.
       // On a resume these come from the cursor: they are derived from records
@@ -200,7 +252,7 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
       /** The last chunk handed out for this file; see `FileCursor.lastEmitted`. */
       let lastEmitted: EmittedPosition | null | undefined = resumed ? cursor?.lastEmitted : null;
 
-      for await (const entry of readJsonlLines(filePath, { start: startAt })) {
+      for await (const entry of readJsonlLines(filePath, { start: startAt, ...(responseUserFallback ? {maxLineBytes:32*1024*1024}: {}) })) {
         readTo = entry.endOffset;
         const line = entry.line;
         if (line === null) {
@@ -429,7 +481,7 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
 
         // Skip system-injected context which Codex sends as "user" role items.
         const role = toStringValue(payload.role);
-        if (role !== "assistant") {
+        if (role !== "assistant" && !(role === "user" && responseUserFallback)) {
           if (!("role" in payload)) {
             warnDrift(
               filePath,
@@ -464,6 +516,7 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
           gitBranch,
           gitCommit,
         });
+        if (role === "user" && responseUserFallback) Object.assign(chunk.metadata,{sourceFormat:"codex-desktop-response-user",mayIncludeInjectedContext:true,nonTextParts:Array.isArray(payload.content)?payload.content.filter(p=>isRecord(p)&&p.type!=="input_text"&&p.type!=="text").length:0});
         yield chunk;
         lastEmitted = emittedPosition(chunk) ?? lastEmitted;
         messageIndex++;
@@ -480,6 +533,7 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
           ...(recordHash ? { headHash: recordHash } : {}),
           ...(recordTail ? { tailHash: recordTail } : {}),
           context: {
+            responseUserFallback,
             sessionId,
             messageIndex,
             projectMatched,
@@ -502,7 +556,7 @@ export class CodexCliScraper extends AbstractScraper<CodexChunk> {
     if (Object.keys(updated).length > 0) {
       // Merged by `saveScrapedPosition`, so this does not disturb the
       // `lastTimestamp` the index writes when the whole scrape completes.
-      await this.saveScrapedPosition({ files: updated });
+      await this.saveScrapedPosition({ files: updated, scraperVersion: CODEX_SCRAPER_VERSION });
     }
   }
 
@@ -706,4 +760,19 @@ function compactedSummary(payload: unknown): string | undefined {
   return (
     toStringValue(payload.summary) ?? toStringValue(payload.content) ?? toStringValue(payload.text)
   );
+}
+
+/** Desktop transcripts can omit authoritative user events entirely. Retain their
+ * recorded response-user text, explicitly labelled as potentially injected context.
+ * Prefer authoritative events whenever the complete file contains any. */
+async function desktopResponseUserFallback(file:string):Promise<boolean>{
+ let desktop=false;
+ for await(const entry of readJsonlLines(file)){
+  if(entry.line===null)continue;
+  let row:unknown;try{row=JSON.parse(entry.line);}catch{continue;}
+  if(!isRecord(row)||!isRecord(row.payload))continue;
+  if(row.type==="session_meta"){desktop=row.payload.originator==="Codex Desktop";if(!desktop)return false;}
+  if(row.type==="event_msg"&&(row.payload.type==="user_message"||(row.payload.type==="item_completed"&&isRecord(row.payload.item)&&row.payload.item.type==="UserMessage")))return false;
+ }
+ return desktop;
 }

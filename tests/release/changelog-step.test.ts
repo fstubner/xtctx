@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,6 +7,21 @@ import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 const run = promisify(execFile);
+
+// System32/bash.exe is WSL on Windows. It does not preserve these native test
+// environment variables and can keep the fixture directory locked. These tests
+// exercise the hosted Bash scripts with Git for Windows, not a WSL session.
+function testBash(): string {
+  if (process.platform !== "win32") return "bash";
+  const configured = process.env.XTCTX_TEST_BASH;
+  const candidates = configured ? [configured] : [
+    join(process.env.ProgramFiles ?? "C:\\Program Files", "Git", "bin", "bash.exe"),
+    join(process.env.LOCALAPPDATA ?? "", "Programs", "Git", "bin", "bash.exe"),
+  ];
+  const found = candidates.find((candidate) => existsSync(candidate));
+  if (!found) throw new Error("Git for Windows Bash is required; set XTCTX_TEST_BASH to its bash.exe path.");
+  return found;
+}
 
 /**
  * The release workflow writes the CHANGELOG entry with a shell step, and a
@@ -61,7 +77,7 @@ describe("release workflow: Write the CHANGELOG entry", () => {
 
   async function release(changelog: string, notes = GENERATED_NOTES): Promise<string> {
     await writeFile(join(dir, "CHANGELOG.md"), changelog, "utf-8");
-    await run("bash", ["-c", await stepScript("Write the CHANGELOG entry")], {
+    await run(testBash(), ["-c", await stepScript("Write the CHANGELOG entry")], {
       cwd: dir,
       env: {
         ...process.env,
@@ -189,7 +205,7 @@ describe("release workflow: Create the GitHub release", () => {
       "  done",
       "}",
     ].join("\n");
-    await run("bash", ["-c", `${stub}\n${await stepScript("Create the GitHub release")}`], {
+    await run(testBash(), ["-c", `${stub}\n${await stepScript("Create the GitHub release")}`], {
       cwd: dir,
       env: { ...process.env, VERSION: "1.2.3", TAG: "xtctx-v1.2.3", STUB_DIR: dir, NOTES: "SHOULD NOT BE USED" },
     });

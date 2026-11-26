@@ -35,7 +35,8 @@ export function normalizeRootForCompare(value: string): string {
  */
 export function canonicalRoot(projectRoot: string): string {
   try {
-    return realpathSync(projectRoot);
+    // .native matches fs/promises.realpath by expanding Windows 8.3 short paths (e.g. RUNNER~1).
+    return realpathSync.native(projectRoot);
   } catch {
     return projectRoot;
   }

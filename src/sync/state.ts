@@ -30,6 +30,8 @@ export interface AccountSyncState {
   lastErrorAt?: string;
   /** When the server was last told this project is in sync, even with nothing to send. */
   lastReportedAt?: string;
+  /** Number of secret/PII matches redacted before sending in the last upload with messages. */
+  lastRedactedCount?: number;
   /** Messages the server refused as too large; never sent again, and left out of the count. */
   skipped: SkippedMessage[];
 }

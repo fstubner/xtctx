@@ -1,19 +1,7 @@
-import type { Env, AuthUser, MessageRecord, SessionRecord } from "./types.js";
-import { getRecentSessions, getSessionMessages, getUploadStatus } from "./db.js";
+import type { AuthUser, CloudContext, MessageRecord, SessionRecord } from "./types.js";
+import { getRecentSessions, getSessionMessages, getUploadStatus } from "./db/queries.js";
+import { searchMessages } from "./db/search.js";
 import { SERVER_NAME, SERVER_VERSION } from "./version.js";
-
-/**
- * MCP over JSON-RPC, for two eras of client on one endpoint.
- *
- * Modern (2026-07-28): no handshake; every request carries its protocol
- * version in `params._meta` and, over HTTP, mirrors it and the method into
- * headers that must agree with the body. Legacy (2025-11-25, 2025-06-18, and
- * 2024-11-05 over the `/sse` transport): an `initialize` handshake. Neither
- * keeps session state here, so nothing depends on which isolate answers.
- *
- * JSON-RPC batches are refused: 2025-06-18 removed them and 2026-07-28 allows
- * one message per POST.
- */
 
 export const MODERN_VERSIONS = ["2026-07-28"];
 export const LEGACY_VERSIONS = ["2025-11-25", "2025-06-18", "2024-11-05"];
@@ -33,18 +21,12 @@ export const ERR = {
 } as const;
 
 const SERVER_INFO = { name: SERVER_NAME, version: SERVER_VERSION };
-
-/**
- * 2026-07-28 caching hints, required on server/discover and tools/list. The
- * tool list and the discovery result are the same for every user, so they
- * are public; they change only with a deploy.
- */
 const CACHE_PUBLIC = { ttlMs: 60 * 60 * 1000, cacheScope: "public" } as const;
 
 const INSTRUCTIONS =
   "Transcripts you uploaded to xtctx cloud from your other machines. " +
   "Call xtctx_cloud_status first to see which projects and devices have uploaded and when; " +
-  "then xtctx_cloud_recent_sessions and xtctx_cloud_session_detail. " +
+  "then xtctx_cloud_recent_sessions, xtctx_cloud_session_detail, and xtctx_cloud_search_sessions. " +
   "For this machine's own sessions use the local xtctx tools.";
 
 export const MCP_TOOLS = [
@@ -74,7 +56,8 @@ export const MCP_TOOLS = [
   },
   {
     name: "xtctx_cloud_session_detail",
-    description: "Return the messages of one uploaded session, in conversation order, by the session_ref that xtctx_cloud_recent_sessions gave.",
+    description:
+      "Return the messages of one uploaded session, in conversation order, by the session_ref that xtctx_cloud_recent_sessions gave.",
     inputSchema: {
       type: "object",
       required: ["session_ref"],
@@ -99,9 +82,25 @@ export const MCP_TOOLS = [
       },
     },
   },
+  {
+    name: "xtctx_cloud_search_sessions",
+    description:
+      "Search your uploaded transcript messages. Supports keyword, semantic, and hybrid when indexed. " +
+      "Reports any fallback and partial coverage explicitly. Results retain session references and message positions.",
+    inputSchema: {
+      type: "object",
+      required: ["query"],
+      properties: {
+        query: { type: "string", minLength: 1, maxLength: 1000 },
+        mode: { type: "string", enum: ["keyword", "semantic", "hybrid"], default: "hybrid" },
+        repo_url: { type: "string" },
+        limit: { type: "integer", minimum: 1, maximum: 25 },
+        format: { type: "string", enum: ["json", "markdown"] },
+      },
+    },
+  },
 ];
 
-/** Thrown for arguments a tool cannot use; reported to the model as a tool error so it can correct them. */
 class ArgumentError extends Error {}
 
 function optionalString(args: Record<string, unknown>, key: string): string | undefined {
@@ -120,7 +119,6 @@ function optionalStrings(args: Record<string, unknown>, key: string): string[] |
   return v as string[];
 }
 
-/** An integer clamped into [min, max]; anything that is not a number is an error, not "unlimited". */
 function clampInt(args: Record<string, unknown>, key: string, min: number, max: number, fallback: number): number {
   const v = args[key];
   if (v === undefined || v === null) return fallback;
@@ -159,22 +157,60 @@ function publicMessage(m: MessageRecord) {
   try {
     metadata = JSON.parse(m.metadata_json);
   } catch {
-    // stored as sent; a bad one is shown as empty rather than failing the call
+    // preserve readable response even if metadata was stored malformed
   }
   return { message_index: m.message_index, timestamp: m.timestamp, role: m.role, content: m.content, metadata };
 }
 
-/** Unknown tool: null, which the caller reports as a protocol error (-32602). */
 export async function handleToolCall(
-  env: Env,
+  ctx: CloudContext,
   user: AuthUser,
   name: string,
   args: Record<string, unknown>,
 ): Promise<Record<string, unknown> | null> {
   try {
+    if (name === "xtctx_cloud_search_sessions") {
+      const query = optionalString(args, "query")?.trim();
+      if (!query || query.length > 1000) throw new ArgumentError("query must contain 1 to 1000 characters");
+      const mode = optionalString(args, "mode") ?? "hybrid";
+      if (!["keyword", "semantic", "hybrid"].includes(mode)) throw new ArgumentError("Unsupported search mode");
+      const fmt = format(args);
+      try {
+        const result = await searchMessages(ctx, user.userId, {
+          query,
+          mode,
+          repoUrl: optionalString(args, "repo_url"),
+          limit: clampInt(args, "limit", 1, 25, 10),
+        });
+        if (fmt === "json") return text(JSON.stringify(result, null, 2));
+        if (result.matches.length === 0) {
+          return text(
+            `No matches (${result.effective_mode}${result.fallback ? `; ${result.fallback}` : ""}).`,
+          );
+        }
+        const lines = [
+          `## Search results (${result.effective_mode})`,
+          result.fallback ? `Note: ${result.fallback}` : "",
+          result.coverage
+            ? `Coverage: ${result.coverage.indexed_messages}/${result.coverage.total_messages} messages vectorized.`
+            : "",
+          "",
+        ].filter(Boolean);
+        for (const m of result.matches) {
+          lines.push(
+            `- **${m.tool}** in ${m.repo_url} · \`${m.session_ref}\` (#${m.message_index}, ${m.timestamp})`,
+            `  > ${oneLine(m.excerpt).slice(0, 240)}`,
+          );
+        }
+        return text(lines.join("\n"));
+      } catch (error) {
+        return { isError: true, ...text(error instanceof Error ? error.message : "Search unavailable") };
+      }
+    }
+
     if (name === "xtctx_cloud_recent_sessions") {
       const fmt = format(args);
-      const sessions = await getRecentSessions(env, user.userId, {
+      const sessions = await getRecentSessions(ctx, user.userId, {
         repoUrl: optionalString(args, "repo_url"),
         limit: clampInt(args, "limit", 1, 25, 5),
         toolFilter: optionalStrings(args, "tool_filter"),
@@ -205,9 +241,12 @@ export async function handleToolCall(
       const fmt = format(args);
       const offset = clampInt(args, "offset", 0, Number.MAX_SAFE_INTEGER, 0);
       const limit = clampInt(args, "limit", 1, 100, 50);
-      const { session, messages } = await getSessionMessages(env, user.userId, sessionRef, { offset, limit });
+      const { session, messages } = await getSessionMessages(ctx, user.userId, sessionRef, { offset, limit });
       if (!session) {
-        return { isError: true, ...text(`Session '${sessionRef}' not found. Use a session_ref from xtctx_cloud_recent_sessions.`) };
+        return {
+          isError: true,
+          ...text(`Session '${sessionRef}' not found. Use a session_ref from xtctx_cloud_recent_sessions.`),
+        };
       }
       const page = { offset, returned: messages.length, total: session.message_count };
       if (fmt === "json") {
@@ -230,7 +269,7 @@ export async function handleToolCall(
 
     if (name === "xtctx_cloud_status") {
       const fmt = format(args);
-      const rows = await getUploadStatus(env, user.userId, optionalString(args, "repo_url"));
+      const rows = await getUploadStatus(ctx, user.userId, optionalString(args, "repo_url"));
       if (fmt === "json") return text(JSON.stringify(rows, null, 2));
       if (rows.length === 0) {
         return text(
@@ -253,58 +292,51 @@ export async function handleToolCall(
 }
 
 export interface RpcOutcome {
-  /** HTTP status for the HTTP transport. */
   status: number;
-  /** JSON-RPC message to send back, or null for none (a notification). */
   body: Record<string, unknown> | null;
 }
 
-const error = (status: number, id: unknown, code: number, message: string, data?: unknown): RpcOutcome => ({
+const rpcError = (status: number, id: unknown, code: number, message: string, data?: unknown): RpcOutcome => ({
   status,
   body: { jsonrpc: "2.0", id: id ?? null, error: data === undefined ? { code, message } : { code, message, data } },
 });
 
-/** Base64 sentinel decoding for mirrored header values (`=?base64?...?=`). */
 function decodeHeaderValue(value: string): string {
   const m = /^=\?base64\?([A-Za-z0-9+/=]*)\?=$/.exec(value);
   if (!m) return value;
   try {
-    return new TextDecoder().decode(Uint8Array.from(atob(m[1]), (c) => c.charCodeAt(0)));
+    return Buffer.from(m[1], "base64").toString("utf8");
   } catch {
     return "\u0000invalid";
   }
 }
 
-const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+const isObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
 
-/**
- * Handle one parsed JSON-RPC message. `headers` is given for Streamable HTTP,
- * whose modern-era header checks it enables; the SSE transport passes none.
- */
 export async function processMessage(
-  env: Env,
+  ctx: CloudContext,
   user: AuthUser,
   message: unknown,
   headers?: Headers,
 ): Promise<RpcOutcome> {
   if (!isObject(message) || message.jsonrpc !== "2.0") {
-    return error(400, null, ERR.invalidRequest, "Invalid Request: expected a single JSON-RPC 2.0 object");
+    return rpcError(400, null, ERR.invalidRequest, "Invalid Request: expected a single JSON-RPC 2.0 object");
   }
   const { id, method } = message;
 
   if (typeof method !== "string") {
-    // A response from the client (to nothing we sent) is accepted and dropped.
     if ("result" in message || "error" in message) return { status: 202, body: null };
-    return error(400, id, ERR.invalidRequest, "Invalid Request: missing method");
+    return rpcError(400, id, ERR.invalidRequest, "Invalid Request: missing method");
   }
-  // Any notification: accepted, never answered.
   if (!("id" in message)) return { status: 202, body: null };
   if (!(typeof id === "string" || (typeof id === "number" && Number.isInteger(id)))) {
-    return error(400, null, ERR.invalidRequest, "Invalid Request: id must be a string or an integer");
+    return rpcError(400, null, ERR.invalidRequest, "Invalid Request: id must be a string or an integer");
   }
   if (message.params !== undefined && !isObject(message.params)) {
-    return error(400, id, ERR.invalidRequest, "Invalid Request: params must be an object");
+    return rpcError(400, id, ERR.invalidRequest, "Invalid Request: params must be an object");
   }
+
   const params = (message.params ?? {}) as Record<string, unknown>;
   const meta = isObject(params._meta) ? params._meta : {};
   const metaVersion = meta[META_VERSION];
@@ -316,37 +348,47 @@ export async function processMessage(
 
   if (modern) {
     if (typeof metaVersion !== "string") {
-      return error(400, id, ERR.invalidParams, `Missing _meta["${META_VERSION}"]`);
+      return rpcError(400, id, ERR.invalidParams, `Missing _meta["${META_VERSION}"]`);
     }
     if (headers && headerVersion === null) {
-      return error(400, id, ERR.headerMismatch, "Header mismatch: MCP-Protocol-Version header is required");
+      return rpcError(400, id, ERR.headerMismatch, "Header mismatch: MCP-Protocol-Version header is required");
     }
     if (headers && headerVersion !== metaVersion) {
-      return error(400, id, ERR.headerMismatch, `Header mismatch: MCP-Protocol-Version '${headerVersion}' does not match body '${metaVersion}'`);
+      return rpcError(
+        400,
+        id,
+        ERR.headerMismatch,
+        `Header mismatch: MCP-Protocol-Version '${headerVersion}' does not match body '${metaVersion}'`,
+      );
     }
     if (!MODERN_VERSIONS.includes(metaVersion)) {
-      return error(400, id, ERR.unsupportedVersion, "Unsupported protocol version", {
+      return rpcError(400, id, ERR.unsupportedVersion, "Unsupported protocol version", {
         supported: [...MODERN_VERSIONS, ...LEGACY_VERSIONS],
         requested: metaVersion,
       });
     }
     if (!isObject(meta[META_CAPABILITIES])) {
-      return error(400, id, ERR.invalidParams, `Missing _meta["${META_CAPABILITIES}"]`);
+      return rpcError(400, id, ERR.invalidParams, `Missing _meta["${META_CAPABILITIES}"]`);
     }
     if (headers) {
       const headerMethod = headers.get("Mcp-Method");
       if (headerMethod !== method) {
-        return error(400, id, ERR.headerMismatch, `Header mismatch: Mcp-Method '${headerMethod ?? ""}' does not match body '${method}'`);
+        return rpcError(
+          400,
+          id,
+          ERR.headerMismatch,
+          `Header mismatch: Mcp-Method '${headerMethod ?? ""}' does not match body '${method}'`,
+        );
       }
       if (method === "tools/call") {
         const headerName = headers.get("Mcp-Name");
         if (headerName === null || decodeHeaderValue(headerName) !== params.name) {
-          return error(400, id, ERR.headerMismatch, "Header mismatch: Mcp-Name does not match params.name");
+          return rpcError(400, id, ERR.headerMismatch, "Header mismatch: Mcp-Name does not match params.name");
         }
       }
     }
   } else if (headerVersion !== null && !LEGACY_VERSIONS.includes(headerVersion)) {
-    return error(400, id, ERR.invalidRequest, `Unsupported MCP-Protocol-Version '${headerVersion}'`);
+    return rpcError(400, id, ERR.invalidRequest, `Unsupported MCP-Protocol-Version '${headerVersion}'`);
   }
 
   const reply = (result: Record<string, unknown>): RpcOutcome => ({
@@ -381,48 +423,42 @@ export async function processMessage(
       return reply(modern ? { tools: MCP_TOOLS, ...CACHE_PUBLIC } : { tools: MCP_TOOLS });
     case "tools/call": {
       const name = params.name;
-      if (typeof name !== "string") return error(modern ? 400 : 200, id, ERR.invalidParams, "params.name is required");
+      if (typeof name !== "string") return rpcError(modern ? 400 : 200, id, ERR.invalidParams, "params.name is required");
       if (params.arguments !== undefined && !isObject(params.arguments)) {
-        return error(modern ? 400 : 200, id, ERR.invalidParams, "params.arguments must be an object");
+        return rpcError(modern ? 400 : 200, id, ERR.invalidParams, "params.arguments must be an object");
       }
       try {
-        const result = await handleToolCall(env, user, name, (params.arguments ?? {}) as Record<string, unknown>);
-        if (!result) return error(modern ? 400 : 200, id, ERR.invalidParams, `Unknown tool: ${name}`);
+        const result = await handleToolCall(ctx, user, name, (params.arguments ?? {}) as Record<string, unknown>);
+        if (!result) return rpcError(modern ? 400 : 200, id, ERR.invalidParams, `Unknown tool: ${name}`);
         return reply(result);
       } catch (err) {
-        // Detail goes to the Worker's log; the caller gets nothing that names
-        // a table or a query.
         console.error(JSON.stringify({ event: "tool_call_failed", tool: name, userId: user.userId, error: String(err) }));
-        return error(200, id, ERR.internal, "Internal error");
+        return rpcError(500, id, ERR.internal, "Internal error");
       }
     }
     default:
-      // Modern HTTP answers an unknown method with 404, which tells it apart
-      // from a legacy server's 404 for a missing endpoint.
-      return error(modern && headers ? 404 : 200, id, ERR.methodNotFound, `Method not found: ${method}`);
+      return rpcError(modern && headers ? 404 : 200, id, ERR.methodNotFound, `Method not found: ${method}`);
   }
 }
 
-/** Streamable HTTP (`POST /mcp`): one JSON-RPC message per request. */
-export async function handleMcpPost(env: Env, user: AuthUser, request: Request, bodyText: string): Promise<Response> {
+export async function handleMcpPost(ctx: CloudContext, user: AuthUser, request: Request, bodyText: string): Promise<Response> {
   let parsed: unknown;
   try {
     parsed = JSON.parse(bodyText);
   } catch {
-    return json(400, { jsonrpc: "2.0", id: null, error: { code: ERR.parse, message: "Parse error" } });
+    return Response.json({ jsonrpc: "2.0", id: null, error: { code: ERR.parse, message: "Parse error" } }, { status: 400 });
   }
   if (Array.isArray(parsed)) {
-    return json(400, {
-      jsonrpc: "2.0",
-      id: null,
-      error: { code: ERR.invalidRequest, message: "Invalid Request: JSON-RPC batches are not supported" },
-    });
+    return Response.json(
+      {
+        jsonrpc: "2.0",
+        id: null,
+        error: { code: ERR.invalidRequest, message: "Invalid Request: JSON-RPC batches are not supported" },
+      },
+      { status: 400 },
+    );
   }
-  const outcome = await processMessage(env, user, parsed, request.headers);
+  const outcome = await processMessage(ctx, user, parsed, request.headers);
   if (!outcome.body) return new Response(null, { status: 202 });
-  return json(outcome.status, outcome.body);
-}
-
-function json(status: number, body: unknown): Response {
-  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+  return Response.json(outcome.body, { status: outcome.status });
 }

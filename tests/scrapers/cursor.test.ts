@@ -316,6 +316,16 @@ describe("CursorScraper reading conversations no workspace lists", () => {
     await rm(stateDir, { recursive: true, force: true });
   });
 
+  it("includes personal orphan chats only with explicit machine collection", async () => {
+    addOrphan("personal", undefined, "personal fixture");
+    for (const enabled of [false, true]) {
+      const scraper = new CursorScraper(join(rootDir, "workspaceStorage"), stateDir, undefined, enabled);
+      const chunks: CursorChunk[] = [];
+      for await (const chunk of scraper.fullSync()) chunks.push(chunk);
+      expect(chunks.map(chunk => chunk.content)).toEqual(enabled ? ["personal fixture"] : []);
+    }
+  });
+
   it("reads one whose recorded file is inside the project", async () => {
     addOrphan("orphan-mine", join(projectRoot, "src", "index.ts"), "a turn worth keeping");
 

@@ -3,6 +3,7 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { isRecord, pathExists, writeIfChanged } from "./file-io.js";
 import { installClaudeHook } from "./claude-settings.js";
+import { installCursorHook } from "./cursor-hooks.js";
 import { memoryTargets, renderManagedBlock, upsertManagedBlock } from "./instruction-blocks.js";
 import { publishedServerDefinition, xtctxServerDefinition } from "./server-definition.js";
 import { isGlobalOnlyMcpTool, syncToolMcpConfigs } from "./mcp-config.js";
@@ -212,6 +213,18 @@ export async function setupProject(options: SetupOptions = {}): Promise<SetupRes
     });
   }
 
+  if (!disabled.has("cursor")) {
+    const cursorHook = await installCursorHook(projectRoot);
+    if (cursorHook.failure) {
+      failures.push(cursorHook.failure);
+    }
+    writes.push({
+      path: join(projectRoot, ".cursor", "hooks.json"),
+      kind: "hook:cursor",
+      changed: cursorHook.changed,
+    });
+  }
+
   // The half setup cannot do. Claude Code ignores `permissions.allow` outright
   // in a workspace the user has not trusted, so the grants written above are
   // inert until someone accepts the trust dialog. Trusting a directory is a
@@ -285,6 +298,7 @@ export function describeSetupPlan(
     { path: join(projectRoot, ".cursor", "rules", "xtctx.mdc"), kind: "memory:cursor" },
     { path: join(projectRoot, ".github", "copilot-instructions.md"), kind: "memory:copilot" },
     { path: join(projectRoot, ".claude", "settings.json"), kind: "hook:claude-code" },
+    { path: join(projectRoot, ".cursor", "hooks.json"), kind: "hook:cursor" },
   ];
 
   for (const skillId of skillIds) {

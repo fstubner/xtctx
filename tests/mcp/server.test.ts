@@ -11,6 +11,7 @@ describe("MCP Server", () => {
       "xtctx_search_sessions",
       "xtctx_continuity_status",
       "xtctx_handoff_manifest",
+      "xtctx_skill_usage",
     ]);
 
     expect(toolNames).not.toContain("xtctx_last_session_brief");

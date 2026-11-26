@@ -14,6 +14,8 @@ import type {
   SessionSearchMode,
   SessionService,
   SessionSummary,
+  SkillUsageQueryOptions,
+  SkillUsageStat,
 } from "./types.js";
 import { cosineSimilarity, deserializeVector } from "./vector.js";
 import { semanticOffMessage } from "./null-embeddings.js";
@@ -432,6 +434,120 @@ export class SqliteHandoffIndex implements SessionService {
    * is four seconds added to every agent startup. Priming with slightly
    * stale context instantly beats priming with fresh context late.
    */
+  /**
+   * Aggregate skill invocations recorded in message metadata across sessions
+   * in this project.
+   */
+  async getSkillUsage(options: SkillUsageQueryOptions = {}): Promise<SkillUsageStat[]> {
+    if (options.refresh) {
+      await this.refresh({ toolFilter: options.tool ? [options.tool] : undefined });
+    } else {
+      await this.whenReady();
+    }
+    const db = this.getDb();
+
+    let sinceIso: string | undefined;
+    if (options.days !== undefined && options.days > 0) {
+      sinceIso = new Date(Date.now() - options.days * 86_400_000).toISOString();
+    } else if (options.since) {
+      sinceIso = typeof options.since === "string" ? options.since : options.since.toISOString();
+    }
+
+    const clauses: string[] = [
+      `${PROJECT_ROOT_SQL.replace("project_root", "s.project_root")} = ?`,
+      `m.metadata_json LIKE '%"skills":%'`,
+    ];
+    const params: unknown[] = [this.scopedRoot];
+
+    const tool = options.tool ?? options.agent;
+    if (tool) {
+      clauses.push(`m.tool = ?`);
+      params.push(tool);
+    }
+
+    if (sinceIso) {
+      clauses.push(`m.timestamp >= ?`);
+      params.push(sinceIso);
+    }
+
+    const where = clauses.join(" AND ");
+    const rows = db
+      .prepare(
+        `SELECT m.timestamp, m.tool, m.session_ref, m.metadata_json
+         FROM messages m
+         JOIN sessions s ON m.session_ref = s.session_ref
+         WHERE ${where}
+         ORDER BY m.timestamp DESC`,
+      )
+      .all(...params) as Array<{
+        timestamp: string;
+        tool: string;
+        session_ref: string;
+        metadata_json: string;
+      }>;
+
+    const skillMap = new Map<
+      string,
+      {
+        total_count: number;
+        last_used_at: string;
+        by_tool: Record<string, number>;
+        sessions: Set<string>;
+      }
+    >();
+
+    const targetSkill = options.skill?.trim().toLowerCase();
+
+    for (const row of rows) {
+      let meta: { skills?: unknown };
+      try {
+        meta = JSON.parse(row.metadata_json);
+      } catch {
+        continue;
+      }
+      if (!Array.isArray(meta?.skills)) continue;
+
+      for (const rawSkill of meta.skills) {
+        if (typeof rawSkill !== "string") continue;
+        const skillName = rawSkill.trim();
+        if (!skillName) continue;
+        if (targetSkill && skillName.toLowerCase() !== targetSkill) continue;
+
+        let entry = skillMap.get(skillName);
+        if (!entry) {
+          entry = {
+            total_count: 0,
+            last_used_at: row.timestamp,
+            by_tool: {},
+            sessions: new Set<string>(),
+          };
+          skillMap.set(skillName, entry);
+        }
+
+        entry.total_count += 1;
+        entry.by_tool[row.tool] = (entry.by_tool[row.tool] ?? 0) + 1;
+        entry.sessions.add(row.session_ref);
+        if (row.timestamp > entry.last_used_at) {
+          entry.last_used_at = row.timestamp;
+        }
+      }
+    }
+
+    const result: SkillUsageStat[] = [];
+    for (const [skill, data] of skillMap.entries()) {
+      result.push({
+        skill,
+        total_count: data.total_count,
+        last_used_at: data.last_used_at,
+        by_tool: data.by_tool,
+        session_count: data.sessions.size,
+      });
+    }
+
+    result.sort((a, b) => b.total_count - a.total_count || a.skill.localeCompare(b.skill));
+    return result;
+  }
+
   async listIndexedSessions(limit: number): Promise<SessionSummary[]> {
     await this.whenReady();
     const db = this.getDb();
@@ -737,12 +853,12 @@ export class SqliteHandoffIndex implements SessionService {
       summary.messagesAdded += result.messagesAdded;
       if (result.created) {
         summary.sessionsAdded += 1;
-      } else if (result.messagesAdded > 0) {
+      } else if (result.messagesAdded > 0 || (result.messagesUpdated ?? 0) > 0) {
         summary.sessionsUpdated += 1;
       } else {
         summary.sessionsUnchanged += 1;
       }
-      if (result.created || result.messagesAdded > 0) {
+      if (result.created || result.messagesAdded > 0 || (result.messagesUpdated ?? 0) > 0) {
         changed.push(session.session_ref);
       }
     }

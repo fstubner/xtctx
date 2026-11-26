@@ -39,8 +39,7 @@ updates:
       - dependency-name: typescript
         versions: [">=7.0.0"]
 
-  # The Worker: wrangler, workers-types and the OAuth provider move often, and
-  # the provider is security-relevant.
+  # Cloud server and worker (pg, transformers, build/test tooling).
   - package-ecosystem: npm
     directory: /cloud
     schedule:

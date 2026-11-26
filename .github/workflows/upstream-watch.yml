@@ -10,7 +10,7 @@ name: upstream-watch
 
 on:
   schedule:
-    - cron: "30 6 * * *" # 06:30 UTC daily
+    - cron: "30 6 */3 * *" # 06:30 UTC every 72 hours (every 3rd day)
   workflow_dispatch:
 
 permissions:
@@ -96,15 +96,23 @@ jobs:
           fi
           echo "count=${found}" >> "$GITHUB_OUTPUT"
 
-      - name: Open an issue
+      - name: Upsert single open upstream issue
         if: steps.check.outputs.exit_code == '10' && steps.existing.outputs.count == '0'
-        uses: peter-evans/create-issue-from-file@fca9117c27cdc29c6c4db3b86c48e4115a786710 # v6.0.0
-        with:
-          title: ${{ steps.title.outputs.value }}
-          content-filepath: issue-body.md
-          labels: |
-            drift
-            upstream
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TITLE: ${{ steps.title.outputs.value }}
+        run: |
+          set -euo pipefail
+          mapfile -t open_issues < <(gh issue list --state open --label upstream --json number --jq 'sort_by(.number) | reverse | .[].number')
+          if [ "${#open_issues[@]}" -gt 0 ]; then
+            primary="${open_issues[0]}"
+            gh issue edit "$primary" --title "$TITLE" --body-file issue-body.md
+            for extra in "${open_issues[@]:1}"; do
+              gh issue close "$extra" --comment "Consolidated into #${primary}."
+            done
+          else
+            gh issue create --title "$TITLE" --body-file issue-body.md --label drift --label upstream
+          fi
 
       - name: Note when a release is pending but already reported
         if: steps.check.outputs.exit_code == '10' && steps.existing.outputs.count != '0'

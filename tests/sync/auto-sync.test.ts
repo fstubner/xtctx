@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startAutoSync } from "@xtctx/sync/auto-sync";
 import { NotOptedInError, type DiffSyncResult } from "@xtctx/sync/diff-sync";
 
-const result = (n: number): DiffSyncResult => ({ syncedCount: n, sessionCount: n ? 1 : 0, skipped: [], upToDate: n === 0, busy: false });
+const result = (n: number): DiffSyncResult => ({ syncedCount: n, sessionCount: n ? 1 : 0, redactedCount: 0, skipped: [], upToDate: n === 0, busy: false });
 
 describe("auto sync", () => {
   beforeEach(() => vi.useFakeTimers());

@@ -1,9 +1,10 @@
+import {validateAttachmentRefs} from "../web/claude-content.js";
 /**
  * What a message looks like on its way to xtctx cloud.
  *
  * The limits mirror the server's (cloud/src/db.ts `LIMITS`). The client stays
- * under them on its own, so a refusal only happens when the two disagree,
- * and then the sync skips the one message and carries on.
+ * under them on its own. Large content negotiates self-hosted limits; refusals
+ * retain the local original and leave the durable sync checkpoint unchanged.
  */
 export const UPLOAD_LIMITS = {
   maxBodyBytes: 1024 * 1024,
@@ -29,6 +30,10 @@ export const UPLOAD_LIMITS = {
  */
 const UPLOADED_METADATA_KEYS = [
   "messageIndex",
+  // Archive provenance and extraction limitations; raw tool arguments stay local.
+  "source_provider", "source_namespace", "source_message_id", "source_channel",
+  "source_parent_session_id", "tool_call_id", "tool_name", "tool_calls_omitted",
+  "sourceFormat", "mayIncludeInjectedContext", "nonTextParts",
   "tokenEstimate",
   "toolCalls",
   "toolName",
@@ -43,8 +48,15 @@ const UPLOADED_METADATA_KEYS = [
   "costUsd",
   "gitBranch",
   "gitCommit",
+  "skills",
   "subagent",
   "subagentType",
+  // Web provenance is needed to distinguish branches, revisions and omissions.
+  // Credentials, local paths and attachment payloads remain excluded.
+  "source", "provider_message_id", "provider_conversation_id", "parent_id",
+  "source_role", "source_complete", "timestamp_inferred", "non_text_blocks",
+  "representation", "revision", "untrusted_transcript_data",
+  "content_capture_version", "block_types", "preserved_block_types", "omitted_block_types", "attachment_refs", "attachment_metadata_omitted",
 ] as const;
 
 export const UPLOADED_METADATA_FIELDS: readonly string[] = UPLOADED_METADATA_KEYS;
@@ -72,20 +84,25 @@ export function sanitizeMetadata(json: string | null | undefined): string {
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return "{}";
   const out: Record<string, unknown> = {};
   for (const key of UPLOADED_METADATA_KEYS) {
-    const value = safeValue((parsed as Record<string, unknown>)[key]);
+    const raw = (parsed as Record<string, unknown>)[key];
+    let value: unknown;
+    if(key==="attachment_refs"&&raw!==undefined){try{value=validateAttachmentRefs(raw);}catch{value=undefined;}}else value=safeValue(raw);
     if (value !== undefined) out[key] = value;
   }
-  const text = JSON.stringify(out);
+  if ((parsed as Record<string, unknown>).tool_calls != null) out.tool_calls_omitted = true;
+  let text = JSON.stringify(out);
+  // Keep core provenance when optional attachment descriptors exhaust the
+  // metadata budget, and explicitly count descriptors absent remotely.
+  while (Buffer.byteLength(text) > UPLOAD_LIMITS.maxMetadataBytes && Array.isArray(out.attachment_refs) && out.attachment_refs.length) {
+    out.attachment_refs.pop();
+    out.attachment_metadata_omitted = (typeof out.attachment_metadata_omitted === "number" ? out.attachment_metadata_omitted : 0) + 1;
+    text = JSON.stringify(out);
+  }
   return Buffer.byteLength(text) > UPLOAD_LIMITS.maxMetadataBytes ? "{}" : text;
 }
 
-/** Content cut to the server's per-message limit, with a marker saying so. */
-export function fitContent(content: string): string {
-  const bytes = Buffer.byteLength(content);
-  if (bytes <= UPLOAD_LIMITS.maxMessageBytes) return content;
-  const marker = `\n\n[xtctx: truncated for upload; the original is ${bytes} bytes]`;
-  // A few bytes of slack: cutting inside a multi-byte character leaves a
-  // replacement character, which can be longer than what it replaced.
-  const keep = UPLOAD_LIMITS.maxMessageBytes - Buffer.byteLength(marker) - 4;
-  return Buffer.from(content, "utf-8").subarray(0, keep).toString("utf-8") + marker;
+/** Refuse unsupported content; never replace the remote source with shortened text. */
+export function fitContent(content: string, maximum: number = UPLOAD_LIMITS.maxMessageBytes): string {
+  if(Buffer.byteLength(content)>maximum)throw new Error("Message exceeds negotiated remote limit; original retained locally and sync checkpoint unchanged");
+  return content;
 }

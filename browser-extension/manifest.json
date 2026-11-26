@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "xtctx private web history",
+  "version": "0.1.3",
+  "description": "Private ChatGPT and Claude history sync with client-side secret redaction, plus optional local dev mode.",
+  "icons": {
+    "128": "icons/icon-128.png"
+  },
+  "permissions": [
+    "storage",
+    "scripting"
+  ],
+  "optional_permissions": [
+    "nativeMessaging"
+  ],
+  "optional_host_permissions": [
+    "https://chatgpt.com/*",
+    "https://claude.ai/*",
+    "https://gemini.google.com/*",
+    "https://sync.xtctx.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html"
+  }
+}

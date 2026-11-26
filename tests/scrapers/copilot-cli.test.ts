@@ -25,6 +25,19 @@ describe("CopilotCliScraper", () => {
     await writeFile(join(sessionDir, "events.jsonl"), lines.join("\n") + "\n");
   }
 
+  it("inventories only file-backed source sessions without treating unknown project scope as empty", async () => {
+    await writeSessionEvents("session-a", []);
+    await writeSessionEvents("session-b", ["unsupported or malformed source remains discoverable"]);
+    await mkdir(join(rootDir,"no-events"));
+    await writeFile(join(rootDir,"not-a-session"),"file");
+    expect(await new CopilotCliScraper(rootDir,stateDir).listSessionIds()).toEqual(new Set(["session-a","session-b"]));
+    expect(await new CopilotCliScraper(rootDir,stateDir,"/work/project").listSessionIds()).toBeNull();
+    await rm(join(rootDir,"session-a"),{recursive:true});
+    expect(await new CopilotCliScraper(rootDir,stateDir).listSessionIds()).toEqual(new Set(["session-b"]));
+    expect(await new CopilotCliScraper(join(rootDir,"missing"),stateDir).listSessionIds()).toBeNull();
+    await expect(new CopilotCliScraper(join(rootDir,"not-a-session"),stateDir).listSessionIds()).rejects.toThrow();
+  });
+
   it("returns no chunks when sessions root is missing", async () => {
     const scraper = new CopilotCliScraper(join(rootDir, "missing"), stateDir);
     expect(await scraper.detect()).toBe(false);

@@ -97,7 +97,9 @@ export async function runLogin(options: {
       intervalMs = poll.interval ? poll.interval * 1000 : intervalMs + 5000;
     } else if (poll.error === "not_allowed") {
       throw new Error(
-        "Login failed: this GitHub account is not allowed on this xtctx cloud server (its ALLOWED_GITHUB_IDS does not list it).",
+        poll.detail
+          ? `Login failed: ${poll.detail}`
+          : "Login failed: this GitHub account is not allowed on this xtctx cloud server (its ALLOWED_GITHUB_IDS does not list it).",
       );
     } else if (poll.error && poll.error !== "authorization_pending") {
       throw new Error(`Login failed: ${poll.error}`);

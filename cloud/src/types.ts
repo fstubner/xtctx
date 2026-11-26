@@ -1,31 +1,45 @@
-import type { OAuthHelpers } from "@cloudflare/workers-oauth-provider";
+import type { Pool } from "pg";
 
-export interface Env {
-  DB: D1Database;
-  /** Grants, OAuth tokens and registered clients; owned by workers-oauth-provider. */
-  OAUTH_KV: KVNamespace;
-  /** Set by workers-oauth-provider before a handler runs. */
-  OAUTH_PROVIDER?: OAuthHelpers;
-  /** Holds the open baseline-MCP SSE streams; see sse-session.ts. */
-  SSE: DurableObjectNamespace;
-  /**
-   * The canonical origin MCP clients reach, e.g. "https://xtctx-sync.example.com".
-   * The MCP resource is `${PUBLIC_URL}/mcp`, and every token is bound to it.
-   */
-  PUBLIC_URL: string;
-  GITHUB_CLIENT_ID: string;
-  /** Needed only for the browser sign-in (`/authorize`); the CLI's device flow works without it. */
-  GITHUB_CLIENT_SECRET?: string;
-  /** Required. Requests are refused with a 500 while it is unset. */
-  JWT_SECRET?: string;
-  /**
-   * Comma-separated numeric GitHub user ids allowed to sign in. Unset or empty
-   * means nobody: the server fails closed.
-   */
-  ALLOWED_GITHUB_IDS?: string;
-  /** Comma-separated browser origins to send CORS headers to. Unset means none. */
-  ALLOWED_ORIGINS?: string;
-  ENVIRONMENT?: string;
+export interface Embedder {
+  readonly provider: string;
+  readonly model: string;
+  readonly dimensions: number;
+  embed(texts: string[]): Promise<number[][]>;
+}
+
+export interface UploadLimits {
+  maxBodyBytes: number;
+  maxMessageBytes: number;
+  maxMetadataBytes: number;
+  maxSessionsPerRequest: number;
+  maxMessagesPerRequest: number;
+}
+
+export interface DashboardAssets {
+  html: string;
+  css: string;
+  js: string;
+}
+
+export interface CloudContext {
+  pool: Pool;
+  appRole?: string;
+  embedder: Embedder | null;
+  embedOnUpload?: boolean;
+  embedOnUploadMaxJobs?: number;
+  embedOnUploadBudgetMs?: number;
+  publicUrl: string;
+  jwtSecret?: string;
+  githubClientId: string;
+  githubClientSecret?: string;
+  allowedGithubIds?: string;
+  allowedOrigins?: string;
+  stripeSecretKey?: string;
+  stripeWebhookSecret?: string;
+  stripePriceId?: string;
+  hostedMessageQuota?: number;
+  uploadLimits: UploadLimits;
+  dashboardAssets?: DashboardAssets;
 }
 
 export interface AuthUser {
@@ -36,7 +50,7 @@ export interface AuthUser {
 
 /** The MCP tools. */
 export const SCOPE_READ = "read";
-/** POST /api/stream. Only the CLI's own login carries it. */
+/** POST /api/stream, POST /api/coverage, POST /api/tokens. */
 export const SCOPE_SYNC_WRITE = "sync:write";
 /** DELETE /api/me. Only the CLI's own login carries it. */
 export const SCOPE_ACCOUNT_DELETE = "account:delete";

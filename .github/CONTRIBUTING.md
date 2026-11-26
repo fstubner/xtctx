@@ -8,13 +8,28 @@ Thanks for contributing.
 2. Install dependencies:
    - `npm ci`
    - `npm --prefix site ci`
+   - `npm --prefix cloud ci`
 3. Build:
    - `npm run build`
    - `npm run site:build`
 
 ## Local Validation
 
-Before opening a PR, run:
+Before pushing or opening a PR, run `npm run ci:local`. This runs the same
+portable, checks and semantic lanes that hosted CI runs. A single lane is useful
+while iterating (`npm run ci:local -- --lane portable`), but is not the full gate.
+
+To run the full `cloud/` Postgres + `pgvector` integration tests locally in the semantic
+lane, start `pgvector/pgvector:pg17` (e.g., `docker compose -f cloud/docker-compose.yml up -d postgres`)
+and set `TEST_DATABASE_URL=postgresql://xtctx:xtctx@127.0.0.1:5432/xtctx`. Without it,
+`ci:local` still runs the `cloud/` unit semantic checks (`test:semantic`).
+On Windows, release-script fixtures use Git for Windows Bash; `XTCTX_TEST_BASH`
+can select its executable explicitly. The System32 WSL launcher is not suitable.
+Hosted CI additionally covers Linux, macOS and Windows. Local CI never publishes,
+deploys, pushes or touches production services. Dependency audits and the existing
+retrieval eval may need network access and an embedding-model cache.
+
+The individual checks remain available:
 
 - `npm run lint`
 - `npm test`
@@ -33,9 +48,11 @@ Or run everything with:
 ## Project Layout
 
 - `src/`: CLI, MCP, setup/status, local handoff index, and transcript scrapers
+- `cloud/`: optional Node 24 + PostgreSQL 17 (`pgvector`) sync server, MCP OAuth 2.1, dashboard, and async worker
+- `browser-extension/`: optional Chrome extension for web chat history capture
 - `tests/`: scraper, setup, MCP, security, integration, and drift tests
 - `site/`: the xtctx.com site, built on product-site-template (`npm run site:dev` to preview it)
-- `docs/`: security docs and historical design notes
+- `docs/`: security docs and design notes
 
 ## Pull Request Guidelines
 

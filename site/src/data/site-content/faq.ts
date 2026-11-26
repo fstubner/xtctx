@@ -34,7 +34,7 @@ export const faq: FaqItem[] = [
   {
     group: 'Setup',
     q: 'Does xtctx run a background service?',
-    a: 'No. Each MCP client starts its own xtctx MCP server, which indexes when it starts and when it is called, and stops when the client exits. There is no daemon, API server, dashboard or watcher.',
+    a: 'Not for local handoff. Each MCP client starts its own xtctx stdio server when needed and exits when the client disconnects. If you opt into remote sync, you deploy the separate cloud server yourself.',
   },
   {
     group: 'Setup',
@@ -53,9 +53,9 @@ export const faq: FaqItem[] = [
   {
     group: 'Data',
     q: 'Does anything leave my machine?',
-    a: 'Not by default. Search runs on this machine. Two opt-ins send transcript text elsewhere: a remote OpenAI-compatible embedding endpoint set in a project’s config, and self-hosted cloud sync, which uploads a project to your own server only after you run xtctx login and xtctx sync enable.',
+    a: 'Not by default. Search runs on this machine. Two opt-ins send transcript text elsewhere: a remote OpenAI-compatible embedding endpoint set in a project’s config, and cloud sync, which uploads an opted-in project only after you log in and enable sync. High-confidence secrets are redacted on your device before upload, with optional PII scrubbing in .xtctx/config.yaml.',
     aHtml:
-      'Not by default. Search runs on this machine. Two opt-ins send transcript text elsewhere: a remote OpenAI-compatible embedding endpoint set in a project’s config, and <a href="https://github.com/fstubner/xtctx/blob/main/docs/cloud-sync.md">self-hosted cloud sync</a>, which uploads a project to your own server only after you run <code>xtctx login</code> and <code>xtctx sync enable</code>.',
+      'Not by default. Search runs on this machine. Two opt-ins send transcript text elsewhere: a remote OpenAI-compatible embedding endpoint set in a project’s config, and <a href="https://github.com/fstubner/xtctx/blob/main/docs/cloud-sync.md">cloud sync</a>, which uploads an opted-in project only after you log in and enable sync. High-confidence secrets are redacted on your device before upload, with optional PII scrubbing in <code>.xtctx/config.yaml</code>.',
   },
   {
     group: 'Data',
@@ -70,5 +70,19 @@ export const faq: FaqItem[] = [
     a: 'Yes. xtctx is MIT licensed and published at github.com/fstubner/xtctx.',
     aHtml:
       'Yes. xtctx is MIT licensed and published at <a href="https://github.com/fstubner/xtctx">github.com/fstubner/xtctx</a>.',
+  },
+  {
+    group: 'Cloud sync',
+    q: 'How do I sync coding agent context across multiple machines?',
+    a: 'Run xtctx login --sync-url followed by xtctx sync enable in the projects you choose. You can self-host the included cloud package with Docker Compose (Node 24 and PostgreSQL 17 with pgvector) under the MIT license, with secret redaction running on your device before upload. Managed cloud hosting is not live yet; request early-access updates at github.com/fstubner/xtctx/issues. See /privacy/ for details.',
+    aHtml:
+      'Run <code>xtctx login --sync-url</code> followed by <code>xtctx sync enable</code> in the projects you choose. You can self-host the included <a href="https://github.com/fstubner/xtctx/tree/main/cloud">cloud/</a> package with Docker Compose (Node 24 and PostgreSQL 17 with pgvector) under the MIT license, with secret redaction running on your device before upload. Managed cloud hosting is not live yet: <a href="https://github.com/fstubner/xtctx/issues/new?labels=enhancement&title=Managed+Cloud+Early+Access">request early-access updates</a>. See <a href="/privacy/">Privacy and Terms</a>.',
+  },
+  {
+    group: 'Cloud sync',
+    q: 'Can xtctx index ChatGPT, Claude web, or GitHub Issues and PRs?',
+    a: 'Yes. Run xtctx import-github inside a project to index repository issues, pull requests, and comments locally, or xtctx import-web for ChatGPT and Claude export archives. An optional Chrome extension can also capture web chats on those sites and send redacted snapshots to your configured sync server or local native host.',
+    aHtml:
+      'Yes. Run <code>xtctx import-github</code> inside a project to index repository issues, pull requests, and comments locally, or <code>xtctx import-web</code> for ChatGPT and Claude export archives. An optional Chrome extension can also capture web chats on those sites and send redacted snapshots to your configured sync server or local native host.',
   },
 ];

@@ -1,8 +1,8 @@
 # Cloud sync
 
-Optional, self-hosted, and opt-in per project. There is no xtctx cloud service: sync talks only to a server you deploy yourself (see [Server](#server)). xtctx stays local unless you have that server and do both of these:
+Optional, opt-in per project, and self-hostable (with an upcoming early-access Hosted Sync option). Sync talks only to the server URL you explicitly configure (see [Server](#server) and [`cloud/`](../cloud/README.md)). High-confidence secrets are redacted client-side (best effort) before upload, with optional PII scrubbing in `.xtctx/config.yaml`. xtctx stays local unless you do both of these:
 
-1. **Log in:** `xtctx login --sync-url <your server's URL>` signs you in with GitHub and stores a token, and the URL, in your home directory. It uploads nothing. Without `--sync-url` (or `XTCTX_SYNC_URL`) it refuses: there is no default server.
+1. **Log in:** `xtctx login --sync-url <server URL>` signs you in with GitHub and stores a token, and the URL, in your home directory. It uploads nothing. Without `--sync-url` (or `XTCTX_SYNC_URL`) it refuses: there is no implicit default server in the CLI.
 2. **Opt a project in:** `xtctx sync enable`, run in that project. Each project is its own decision.
 
 Either one alone sends nothing. `XTCTX_TOKEN` in the environment counts as logging in, not as opting in.
@@ -83,4 +83,4 @@ A client without OAuth support can send a token from `xtctx sync token` as an `A
 
 ## Server
 
-xtctx does not run a hosted server, so cloud sync works only against one you run. Deploy the Worker in [`cloud/`](../cloud/README.md) to your own Cloudflare account (the README there has the steps, including a git-ignored `wrangler.local.toml` for your own domain and ids), list your GitHub account in its `ALLOWED_GITHUB_IDS`, and point `xtctx login --sync-url` at it. The sync URL must be `https`; plain `http` is accepted only for `localhost`. Only the GitHub accounts the server's operator lists can sign in, and that operator is you.
+xtctx's CLI does not configure a default server, so cloud sync works only against one you run or configure. Deploy [`cloud/`](../cloud/README.md) (Node 24 + PostgreSQL 17 with `pgvector`) with Docker Compose or your own PaaS + Postgres provider, list your GitHub account in its `ALLOWED_GITHUB_IDS` (or enable Stripe billing), and point `xtctx login --sync-url` at it. The sync URL must be `https`; plain `http` is accepted only for `localhost`.

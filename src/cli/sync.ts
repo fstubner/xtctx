@@ -9,6 +9,9 @@ const WATCH_INTERVAL_MS = 10_000;
 function describe(result: DiffSyncResult): string {
   if (result.busy) return "Another xtctx process is uploading this project right now; it will pick up these changes.";
   const lines = [result.syncedCount === 0 ? "Cloud sync is up to date." : `Sent ${result.syncedCount} message(s) from ${result.sessionCount} session(s) to xtctx cloud.`];
+  if (result.redactedCount > 0) {
+    lines.push(`Redacted ${result.redactedCount} secret/PII match(es) before upload (local index unchanged).`);
+  }
   for (const s of result.skipped) lines.push(`Skipped message ${s.messageId} in ${s.sessionRef}: ${s.reason}.`);
   return lines.join("\n");
 }

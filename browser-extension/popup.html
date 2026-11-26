@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>xtctx web history</title><link rel="stylesheet" href="popup.css"></head><body class="popup">
+<header><span class="brand">xtctx <span>Web history</span></span><h1>Your web history.</h1><p class="muted">Import older chats. Save new conversations as you browse.</p></header>
+<main><section aria-labelledby="backfill"><h2 id="backfill">Import existing history</h2><p>Fetch ChatGPT and Claude conversations using your website sign-in. No need to open each chat.</p><a class="button primary" href="backfill.html" target="_blank" rel="noopener">Import history <span aria-hidden="true">↗</span></a>
+<details><summary>Use an account export instead</summary><p><a href="https://help.openai.com/en/articles/7260999-exporting-your-chatgpt-history-and-data" target="_blank" rel="noopener noreferrer">Export ChatGPT history</a><br><a href="https://support.claude.com/en/articles/9450526-export-your-claude-data" target="_blank" rel="noopener noreferrer">Export Claude history</a></p><p>Extract <code>conversations.json</code>, then import it with <code>xtctx import-web</code>. The local importer can sync to your configured server.</p></details></section>
+<section aria-labelledby="ongoing"><h2 id="ongoing">Save chats you open <span class="tag">Optional</span></h2><p class="muted">Capture opened conversations on these sites. Older, unopened chats require an import.</p><div class="capture-row"><span>ChatGPT<small id="chatgpt-state">Checking capture…</small></span><button id="chatgpt">Enable capture</button></div><div class="capture-row"><span>Claude<small id="claude-state">Checking capture…</small></span><button id="claude">Enable capture</button></div><p class="muted small">Secrets are redacted on this device before web upload.</p><button id="stop" class="quiet">Stop all capture</button></section>
+<section aria-labelledby="sync-heading"><h2 id="sync-heading">Sync destination</h2>
+<label for="sync-mode">Sync mode</label><select id="sync-mode"><option value="web">Web sync (direct)</option><option value="local">Local native host (dev mode)</option></select>
+<div id="web-sync-fields">
+<label for="sync-url">Sync server URL</label><input id="sync-url" type="url" placeholder="https://your-sync-server.example">
+<label for="sync-token">Sync token (<code>sync:write</code>)</label><input id="sync-token" type="password" placeholder="Paste scoped token"><p class="muted small hint">Mint a scoped token from Dashboard -> Ingestion -> Connect CLI &amp; Extension.</p>
+<label class="checkbox-row"><input id="redact-pii" type="checkbox"><span>Also redact PII (emails, phones, SSNs, cards)</span></label>
+</div>
+<p id="local-sync-note" class="muted small" hidden>Dev mode routes captures to the local <code>io.xtctx.web_history</code> native host and requests <code>nativeMessaging</code> permission on save.</p>
+<div class="actions"><button id="save-sync" type="button">Save sync settings</button><button id="test-sync" type="button" class="quiet">Test</button></div>
+</section>
+<p id="status" class="status" role="status" aria-live="polite"></p></main><script type="module" src="popup.js"></script></body></html>

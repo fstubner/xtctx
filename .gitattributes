@@ -5,3 +5,5 @@
 # that had not moved. The script normalizes line endings too; this keeps the
 # committed form consistent in the first place.
 tests/drift/fingerprints/*.json text eol=lf
+browser-extension/claude-content.js text eol=lf
+browser-extension/redact.js text eol=lf

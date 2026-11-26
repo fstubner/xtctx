@@ -3,9 +3,10 @@
 One npm package, no services on the handoff path. Everything runs in the
 invoking process on the developer's machine. The one exception is optional and
 off by default: cloud sync, which uploads an opted-in project's sessions to a
-separate Worker (`cloud/`) that the user deploys themselves (there is no hosted
-service and no default server) so the same user's agents on other machines can read
-them. Handoff never depends on it. `modules.md` describes module
+separate server (`cloud/` Node + PostgreSQL service) that the user
+deploys themselves or points at an optional early-access Hosted Sync instance
+(there is no implicit default server in the CLI) so the same user's agents on
+other machines can read redacted transcripts. Handoff never depends on it. `modules.md` describes module
 internals; this document fixes the parts, how a handoff actually flows through
 them, the boundaries between them, and what each part is allowed to trust.
 
@@ -58,10 +59,11 @@ them, the boundaries between them, and what each part is allowed to trust.
   seconds and once on shutdown, or from `xtctx sync`; reads the index through
   its own read-only connection; keeps its position per project and account in
   `~/.xtctx/sync/`, never in the index. See `docs/cloud-sync.md`.
-- **Cloud Worker** (`cloud/`) — a separate Cloudflare Worker, not shipped in
-  the npm package, that the user deploys to their own Cloudflare account. Stores uploads in D1 and serves them back over MCP to the
-  same account. Has its own tests (`npm run test:cloud`) and deploy steps
-  (`cloud/README.md`).
+- **Cloud Server** (`cloud/`) — a unified Node 24 + PostgreSQL 17 (`pgvector`)
+  server and async worker, not shipped in the npm package, that the user deploys
+  or points to via `xtctx login --sync-url`. Stores uploads in Postgres (RLS-isolated)
+  and serves them back over MCP and the web dashboard. Has its own tests
+  (`npm run test:cloud`) and deploy steps (`cloud/README.md`).
 - **Site** (`site/`) — static Astro site on GitHub Pages, a subtree of
   product-site-template;
   no runtime relationship to the package.

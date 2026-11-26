@@ -2,6 +2,8 @@ export interface ChunkMetadata {
   messageIndex: number;
   tokenEstimate?: number;
   referencedFiles?: string[];
+  /** Skills detected as invoked or referenced in this chunk. */
+  skills?: string[];
   /**
    * Chunking layer indicating the abstraction level of the content.
    *
@@ -49,6 +51,8 @@ export interface ConversationChunk {
  * record it reads.
  */
 export interface FileCursorContext {
+  /** Desktop response-user fallback chosen from the complete source file. */
+  responseUserFallback?: boolean;
   sessionId: string;
   messageIndex: number;
   projectMatched: boolean;
@@ -106,6 +110,8 @@ export interface EmittedPosition {
 export type IndexProbe = (sessionId: string, messageIndex: number) => boolean;
 
 export interface ScraperState {
+  /** Complete live snapshots already committed for each Antigravity session. */
+  antigravityRuntimeFingerprints?: Record<string, string>;
   lastTimestamp: Date;
   lastOffset?: number;
   lastRowId?: number;
@@ -168,6 +174,7 @@ export interface ConversationScraper<
    * without it is left out of that count rather than guessed at.
    */
   listSessionIds?(): Promise<Set<string> | null>;
+  listCoverageSessions?(): Promise<{ ids: Set<string>; emptyIds: Set<string> } | null>;
 }
 
 export interface ClaudeCodeChunk extends ConversationChunk {

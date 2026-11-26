@@ -45,6 +45,7 @@ interface ToolSourceDefinition {
      * receive; the others ignore it and reconstruct as before.
      */
     projectStoreDir?: string,
+    allLocalSessions?: boolean,
   ) => ConversationScraper;
   memoryTargets: string[];
   hookMode: HookMode;
@@ -69,10 +70,10 @@ export const SUPPORTED_TOOLS: ToolSourceDefinition[] = [
     id: "cursor",
     label: "Cursor",
     defaultStorePath: defaultCursorStorePath,
-    createScraper: (storePath, stateDir, projectRoot) =>
-      new CursorScraper(storePath, stateDir, projectRoot),
+    createScraper: (storePath, stateDir, projectRoot, _projectStoreDir, allLocalSessions) =>
+      new CursorScraper(storePath, stateDir, projectRoot, allLocalSessions),
     memoryTargets: [join(".cursor", "rules", "xtctx.mdc")],
-    hookMode: "instruction-only",
+    hookMode: "executable",
     skillSync: {
       mode: "rule-adapter",
       targetPath: (projectRoot, skillId) => join(projectRoot, ".cursor", "rules", "xtctx-skills", `${skillId}.mdc`),
@@ -153,6 +154,7 @@ export function createDefaultScrapers(
   projectRoot?: string,
   /** Per-tool store directories the tool itself named; see `createScraper`. */
   storeDirs: Record<string, string | undefined> = {},
+  allLocalSessions = false,
 ): ConversationScraper[] {
   return SUPPORTED_TOOLS.map((tool) =>
     tool.createScraper(
@@ -160,6 +162,7 @@ export function createDefaultScrapers(
       stateDir,
       projectRoot,
       storeDirs[tool.id],
+      allLocalSessions,
     ),
   );
 }

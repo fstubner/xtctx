@@ -1,0 +1,15 @@
+.git/
+.venv-ci/
+.xtctx/
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+site/
+coverage/
+tmp/
+.env
+.env.*
+**/__pycache__/
+*.pyc
+*.tsbuildinfo

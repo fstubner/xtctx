@@ -28,6 +28,9 @@ export async function describeCloudSync(projectRoot: string): Promise<string[]> 
   const state = await readAccountState(projectRoot, accountKey(effective.user.id, effective.syncUrl));
   const lines = [`on; uploading as ${effective.user.username} to ${effective.syncUrl}, device "${effective.deviceName}"`];
   lines.push(`last upload: ${state.lastSuccessAt ?? "never"}`);
+  if (typeof state.lastRedactedCount === "number" && state.lastRedactedCount > 0) {
+    lines.push(`last upload redacted ${state.lastRedactedCount} secret/PII match(es) before sending`);
+  }
   if (state.lastError && (!state.lastSuccessAt || (state.lastErrorAt ?? "") > state.lastSuccessAt)) {
     lines.push(`last attempt FAILED at ${state.lastErrorAt}: ${state.lastError}`);
   }

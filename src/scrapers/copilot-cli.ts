@@ -118,6 +118,27 @@ export class CopilotCliScraper extends AbstractScraper<CopilotCliChunk> {
     }
   }
 
+  /** File-backed session identities; project attribution requires reading events. */
+  async listSessionIds(): Promise<Set<string> | null> {
+    if (this.projectRoot) return null;
+    let entries;
+    try { entries = await readdir(this.sessionStateDir, { withFileTypes: true }); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    }
+    const ids = new Set<string>();
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      try {
+        if ((await stat(join(this.sessionStateDir, entry.name, "events.jsonl"))).isFile()) ids.add(entry.name);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+    }
+    return ids;
+  }
+
   getStorePaths(): string[] {
     return [this.sessionStateDir];
   }

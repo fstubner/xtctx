@@ -14,7 +14,8 @@
   },
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
-    "build": "npm run clean && tsc",
+    "build": "node scripts/build-web-content.mjs && npm run clean && tsc",
+    "pack:extension": "node scripts/pack-extension.mjs",
     "dev": "tsx watch src/cli/index.ts",
     "test": "vitest run --exclude=tests/smoke/** --exclude=tests/drift/** --exclude=tests/eval/**",
     "test:security": "vitest run tests/security tests/mcp/hardening.test.ts tests/utils/atomic-file.test.ts tests/utils/project-boundary.test.ts tests/scrapers/copilot-journal-safety.test.ts tests/config/disconnect-unconfigured.test.ts",
@@ -44,14 +45,15 @@
     "check:upstream": "node scripts/check-upstream-versions.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
     "check:review-coverage": "node ./scripts/check-review-coverage.mjs",
-    "check:workflows": "node ./scripts/check-workflows.mjs"
+    "check:workflows": "node ./scripts/check-workflows.mjs",
+    "ci:local": "node scripts/ci-local.mjs"
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "better-sqlite3": "^13.0.3",
     "commander": "^15.0.0",
-    "glob": "^13.0.6",
+    "glob": "^14.0.6",
     "yaml": "^2.9.0"
   },
   "devDependencies": {
@@ -67,7 +69,9 @@
   "overrides": {
     "protobufjs": "^7.5.5",
     "sharp": "^0.35.3",
-    "adm-zip": "^0.6.1"
+    "adm-zip": "^0.6.1",
+    "rolldown": "1.2.14",
+    "vite": "8.3.4"
   },
   "engines": {
     "node": ">=24.0.0"

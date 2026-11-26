@@ -11,7 +11,7 @@ import { openDatabase } from "@xtctx/handoff/schema";
 export function sandbox() {
   // Resolved, as the index stores project roots: on macOS the temp dir is
   // behind /var -> /private/var, and a root seeded unresolved never matches.
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "xtctx-sync-")));
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), "xtctx-sync-")));
   const home = join(root, "home");
   const project = join(root, "project");
   mkdirSync(home);

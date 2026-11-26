@@ -6,6 +6,7 @@ import { NATIVE_MCP_TOOLS, removeMcpServerConfigs, resolveConfigTarget } from ".
 import { BUILT_IN_SKILL_ID, removeSyncedSkillsForTools } from "./skills.js";
 import { SUPPORTED_TOOLS, getToolDefinition, type ToolId } from "../tools/sources.js";
 import { removeClaudeHook, removeClaudeHookFromSettings } from "./claude-settings.js";
+import { removeCursorHook } from "./cursor-hooks.js";
 import { removeManagedBlocksFromFile } from "./instruction-blocks.js";
 import {
   directoryIsEmpty,
@@ -108,6 +109,10 @@ export function describeDisconnectPlan(options: DisconnectOptions = {}): {
     if (tool === "claude-code") {
       writes.push({ path: join(projectRoot, ".claude", "settings.json"), kind: "hook:claude-code" });
       writes.push({ path: join(projectRoot, ".claude", "hooks.json"), kind: "hook:claude-code" });
+    }
+
+    if (tool === "cursor") {
+      writes.push({ path: join(projectRoot, ".cursor", "hooks.json"), kind: "hook:cursor" });
     }
 
     writes.push(...plannedSkillWrites(projectRoot, tool));
@@ -253,6 +258,15 @@ export async function disconnectProject(options: DisconnectOptions = {}): Promis
       kind: "hook:claude-code",
       changed: await removeClaudeHook(legacyHooksPath, projectRoot),
       note: "legacy hook file",
+    });
+  }
+
+  if (tools.includes("cursor")) {
+    const cursorHooksPath = join(projectRoot, ".cursor", "hooks.json");
+    writes.push({
+      path: cursorHooksPath,
+      kind: "hook:cursor",
+      changed: await removeCursorHook(projectRoot),
     });
   }
 
@@ -457,6 +471,7 @@ async function hasXtctxFootprint(projectRoot: string): Promise<boolean> {
   }
   candidates.add(join(projectRoot, ".mcp.json"));
   candidates.add(join(projectRoot, ".cursor", "mcp.json"));
+  candidates.add(join(projectRoot, ".cursor", "hooks.json"));
 
   for (const path of candidates) {
     const content = await readFile(path, "utf-8").catch(() => null);

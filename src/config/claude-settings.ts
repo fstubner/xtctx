@@ -96,6 +96,7 @@ const XTCTX_TOOL_NAMES = [
   "xtctx_search_sessions",
   "xtctx_continuity_status",
   "xtctx_handoff_manifest",
+  "xtctx_skill_usage",
 ] as const;
 
 /**

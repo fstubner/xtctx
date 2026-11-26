@@ -71,9 +71,12 @@ describe("cloud copy across a scraper-version re-read", () => {
   async function scan(): Promise<void> {
     const index = new SqliteHandoffIndex(dbPath, box.project, [
       { tool: "claude-code", scraper: new ClaudeCodeScraper(projects, state) },
-    ]);
+    ], { refreshBudgetMs: 0 });
     try {
       await index.listRecentSessions(5);
+      // Recent-session reads are bounded and may return while scanning. This
+      // migration test needs completed cursors before downgrade/close.
+      await index.whenScanSettled();
     } finally {
       await index.close();
     }
