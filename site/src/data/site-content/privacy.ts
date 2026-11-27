@@ -44,6 +44,6 @@ export const privacyCopy: PrivacyCopy = {
 </ul>
 
 <h2>Contact</h2>
-<p>Privacy questions, deletion questions, or early-access inquiries: open an issue or contact the maintainer via <a href="https://github.com/fstubner/xtctx/issues">github.com/fstubner/xtctx/issues</a>.</p>
+<p>Privacy or deletion questions: open an issue or contact the maintainer via <a href="https://github.com/fstubner/xtctx/issues">github.com/fstubner/xtctx/issues</a>.</p>
 `,
 };

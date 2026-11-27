@@ -50,7 +50,7 @@ Search is keyword only until you run `xtctx embeddings enable`. After that, the 
 
 ## Cloud sync
 
-Cloud sync is optional and off by default. You can self-host [`cloud/`](https://github.com/fstubner/xtctx/tree/main/cloud) (Node 24 + PostgreSQL 17 with pgvector) using Docker Compose on your own infrastructure. Managed cloud hosting is planned and not live yet. A project only uploads after both of these steps:
+Cloud sync is optional and off by default. You can self-host [`cloud/`](https://github.com/fstubner/xtctx/tree/main/cloud) (Node 24 + PostgreSQL 17 with pgvector) using Docker Compose on your own infrastructure. A project only uploads after both of these steps:
 
 1. Run `xtctx login --sync-url <sync server URL>`.
 2. In each project you want to upload, run `xtctx sync enable`.

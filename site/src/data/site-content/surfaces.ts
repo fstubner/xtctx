@@ -78,7 +78,7 @@ xtctx_skill_usage
   {
     title: 'Optional cloud sync (self-hosted)',
     body:
-      'Self-host remote sync and a searchable archive on Node 24 and PostgreSQL 17 (pgvector) with Docker Compose. Syncs opted-in agent sessions, GitHub Issues and PRs (xtctx import-github), and web chats from the Chrome extension, with high-confidence secrets redacted on your device first. Local CLI use and self-hosting remain MIT licensed; managed hosting is planned.',
+      'Self-host remote sync and a searchable archive on Node 24 and PostgreSQL 17 (pgvector) with Docker Compose. Syncs opted-in agent sessions, GitHub Issues and PRs (xtctx import-github), and web chats from the Chrome extension, with high-confidence secrets redacted on your device first. Local CLI use and self-hosting are MIT licensed.',
     codeHtml: `<span style="color:var(--ui-code-comment)"># sync opted-in agent & GitHub context</span>
 <span style="color:var(--ui-code-comment)"># redacts secrets before upload</span>
 <span style="color:var(--ui-code-comment)">$</span> npx -y xtctx sync

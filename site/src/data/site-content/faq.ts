@@ -74,9 +74,9 @@ export const faq: FaqItem[] = [
   {
     group: 'Cloud sync',
     q: 'How do I sync coding agent context across multiple machines?',
-    a: 'Run xtctx login --sync-url followed by xtctx sync enable in the projects you choose. You can self-host the included cloud package with Docker Compose (Node 24 and PostgreSQL 17 with pgvector) under the MIT license, with secret redaction running on your device before upload. Managed cloud hosting is not live yet; request early-access updates at github.com/fstubner/xtctx/issues. See /privacy/ for details.',
+    a: 'Run xtctx login --sync-url followed by xtctx sync enable in the projects you choose. You can self-host the included cloud package with Docker Compose (Node 24 and PostgreSQL 17 with pgvector) under the MIT license, with secret redaction running on your device before upload. See /privacy/ for details.',
     aHtml:
-      'Run <code>xtctx login --sync-url</code> followed by <code>xtctx sync enable</code> in the projects you choose. You can self-host the included <a href="https://github.com/fstubner/xtctx/tree/main/cloud">cloud/</a> package with Docker Compose (Node 24 and PostgreSQL 17 with pgvector) under the MIT license, with secret redaction running on your device before upload. Managed cloud hosting is not live yet: <a href="https://github.com/fstubner/xtctx/issues/new?labels=enhancement&title=Managed+Cloud+Early+Access">request early-access updates</a>. See <a href="/privacy/">Privacy and Terms</a>.',
+      'Run <code>xtctx login --sync-url</code> followed by <code>xtctx sync enable</code> in the projects you choose. You can self-host the included <a href="https://github.com/fstubner/xtctx/tree/main/cloud">cloud/</a> package with Docker Compose (Node 24 and PostgreSQL 17 with pgvector) under the MIT license, with secret redaction running on your device before upload. See <a href="/privacy/">Privacy and Terms</a>.',
   },
   {
     group: 'Cloud sync',
